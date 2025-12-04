@@ -136,6 +136,65 @@ body.theme-sysadmin .np-panel {
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
 }
 
+/* SysAdmin overrides for neon-heavy dashboard elements.
+ * These ensure the UI reads as a clean business console while reusing
+ * the same markup as the CyberDeck theme.
+ */
+body.theme-sysadmin .bg-black\/40,
+body.theme-sysadmin .bg-black\/50,
+body.theme-sysadmin .bg-black\/60,
+body.theme-sysadmin .bg-black\/70,
+body.theme-sysadmin .bg-black\/80,
+body.theme-sysadmin .bg-black\/90 {
+  background-color: var(--np-surface);
+}
+
+body.theme-sysadmin .border-cyan-400\/20,
+body.theme-sysadmin .border-cyan-400\/30,
+body.theme-sysadmin .border-cyan-400\/40,
+body.theme-sysadmin .border-emerald-400\/40 {
+  border-color: var(--np-border);
+}
+
+body.theme-sysadmin .text-cyan-200,
+body.theme-sysadmin .text-cyan-100\/80,
+body.theme-sysadmin .text-cyan-200\/70,
+body.theme-sysadmin .text-cyan-300,
+body.theme-sysadmin .text-emerald-300 {
+  color: var(--np-accent-primary);
+}
+
+body.theme-sysadmin .bg-emerald-400\/60 {
+  background-color: var(--np-accent-secondary);
+}
+
+body.theme-sysadmin .bg-cyan-500\/10,
+body.theme-sysadmin .bg-emerald-500\/20,
+body.theme-sysadmin .bg-rose-500\/20,
+body.theme-sysadmin .bg-sky-500\/20 {
+  background-color: rgba(148, 163, 184, 0.15);
+}
+
+body.theme-sysadmin .text-emerald-300,
+body.theme-sysadmin .text-emerald-300\/80 {
+  color: var(--np-accent-primary);
+}
+
+/* Tables and headers in SysAdmin theme */
+body.theme-sysadmin thead.bg-black\/70 {
+  background-color: #e5e7eb;
+  color: #111827;
+}
+
+body.theme-sysadmin .border-cyan-400\/10 {
+  border-color: rgba(148, 163, 184, 0.45);
+}
+
+/* Disable scanlines in SysAdmin theme */
+body.theme-sysadmin .np-scanlines::before {
+  display: none;
+}
+
 /* Panel header */
 .np-panel-header {
   display: flex;
