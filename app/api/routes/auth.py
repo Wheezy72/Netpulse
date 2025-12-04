@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import (
     create_access_token,
     db_session,
+    get_current_user,
     get_password_hash,
     verify_password,
 )
@@ -40,6 +41,12 @@ class CreateUserRequest(BaseModel):
     role: UserRole = UserRole.OPERATOR
 
 
+class UserMeResponse(BaseModel):
+    id: int
+    email: EmailStr
+
+
+
 @router.post(
     "/login",
     response_model=TokenResponse,
@@ -49,11 +56,7 @@ async def login(
     payload: LoginRequest,
     db: AsyncSession = Depends(db_session),
 ) -> TokenResponse:
-    """Authenticate a user and return a JWT access token.
-
-    This is intentionally minimal; in a business deployment you would layer
-    this behind SSO or central identity where possible.
-    """
+    """Authenticate a user and return a JWT access token."""
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
 
@@ -70,6 +73,22 @@ async def login(
         expires_delta=access_token_expires,
     )
     return TokenResponse(access_token=token)
+
+
+@router.get(
+    "/me",
+    response_model=UserMeResponse,
+    summary="Return the current authenticated user's profile",
+)
+async def read_current_user(
+    user: User = Depends(get_current_user),
+) -> UserMeResponse:
+    return UserMeResponse(
+      id=user.id,
+      email=user.email,
+      full_name=user.full_name,
+      role=user.role,
+    )
 
 
 @router.post(

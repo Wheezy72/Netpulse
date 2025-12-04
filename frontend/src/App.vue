@@ -7,6 +7,13 @@ import Login from "./views/Login.vue";
 
 type Theme = "cyberdeck" | "sysadmin";
 
+type CurrentUser = {
+  id: number;
+  email: string;
+  full_name: string | null;
+  role: "viewer" | "operator" | "admin";
+};
+
 /**
  * Theme state.
  * This drives the <body> class and therefore which CSS variables are active.
@@ -19,6 +26,11 @@ const theme = ref<Theme>("cyberdeck");
  */
 const accessToken = ref<string | null>(null);
 const isAuthenticated = computed(() => !!accessToken.value);
+
+/**
+ * Current user profile for display in the header.
+ */
+const currentUser = ref<CurrentUser | null>(null);
 
 function applyTheme(next: Theme): void {
   const body = document.body;
@@ -35,6 +47,16 @@ function setAuthToken(token: string | null): void {
   } else {
     localStorage.removeItem("np-token");
     delete axios.defaults.headers.common["Authorization"];
+    currentUser.value = null;
+  }
+}
+
+async function loadCurrentUser(): Promise<void> {
+  try {
+    const { data } = await axios.get<CurrentUser>("/api/auth/me");
+    currentUser.value = data;
+  } catch {
+    currentUser.value = null;
   }
 }
 
@@ -52,6 +74,7 @@ onMounted(() => {
   const storedToken = localStorage.getItem("np-token");
   if (storedToken) {
     setAuthToken(storedToken);
+    loadCurrentUser();
   }
 });
 
@@ -66,8 +89,9 @@ function toggleTheme(): void {
   theme.value = theme.value === "cyberdeck" ? "sysadmin" : "cyberdeck";
 }
 
-function handleLoginSuccess(token: string): void {
+async function handleLoginSuccess(token: string): Promise<void> {
   setAuthToken(token);
+  await loadCurrentUser();
 }
 
 function handleLogout(): void {
@@ -166,9 +190,26 @@ function handleLogout(): void {
           </span>
         </button>
 
-        <!-- Simple auth status / logout -->
-        <div v-if="isAuthenticated" class="flex items-center gap-2">
-          <span class="text-xs text-[var(--np-muted-text)]">Signed in</span>
+        <!-- User indicator and logout -->
+        <div v-if="isAuthenticated" class="flex items-center gap-4">
+          <div v-if="currentUser" class="flex flex-col items-end text-xs">
+            <span
+              class="font-mono"
+              :class="[
+                theme === 'cyberdeck' ? 'text-cyan-200' : 'text-slate-700'
+              ]"
+            >
+              {{ currentUser.email }}
+            </span>
+            <span
+              class="text-[0.65rem] uppercase tracking-[0.16em]"
+              :class="[
+                theme === 'cyberdeck' ? 'text-emerald-300' : 'text-slate-500'
+              ]"
+            >
+              {{ currentUser.role }}
+            </span>
+          </div>
           <button
             type="button"
             @click="handleLogout"
