@@ -45,6 +45,27 @@ type TopologyEdge = {
   kind: string;
 };
 
+type PacketHeaderView = {
+  timestamp: string;
+  src_ip: string;
+  dst_ip: string;
+  src_port: number | null;
+  dst_port: number | null;
+  protocol: string;
+  length: number;
+  info: string | null;
+};
+
+const selectedTarget = ref("");
+const selectedServices = ref<ReconTargetService[]>([]);
+const recommendations = ref<NmapRecommendation[]>([]);
+const isScanning = ref(false);
+const scanError = ref<string | null>(null);dge = {
+  source: number;
+  target: number;
+  kind: string;
+};
+
 const selectedTarget = ref("");
 const selectedServices = ref<ReconTargetService[]>([]);
 const recommendations = ref<NmapRecommendation[]>([]);
@@ -54,6 +75,7 @@ const scanError = ref<string | null>(null);
 const topologyLoading = ref(false);
 const topologyError = ref<string | null>(null);
 const hoveredNode = ref<TopologyNode | null>(null);
+const selectedNode = ref<TopologyNode | null>(null);
 let cy: CytoscapeCore | null = null;
 
 // Vault / PCAP capture state
@@ -62,6 +84,11 @@ const pcapTaskId = ref<string | null>(null);
 const pcapStatus = ref<string>("idle");
 const pcapCaptureId = ref<number | null>(null);
 const pcapError = ref<string | null>(null);
+const captureHeaders = ref<PacketHeaderView[]>([]);
+
+// Device quick action state
+const isRunningAction = ref(false);
+const actionStatus = ref<string | null>(null);
 
 /**
  * Trigger an on-demand Nmap scan for the selected target.
@@ -208,6 +235,21 @@ async function loadTopology(): Promise<void> {
       cy.on("mouseout", "node", () => {
         hoveredNode.value = null;
       });
+
+      cy.on("tap", "node", (event) => {
+        const data = event.target.data();
+        selectedNode.value = {
+          id: Number(data.id),
+          label: data.label,
+          ip_address: data.ip,
+          hostname: data.hostname,
+          device_type: data.deviceType,
+          is_gateway: Boolean(data.isGateway),
+          vulnerability_severity: data.vulnerabilitySeverity,
+          vulnerability_count: Number(data.vulnerabilityCount ?? 0),
+          last_seen: data.lastSeen
+        };
+      });
     } else {
       cy.elements().remove();
       cy.add(elements);
@@ -231,6 +273,7 @@ async function startRecentPcapCapture(): Promise<void> {
   pcapError.value = null;
   pcapStatus.value = "starting";
   isCapturingPcap.value = true;
+  captureHeaders.value = [];
 
   try {
     const { data } = await axios.post<{ task_id: string }>("/api/vault/pcap/recent", {
@@ -267,7 +310,20 @@ async function startRecentPcapCapture(): Promise<void> {
 
         if (data.capture_id != null) {
           pcapCaptureId.value = data.capture_id;
+
+          // Fetch header summaries for quick inspection
+          try {
+            const { data: cap } = await axios.get<{
+              capture: unknown;
+              headers: PacketHeaderView[];
+            }>(`/api/vault/pcap/${data.capture_id}`);
+            captureHeaders.value = (cap.headers || []).slice(0, 50);
+          } catch {
+            // Non-fatal; user can still download the PCAP.
+          }
+
           pcapStatus.value = "ready";
+          isCapturingPcap.value = false;
         }
       } catch {
         pcapStatus.value = "error";
@@ -288,6 +344,42 @@ const hasPcapReady = computed(
   () => pcapStatus.value === "ready" && pcapCaptureId.value !== null
 );
 
+/**
+ * Run a prebuilt Smart Script against the currently selected node.
+ * This is wired to offensive/defensive templates (e.g., malformed packets).
+ */
+async function runPrebuiltScriptForDevice(
+  scriptName: string,
+  extraParams: Record<string, unknown> = {}
+): Promise<void> {
+  const node = selectedNode.value;
+  if (!node) {
+    return;
+  }
+
+  isRunningAction.value = true;
+  actionStatus.value = null;
+
+  try {
+    const payload = {
+      script_name: scriptName,
+      params: {
+        target_ip: node.ip_address,
+        ...extraParams
+      }
+    };
+    const { data } = await axios.post<{ job_id: number }>(
+      "/api/scripts/prebuilt/run",
+      payload
+    );
+    actionStatus.value = `Script queued (job #${data.job_id}).`;
+  } catch {
+    actionStatus.value = "Failed to queue script for this device.";
+  } finally {
+    isRunningAction.value = false;
+  }
+}
+
 onMounted(() => {
   loadTopology();
 });
@@ -298,7 +390,6 @@ onBeforeUnmount(() => {
     cy = null;
   }
 });
-</script>
 
 <template>
   <div class="grid gap-4 xl:grid-cols-3 xl:grid-rows-6">
@@ -437,6 +528,44 @@ onBeforeUnmount(() => {
               <dd>{{ hoveredNode.vulnerability_count }}</dd>
             </div>
           </dl>
+
+          <div v-if="selectedNode && selectedNode.id === hoveredNode.id" class="mt-3 space-y-2">
+            <p class="text-[0.65rem] uppercase tracking-[0.16em] text-cyan-200">
+              Quick Actions
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <button
+                type="button"
+                @click="runPrebuiltScriptForDevice('malformed_syn_flood.py', { count: 30 })"
+                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                :disabled="isRunningAction"
+              >
+                SYN Storm (template)
+              </button>
+              <button
+                type="button"
+                @click="runPrebuiltScriptForDevice('malformed_xmas_scan.py')"
+                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                :disabled="isRunningAction"
+              >
+                Xmas Scan (template)
+              </button>
+              <button
+                type="button"
+                @click="runPrebuiltScriptForDevice('malformed_overlap_fragments.py')"
+                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                :disabled="isRunningAction"
+              >
+                Overlap Fragments
+              </button>
+            </div>
+            <p v-if="actionStatus" class="text-[0.65rem] text-cyan-100/80">
+              {{ actionStatus }}
+            </p>
+          </div>
         </div>
 
         <!-- Nmap script advisor / recon playbook -->
@@ -645,6 +774,47 @@ onBeforeUnmount(() => {
               >Download PCAP</a
             >
           </p>
+        </div>
+
+        <div v-if="captureHeaders.length" class="mt-3 max-h-40 overflow-auto rounded border border-cyan-400/30 bg-black/60">
+          <table class="min-w-full text-[0.65rem]">
+            <thead class="bg-black/70 text-cyan-200">
+              <tr>
+                <th class="px-2 py-1 text-left">Time</th>
+                <th class="px-2 py-1 text-left">Src</th>
+                <th class="px-2 py-1 text-left">Dst</th>
+                <th class="px-2 py-1 text-left">Proto</th>
+                <th class="px-2 py-1 text-right">Len</th>
+                <th class="px-2 py-1 text-left">Info</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(pkt, idx) in captureHeaders"
+                :key="idx"
+                class="border-t border-cyan-400/10 text-cyan-100"
+              >
+                <td class="px-2 py-1 whitespace-nowrap">
+                  {{ pkt.timestamp.split("T")[1]?.slice(0, 12) ?? pkt.timestamp }}
+                </td>
+                <td class="px-2 py-1">
+                  {{ pkt.src_ip }}<span v-if="pkt.src_port">:{{ pkt.src_port }}</span>
+                </td>
+                <td class="px-2 py-1">
+                  {{ pkt.dst_ip }}<span v-if="pkt.dst_port">:{{ pkt.dst_port }}</span>
+                </td>
+                <td class="px-2 py-1">
+                  {{ pkt.protocol }}
+                </td>
+                <td class="px-2 py-1 text-right">
+                  {{ pkt.length }}
+                </td>
+                <td class="px-2 py-1">
+                  {{ pkt.info || "" }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </section>

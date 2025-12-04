@@ -3,9 +3,10 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session
@@ -19,6 +20,11 @@ router = APIRouter()
 def _sanitize_filename(filename: str) -> str:
     base = os.path.basename(filename)
     return re.sub(r"[^a-zA-Z0-9_.-]", "_", base)
+
+
+class RunPrebuiltScriptRequest(BaseModel):
+    script_name: str
+    params: Optional[Dict[str, Any]] = None
 
 
 @router.post(
@@ -56,6 +62,41 @@ async def upload_script(
     await db.refresh(job)
 
     # Enqueue Celery job in the background (non-blocking for HTTP request)
+    background_tasks.add_task(execute_script_job_task.delay, job.id)
+
+    return {"job_id": job.id, "script_name": job.script_name}
+
+
+@router.post(
+    "/prebuilt/run",
+    status_code=status.HTTP_201_CREATED,
+    summary="Run a prebuilt script by name",
+)
+async def run_prebuilt_script(
+    payload: RunPrebuiltScriptRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(db_session),
+) -> dict[str, Any]:
+    """Execute a script from the prebuilt scripts directory with optional parameters."""
+    scripts_dir = Path(settings.scripts_base_dir) / settings.scripts_prebuilt_subdir
+    script_path = scripts_dir / payload.script_name
+
+    if not script_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Prebuilt script not found",
+        )
+
+    job = ScriptJob(
+        script_name=payload.script_name,
+        script_path=str(script_path),
+        status=ScriptJobStatus.PENDING,
+        params=payload.params or {},
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
     background_tasks.add_task(execute_script_job_task.delay, job.id)
 
     return {"job_id": job.id, "script_name": job.script_name}
