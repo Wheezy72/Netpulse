@@ -39,10 +39,17 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
 
+    # CORS configuration: which origins are allowed to talk to the API.
+    # For development this usually includes the local frontend; in production
+    # override this via environment.
+    cors_allow_origins: List[str] = Field(
+        default_factory=lambda: ["http://localhost:8080"]
+    )
+
     # Script governance for business environments
     # These lists let you explicitly control which prebuilt scripts can run
     # in different modes. You can override them via env vars such as:
-    #  NETPULSE_ALLOWED_PREBUILT_SCRIPTS="backup_switch.py,defense_block_ip.py"
+    #  ALLOWED_PREBUILT_SCRIPTS="backup_switch.py,defense_block_ip.py"
     allowed_prebuilt_scripts: List[str] = Field(
         default_factory=lambda: [
             "backup_switch.py",

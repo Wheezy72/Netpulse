@@ -17,7 +17,7 @@ COPY app /app
 COPY scripts /scripts
 
 # Install backend dependencies
-# In a real deployment you would maintain a dedicated requirements file.
+# In a production deployment you should pin versions in requirements.txt.
 RUN pip install --no-cache-dir \
       fastapi \
       "uvicorn[standard]" \
@@ -27,6 +27,8 @@ RUN pip install --no-cache-dir \
       celery \
       redis \
       scapy \
-      python-nmap
+      python-nmap \
+      "python-jose[cryptography]" \
+      "passlib[bcrypt]"
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

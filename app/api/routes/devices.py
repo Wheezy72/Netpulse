@@ -8,12 +8,15 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session
+from app.api.deps import db_session, require_role
 from app.models.device import Device
 from app.models.metric import Metric
 from app.models.script_job import ScriptJob
+from app.models.user import UserRole
 from app.models.vulnerability import Vulnerability, VulnerabilitySeverity
 
+# Device and topology endpoints. In production deployments these are
+# restricted to authenticated viewers/operators.
 router = APIRouter()
 
 
@@ -85,9 +88,9 @@ class DeviceDetail(BaseModel):
     "",
     response_model=List[DeviceOut],
     summary="List discovered devices",
+    dependencies=[Depends(require_role(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN))],
 )
-async def list_devices(db: AsyncSession = Depends(db_session)) -> List[DeviceOut]:
-    result = await db.execute(select(Device))
+async def list_devices(db:Device))
     devices = result.scalars().all()
     return [DeviceOut.from_orm(d) for d in devices]
 
@@ -96,9 +99,10 @@ async def list_devices(db: AsyncSession = Depends(db_session)) -> List[DeviceOut
     "/topology",
     response_model=TopologyResponse,
     summary="Get a simple device topology for visualization",
+    dependencies=[Depends(require_role(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN))],
 )
 async def get_topology(db: AsyncSession = Depends(db_session)) -> TopologyResponse:
-    """Return a minimal topology view for the Eye panel's Cytoscape graph."""
+    """Return a minimal topology view for the Eye panel's graph."""
     result = await db.execute(select(Device))
     devices = result.scalars().all()
 
@@ -156,6 +160,7 @@ async def get_topology(db: AsyncSession = Depends(db_session)) -> TopologyRespon
     "/{device_id}/detail",
     response_model=DeviceDetail,
     summary="Get detailed view of a device (vulns, scripts, metrics)",
+    dependencies=[Depends(require_role(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN))],
 )
 async def get_device_detail(
     device_id: int,

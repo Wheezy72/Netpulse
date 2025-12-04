@@ -4,10 +4,10 @@
 
 NetPulse Enterprise is a self‑hosted Network Operations & Security Center providing:
 
-- **The Companion** – production‑grade visibility into latency, topology, and configuration.
-- **The Playground** – a safe, extensible environment for running custom Python automation and offensive/defensive experiments.
+- **The Companion** – visibility into latency, topology, and configuration.
+- **The Playground** – an environment for running custom Python automation and offensive/defensive experiments (typically in lab or staging networks).
 
-This guide is the *Bible* for contributors. It covers:
+This guide explains:
 
 - Core architecture and data flow.
 - Backend services (FastAPI, Celery, TimescaleDB).
@@ -399,18 +399,21 @@ class ScriptContext:
 
 Scripts **must not** instantiate their own event loops or raw DB connections; they should consume only the provided `ctx`.
 
-#### 6.3.3 Security Model (First Iteration)
+#### 6.3.3 Security Model (Current Behaviour)
 
-NetPulse is designed for self‑hosted, trusted environments, but we still apply constraints:
+NetPulse is designed to be self‑hosted and run on networks you control. To keep things predictable:
 
-- Scripts run inside the **Celery worker container**, not the API.
-- Considerations:
-  - Disable root inside containers.
-  - Scope network capabilities to required interfaces.
-  - Use OS‑level sandboxing if needed (e.g., user namespaces, seccomp, AppArmor).
-- The first iteration focuses on API and architectural safety:
-  - Scripts cannot directly modify core NetPulse code.
-  - Scripts have controlled access to context, not direct imports from internal modules by default (though Python runtime still allows imports if present in sys.path; advanced sandboxing would further restrict this).
+- Scripts run inside the **Celery worker container**, not the API process.
+- Workers talk to the database through the same async session layer as the API.
+- Prebuilt scripts are governed by an allowlist in `Settings.allowed_prebuilt_scripts`.
+  - By default this includes conservative automation such as `backup_switch.py` and `defense_block_ip.py`.
+  - Lab‑only templates (malformed packets, PCAP replay) are listed separately in `Settings.lab_only_prebuilt_scripts` and should only be enabled in test environments.
+
+Additional considerations for production:
+
+- Run containers as non‑root where possible.
+- Grant only the Linux capabilities that are required (e.g. `NET_RAW` / `NET_ADMIN` on a dedicated worker for packet capture).
+- If you expose this UI on a shared network, ensure HTTPS termination and upstream auth (SSO or VPN).
 
 Future hardening options (for later versions):
 
@@ -762,7 +765,7 @@ This will:
 
 ## 10. Extensibility & Future Enhancements
 
-NetPulse Enterprise is designed to be hackable yet structured:
+NetPulse Enterprise is designed to be practical to extend:
 
 - Add new metrics:
   - Extend the `Metric` table with additional `metric_type` values and semantics.
@@ -776,4 +779,125 @@ NetPulse Enterprise is designed to be hackable yet structured:
   - Real‑time WebSocket dashboards.
   - Multi‑tenant views and RBAC.
 
-This guide, combined with the code in `/app` and `/frontend`, should serve as the authoritative reference for implementing and extending NetPulse Enterprise.
+## 11. Security & Hardening Overview
+
+This section summarises the hardening that currently exists in the codebase and where you can tune it for business networks.
+
+### 11.1 Authentication and Roles
+
+Users are stored in the `users` table (`app/models/user.py`) with:
+
+- `email`
+- `hashed_password` (bcrypt)
+- `role` (one of `viewer`, `operator`, `admin`)
+- `is_active`
+
+Authentication is handled via JWT bearer tokens:
+
+- `POST /api/auth/login` – returns `{ access_token, token_type }`.
+- Tokens are signed with `Settings.secret_key` and `Settings.jwt_algorithm`.
+- Token lifetime is controlled with `Settings.access_token_expire_minutes`.
+
+Roles:
+
+- `viewer` – read‑only access to devices, metrics, and vault data.
+- `operator` – can start PCAP captures and run allowed prebuilt scripts.
+- `admin` – full access; can also be used for bootstrap tasks.
+
+### 11.2 User Bootstrap
+
+`POST /api/auth/users` creates a new local user.
+
+Bootstrap behaviour:
+
+- If no users exist yet:
+  - The first created user is forced to `admin` role.
+- After the first user:
+  - Subsequent users should only be created by an admin and this endpoint should be guarded at the edge (for example, behind an admin‑only API gateway route) or disabled entirely once you have SSO.
+
+In production, you should:
+
+- Set a strong `Settings.secret_key`.
+- Only expose the `/auth/users` endpoint on trusted admin channels, or remove it after initial provisioning.
+
+### 11.3 Route Protection
+
+Sensitive endpoints are wrapped with `require_role(...)` in `app/api/deps.py`, which:
+
+- Extracts the current user from the bearer token.
+- Verifies the user is active.
+- Ensures the user’s `role` is one of the allowed roles.
+
+Current policy:
+
+- `scripts` routes:
+  - `POST /api/scripts/upload` and `POST /api/scripts/prebuilt/run`:
+    - Require `operator` or `admin`.
+  - `GET /api/scripts/{job_id}`:
+    - Open to any authenticated role (you can tighten further if required).
+- `recon` routes:
+  - `POST /api/recon/nmap-recommendations`:
+    - Requires at least `viewer`.
+  - `POST /api/recon/scan` (runs Nmap):
+    - Requires `operator` or `admin`.
+- `devices` routes:
+  - `GET /api/devices`, `/api/devices/topology`, `/api/devices/{id}/detail`:
+    - Require at least `viewer`.
+- `vault` routes:
+  - `POST /api/vault/pcap/recent` (start capture):
+    - Requires `operator` or `admin`.
+  - `GET /api/vault/pcap/{id}` and `/api/vault/pcap/{id}/download`:
+    - Intended for authenticated users; you can wrap them with `require_role` if you want PCAP access restricted to specific roles.
+
+Health checks (`/api/health`) remain open so they can be used by load balancers and orchestrators.
+
+### 11.4 Script Allowlist
+
+Prebuilt scripts are governed by `Settings.allowed_prebuilt_scripts`:
+
+- Only scripts listed here can be invoked via `POST /api/scripts/prebuilt/run`.
+- Lab‑only templates such as:
+  - `malformed_syn_flood.py`
+  - `malformed_xmas_scan.py`
+  - `malformed_overlap_fragments.py`
+  - `replay_pcap.py`
+- Are listed in `Settings.lab_only_prebuilt_scripts` and are not enabled by default.
+
+To change policy:
+
+- In a production environment, set `ALLOWED_PREBUILT_SCRIPTS` (or override the setting via `.env`) with a comma‑separated list of script names you trust.
+- Keep malformed/replay scripts confined to a separate lab deployment.
+
+### 11.5 CORS and Network Exposure
+
+CORS is configured in `app/main.py` as:
+
+- `allow_origins = settings.cors_allow_origins`, which by default is `["http://localhost:8080"]`.
+
+In production:
+
+- Set `cors_allow_origins` to the actual frontend origins.
+- Terminate TLS at a reverse proxy (Nginx, Traefik, etc.).
+- Place NetPulse behind your VPN or management network rather than exposing it directly to the internet.
+
+### 11.6 Container Permissions
+
+The backend container (`docker/backend.Dockerfile`) installs:
+
+- `iputils-ping`, `nmap`, `tcpdump` and Python packages required for:
+  - FastAPI + Celery.
+  - Scapy.
+  - Auth (`python-jose[cryptography]`, `passlib[bcrypt]`).
+
+When running in a business network:
+
+- Add explicit capabilities to the worker container only when needed:
+  - `CAP_NET_RAW` and `CAP_NET_ADMIN` for packet capture and Scapy.
+- Avoid granting those capabilities to the API container unless strictly required.
+- Consider separate worker pools:
+  - One for routine jobs (no raw network access).
+  - One for capture/replay tasks on a dedicated VLAN.
+
+---
+
+This guide, together with the code in `/app` and `/frontend`, should give you a clear picture of how NetPulse behaves today and where to adjust configuration for your environment.

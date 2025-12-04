@@ -39,16 +39,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS - allow frontend by default in development; tighten for production.
+# CORS configuration.
+# For local development we allow the default frontend origin; in production
+# you should set Settings.cors_allow_origins explicitly.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust in production
+    allow_origins=getattr(settings, "cors_allow_origins", ["http://localhost:8080"]),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Mount API routes
+# Mount API routes under /api
 app.include_router(api_router, prefix="/api")
 
 

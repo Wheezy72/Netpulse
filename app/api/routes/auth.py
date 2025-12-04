@@ -8,10 +8,18 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import create_access_token, db_session, get_password_hash, verify_password
+from app.api.deps import (
+    create_access_token,
+    db_session,
+    get_password_hash,
+    verify_password,
+)
 from app.core.config import settings
 from app.models.user import User, UserRole
 
+# Authentication and user management endpoints.
+# In production you would typically front this with SSO, but a small local
+# user table is sufficient for self-hosted or lab deployments.
 router = APIRouter()
 
 
@@ -76,9 +84,16 @@ async def create_user(
 ) -> Dict[str, Any]:
     """Create a new local user.
 
-    In a hardened environment this endpoint should be restricted to admins
-    only or used once during bootstrap and then disabled.
+    Bootstrapping rules:
+      - If there are no users yet, allow creation without authentication.
+      - If at least one user exists, this should be called by an admin only
+        (enforced at the edge, e.g. via an API gateway or by disabling this
+        route in production).
     """
+    # Check whether any user exists yet
+    existing_any = await db.execute(select(User).limit(1))
+    first_user = existing_any.scalar_one_or_none()
+
     existing = await db.execute(select(User).where(User.email == payload.email))
     if existing.scalar_one_or_none():
         raise HTTPException(
@@ -86,11 +101,15 @@ async def create_user(
             detail="User with this email already exists",
         )
 
+    # In a fully hardened setup, you would:
+    #   - Remove this endpoint after bootstrap, or
+    #   - Require ADMIN role via a dependency like require_role(UserRole.ADMIN).
+    # We keep it minimal here and rely on deployment-time policy.
     user = User(
         email=payload.email,
         full_name=payload.full_name,
         hashed_password=get_password_hash(payload.password),
-        role=payload.role,
+        role=payload.role if first_user else UserRole.ADMIN,
     )
     db.add(user)
     await db.commit()
