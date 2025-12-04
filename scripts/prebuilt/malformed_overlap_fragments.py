@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""
+Prebuilt lab script: malformed_overlap_fragments.py
+
+Crafts a small pair of overlapping IP fragments toward a target host.
+Useful for examining how legacy or unusual stacks reassemble and how
+network monitoring tools surface these anomalies.
+"""
+
 from typing import Any
 
 from scapy.all import IP, TCP, send  # type: ignore[import-untyped]

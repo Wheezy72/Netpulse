@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""
+Prebuilt lab script: malformed_xmas_scan.py
+
+Generates TCP "Xmas" packets (FIN+PSH+URG flags) across a set of ports
+on a target host. Intended for controlled testing of firewall, IDS, and
+stack behaviour, not for production networks.
+"""
+
 from typing import Any
 
 from scapy.all import IP, TCP, send  # type: ignore[import-untyped]

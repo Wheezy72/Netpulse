@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""
+Prebuilt script: backup_switch.py
+
+Backs up running configuration from devices classified as "switch" in the
+NetPulse device table, using Netmiko SSH connections. Intended for routine
+configuration backup jobs in controlled environments.
+"""
+
 from datetime import datetime
 from pathlib import Path
 from typing import Any

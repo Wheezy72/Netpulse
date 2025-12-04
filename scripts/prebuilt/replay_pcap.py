@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""
+Prebuilt lab script: replay_pcap.py
+
+Replays packets from a PCAP file onto a specified interface. Designed for
+closed lab environments to reproduce traffic patterns and validate IDS/IPS
+behaviour. Requires raw packet send permissions on the chosen interface.
+"""
+
 import subprocess
 from pathlib import Path
 from typing import Any

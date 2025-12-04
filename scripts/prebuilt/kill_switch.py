@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+"""
+Prebuilt script: kill_switch.py
+
+Terminates a single TCP connection by sending RST packets via
+ctx.network.tcp_rst, based on connection parameters in ctx.params.
+Useful for targeted disruption during incident response in lab or
+controlled environments.
+"""
+
 from typing import Any
 
 

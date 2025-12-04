@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""
+Prebuilt script: defense_block_ip.py
+
+Template for blocking a source IP at the container's host firewall
+using iptables. In many production environments you would adapt this
+to call a central firewall API instead of manipulating iptables directly.
+"""
+
 import subprocess
 from typing import Any
 

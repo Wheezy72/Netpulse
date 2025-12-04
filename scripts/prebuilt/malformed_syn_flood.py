@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""
+Prebuilt lab script: malformed_syn_flood.py
+
+Sends a limited number of TCP SYN packets (optionally spoofed) to a target.
+This is intended for lab networks you own or are explicitly authorised to test,
+to study how devices and monitoring stacks react to aggressive but bounded SYN flows.
+"""
+
 from typing import Any
 
 from scapy.all import IP, TCP, send  # type: ignore[import-untyped]
