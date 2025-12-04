@@ -1,0 +1,131 @@
+version: "3.9"
+
+services:
+  db:
+    image: timescale/timescaledb:latest-pg14
+    container_name: netpulse-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: netpulse
+      POSTGRES_USER: netpulse
+      POSTGRES_PASSWORD: netpulse
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U netpulse -d netpulse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: netpulse-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    container_name: netpulse-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: netpulse
+      POSTGRES_USER: netpulse
+      POSTGRES_PASSWORD: netpulse
+      REDIS_URL: redis://redis:6379/0
+      PULSE_GATEWAY_IP: 192.168.1.1
+      PULSE_ISP_IP: 8.8.8.8
+      PULSE_CLOUDFLARE_IP: 1.1.1.1
+      SCRIPTS_BASE_DIR: /scripts
+    volumes:
+      - ./app:/app
+      - ./scripts:/scripts
+    ports:
+      - "8000:8000"
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    container_name: netpulse-worker
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: netpulse
+      POSTGRES_USER: netpulse
+      POSTGRES_PASSWORD: netpulse
+      REDIS_URL: redis://redis:6379/0
+      SCRIPTS_BASE_DIR: /scripts
+    volumes:
+      - ./app:/app
+      - ./scripts:/scripts
+    command: >
+      celery
+      -A app.core.celery_app.celery_app
+      worker
+      --loglevel=info
+
+  beat:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    container_name: netpulse-beat
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_started
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: netpulse
+      POSTGRES_USER: netpulse
+      POSTGRES_PASSWORD: netpulse
+      REDIS_URL: redis://redis:6379/0
+      SCRIPTS_BASE_DIR: /scripts
+    volumes:
+      - ./app:/app
+      - ./scripts:/scripts
+    command: >
+      celery
+      -A app.core.celery_app.celery_app
+      beat
+      --loglevel=info
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    container_name: netpulse-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "8080:80"
+
+volumes:
+  db_data:
+  redis_data:

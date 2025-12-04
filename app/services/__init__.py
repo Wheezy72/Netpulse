@@ -1,0 +1,1 @@
+# Service layer: core business logic used by Celery tasks and API routes.
