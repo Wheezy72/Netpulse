@@ -1,7 +1,7 @@
 from functools import lru_cache
-from typing import List, Optional
+from typing import List
 
-from pydantic import BaseSettings
+from pydantic import BaseSettings, Field
 
 
 class Settings(BaseSettings):
@@ -33,6 +33,32 @@ class Settings(BaseSettings):
     scripts_base_dir: str = "/scripts"
     scripts_uploads_subdir: str = "uploads"
     scripts_prebuilt_subdir: str = "prebuilt"
+
+    # Security / auth
+    secret_key: str = "CHANGE_ME_IN_PRODUCTION"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60
+
+    # Script governance for business environments
+    # These lists let you explicitly control which prebuilt scripts can run
+    # in different modes. You can override them via env vars such as:
+    #  NETPULSE_ALLOWED_PREBUILT_SCRIPTS="backup_switch.py,defense_block_ip.py"
+    allowed_prebuilt_scripts: List[str] = Field(
+        default_factory=lambda: [
+            "backup_switch.py",
+            "defense_block_ip.py",
+            "custom_probe.py",
+        ]
+    )
+    # Scripts that are only intended for lab / red-team environments.
+    lab_only_prebuilt_scripts: List[str] = Field(
+        default_factory=lambda: [
+            "malformed_syn_flood.py",
+            "malformed_xmas_scan.py",
+            "malformed_overlap_fragments.py",
+            "replay_pcap.py",
+        ]
+    )
 
     class Config:
         env_file = ".env"

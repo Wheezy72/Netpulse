@@ -8,11 +8,14 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session
+from app.api.deps import db_session, require_role
 from app.core.celery_app import celery_app
 from app.models.packet_capture import PacketCapture, PacketHeader
+from app.models.user import UserRole
 from app.tasks import packet_capture_recent_task
 
+# Vault: packet capture and PCAP export. In business networks, these
+# endpoints should be restricted to operators and admins.
 router = APIRouter()
 
 
@@ -52,6 +55,7 @@ class CaptureDetail(BaseModel):
     response_model=CaptureTaskResponse,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Start a time-bounded capture and export as PCAP",
+    dependencies=[Depends(require_role(UserRole.OPERATOR, UserRole.ADMIN))],
 )
 async def start_recent_capture(payload: CaptureRequest) -> CaptureTaskResponse:
     """Trigger a Celery task that captures packets for the requested duration.

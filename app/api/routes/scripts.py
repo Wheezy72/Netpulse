@@ -9,11 +9,15 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFi
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session
+from app.api.deps import db_session, require_role
 from app.core.config import settings
 from app.models.script_job import ScriptJob, ScriptJobStatus
+from app.models.user import UserRole
 from app.tasks import execute_script_job_task
 
+# Scripts API: business-grade endpoints for managing Smart Scripts and
+# their execution lifecycle. Uploads are restricted to operators/admins
+# and prebuilt scripts are governed by an allowlist in settings.
 router = APIRouter()
 
 
@@ -37,13 +41,18 @@ class RunPrebuiltScriptRequest(BaseModel):
     "/upload",
     status_code=status.HTTP_201_CREATED,
     summary="Upload and execute a Python script",
+    dependencies=[Depends(require_role(UserRole.OPERATOR, UserRole.ADMIN))],
 )
 async def upload_script(
     file: UploadFile,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(db_session),
 ) -> dict[str, Any]:
-    """Persist an uploaded Python file and enqueue it as a ScriptJob."""
+    """Persist an uploaded Python file and enqueue it as a ScriptJob.
+
+    In business environments, uploading arbitrary scripts should be reserved
+    for trusted operators or automation pipelines.
+    """
     if not file.filename.endswith(".py"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -78,15 +87,27 @@ async def upload_script(
     "/prebuilt/run",
     status_code=status.HTTP_201_CREATED,
     summary="Run a prebuilt script by name",
+    dependencies=[Depends(require_role(UserRole.OPERATOR, UserRole.ADMIN))],
 )
 async def run_prebuilt_script(
     payload: RunPrebuiltScriptRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(db_session),
 ) -> dict[str, Any]:
-    """Execute a script from the prebuilt scripts directory with optional parameters."""
+    """Execute a script from the prebuilt scripts directory with optional parameters.
+
+    A business-grade allowlist is enforced via Settings.allowed_prebuilt_scripts.
+    Lab-only scripts can be separated using Settings.lab_only_prebuilt_scripts.
+    """
     scripts_dir = Path(settings.scripts_base_dir) / settings.scripts_prebuilt_subdir
     script_path = scripts_dir / payload.script_name
+
+    # Enforce allowlist for business environments. You can tune this via env vars.
+    if payload.script_name not in settings.allowed_prebuilt_scripts:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This script is not allowed by current policy",
+        )
 
     if not script_path.exists():
         raise HTTPException(
