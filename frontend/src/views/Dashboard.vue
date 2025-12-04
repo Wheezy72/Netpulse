@@ -12,6 +12,7 @@
  * resize, or add panels without refactoring the entire layout.
  */
 
+import axios from "axios";
 import { computed, ref } from "vue";
 
 type ReconTargetService = {
@@ -26,55 +27,39 @@ type NmapRecommendation = {
 };
 
 const selectedTarget = ref("");
-const selectedServices = ref<ReconTargetService[]>([
-  { port: 22, protocol: "tcp", service: "ssh" },
-  { port: 80, protocol: "tcp", service: "http" }
-]);
+const selectedServices = ref<ReconTargetService[]>([]);
+const recommendations = ref<NmapRecommendation[]>([]);
+const isScanning = ref(false);
+const scanError = ref<string | null>(null);
 
 /**
- * In a full implementation this would be populated dynamically from
- * the backend (/api/recon/nmap-recommendations). For now we provide an
- * inline advisor that demonstrates how the UI surfaces helpful guidance.
+ * Trigger an on-demand Nmap scan for the selected target.
+ * The backend returns detected services and recommended Nmap scripts.
  */
-const recommendations = computed<NmapRecommendation[]>(() => {
-  const recs: NmapRecommendation[] = [];
+async function scanTarget(): Promise<void> {
+  scanError.value = null;
 
-  const services = selectedServices.value.map((s) => s.service.toLowerCase());
-
-  if (services.includes("http")) {
-    recs.push({
-      reason: "HTTP service detected",
-      scripts: [
-        "http-title",
-        "http-enum",
-        "http-methods",
-        "http-vuln-cve2017-5638",
-        "http-shellshock"
-      ]
-    });
+  const target = selectedTarget.value.trim();
+  if (!target) {
+    scanError.value = "Please enter a target hostname or IP address.";
+    return;
   }
 
-  if (services.includes("ssh")) {
-    recs.push({
-      reason: "SSH service detected",
-      scripts: ["ssh2-enum-algos", "ssh-hostkey", "ssh-auth-methods"]
-    });
+  isScanning.value = true;
+  try {
+    const { data } = await axios.post("/api/recon/scan", { target });
+    selectedServices.value = data.services ?? [];
+    recommendations.value = data.recommendations ?? [];
+  } catch (error: unknown) {
+    scanError.value = "Scan failed. Ensure the backend can reach the target and Nmap is installed.";
+    selectedServices.value = [];
+    recommendations.value = [];
+  } finally {
+    isScanning.value = false;
   }
+}
 
-  if (services.includes("ssl") || services.includes("https")) {
-    recs.push({
-      reason: "TLS/SSL detected",
-      scripts: [
-        "ssl-cert",
-        "ssl-enum-ciphers",
-        "ssl-heartbleed",
-        "ssl-known-key"
-      ]
-    });
-  }
-
-  return recs;
-});
+const hasRecommendations = computed(() => recommendations.value.length > 0);
 </script>
 
 <template>
@@ -197,8 +182,25 @@ const recommendations = computed<NmapRecommendation[]>(() => {
               />
             </label>
 
-            <div class="grid gap-2 md:grid-cols-2">
-              <div v-for="svc in selectedServices" :key="svc.port" class="text-[0.7rem]">
+            <div class="flex items-center gap-2 text-[0.7rem]">
+              <button
+                type="button"
+                @click="scanTarget"
+                class="inline-flex items-center justify-center rounded-md border
+                       border-cyan-400/60 bg-black/80 px-2.5 py-1 text-[0.7rem] font-medium
+                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                :disabled="isScanning"
+              >
+                <span v-if="!isScanning">Scan with Nmap</span>
+                <span v-else>Scanning…</span>
+              </button>
+              <span v-if="scanError" class="text-rose-300">
+                {{ scanError }}
+              </span>
+            </div>
+
+            <div v-if="selectedServices.length" class="mt-2 grid gap-2 md:grid-cols-2">
+              <div v-for="svc in selectedServices" :key="`${svc.protocol}-${svc.port}`" class="text-[0.7rem]">
                 <div class="flex items-center justify-between">
                   <span class="font-mono text-cyan-200">
                     {{ svc.protocol }}/{{ svc.port }}
@@ -211,7 +213,7 @@ const recommendations = computed<NmapRecommendation[]>(() => {
             </div>
 
             <div class="mt-2 border-t border-cyan-400/20 pt-2">
-              <div v-if="recommendations.length" class="space-y-2">
+              <div v-if="hasRecommendations" class="space-y-2">
                 <div
                   v-for="(rec, idx) in recommendations"
                   :key="idx"
@@ -235,7 +237,7 @@ const recommendations = computed<NmapRecommendation[]>(() => {
                 </div>
               </div>
               <p v-else class="text-[0.7rem] text-cyan-100/80">
-                Add services/ports to see tailored Nmap script suggestions.
+                Enter a target and run a scan to see tailored Nmap script suggestions.
               </p>
             </div>
           </div>

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.celery_app import celery_app
 from app.db.session import async_session_factory
 from app.services.latency_monitor import monitor_latency
+from app.services.recon import passive_arp_discovery
 from app.services.script_executor import execute_script
 
 logger = get_task_logger(__name__)
@@ -34,5 +35,15 @@ def execute_script_job_task(job_id: int) -> None:
     async def _run() -> None:
         async with async_session_factory() as session:
             await execute_script(session, job_id)
+
+    asyncio.run(_run())
+
+
+@celery_app.task(name="app.tasks.passive_arp_discovery_task")
+def passive_arp_discovery_task() -> None:
+    """Celery task that performs short passive ARP discovery on eth0."""
+    async def _run() -> None:
+        async with async_session_factory() as session:
+            await passive_arp_discovery(session, iface="eth0", duration=10)
 
     asyncio.run(_run())
