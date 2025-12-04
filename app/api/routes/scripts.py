@@ -18,13 +18,19 @@ router = APIRouter()
 
 
 def _sanitize_filename(filename: str) -> str:
+    """Normalize an uploaded filename to a filesystem-safe variant."""
     base = os.path.basename(filename)
     return re.sub(r"[^a-zA-Z0-9_.-]", "_", base)
 
 
 class RunPrebuiltScriptRequest(BaseModel):
+    """Request body for triggering a prebuilt Smart Script."""
+
     script_name: str
+    # Arbitrary parameters passed to the script via ctx.params
     params: Optional[Dict[str, Any]] = None
+    # Optional association to a Device so we can show per-host history
+    device_id: Optional[int] = None
 
 
 @router.post(
@@ -37,6 +43,7 @@ async def upload_script(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(db_session),
 ) -> dict[str, Any]:
+    """Persist an uploaded Python file and enqueue it as a ScriptJob."""
     if not file.filename.endswith(".py"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -92,11 +99,13 @@ async def run_prebuilt_script(
         script_path=str(script_path),
         status=ScriptJobStatus.PENDING,
         params=payload.params or {},
+        device_id=payload.device_id,
     )
     db.add(job)
     await db.commit()
     await db.refresh(job)
 
+    # Fire-and-forget Celery job; status can be polled via /scripts/{job_id}
     background_tasks.add_task(execute_script_job_task.delay, job.id)
 
     return {"job_id": job.id, "script_name": job.script_name}
@@ -110,6 +119,7 @@ async def get_script_job(
     job_id: int,
     db: AsyncSession = Depends(db_session),
 ) -> dict[str, Any]:
+    """Return ScriptJob metadata, including logs and structured result."""
     job = await db.get(ScriptJob, job_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")

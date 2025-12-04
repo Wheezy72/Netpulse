@@ -384,6 +384,27 @@ onMounted(() => {
   loadTopology();
 });
 
+// When a node is selected in the Eye panel, fetch a compact device detail
+// bundle (vulnerabilities, recent scripts, and a simple metric snapshot).
+watch(selectedNode, async (node) => {
+  deviceDetail.value = null;
+  deviceDetailError.value = null;
+
+  if (!node) {
+    return;
+  }
+
+  deviceDetailLoading.value = true;
+  try {
+    const { data } = await axios.get<DeviceDetail>(`/api/devices/${node.id}/detail`);
+    deviceDetail.value = data;
+  } catch {
+    deviceDetailError.value = "Failed to load device details.";
+  } finally {
+    deviceDetailLoading.value = false;
+  }
+});
+
 onBeforeUnmount(() => {
   if (cy) {
     cy.destroy();
