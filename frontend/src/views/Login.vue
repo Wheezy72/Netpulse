@@ -48,7 +48,7 @@ async function handleSubmit(): Promise<void> {
 <template>
   <div class="flex h-full items-center justify-center">
     <div class="np-login-panel w-full max-w-sm rounded-lg px-6 py-5 shadow-lg">
-      <h2 class="text-sm font-semibold tracking-[0.18em] uppercase">
+      <h2 class="np-login-title text-sm font-semibold tracking-[0.18em] uppercase">
         Sign In
       </h2>
       <p class="mt-1 text-[0.75rem] text-[var(--np-muted-text)]">
