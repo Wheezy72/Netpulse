@@ -5,10 +5,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# System dependencies (for ping, nmap, etc. as needed later)
+# System dependencies (for ping, nmap, packet capture, etc.)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        iputils-ping \
+       nmap \
+       tcpdump \
     && rm -rf /var/lib/apt/lists/*
 
 COPY app /app

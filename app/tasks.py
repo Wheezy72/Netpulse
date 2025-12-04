@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.celery_app import celery_app
 from app.db.session import async_session_factory
 from app.services.latency_monitor import monitor_latency
+from app.services.packet_capture import capture_to_pcap
 from app.services.recon import passive_arp_discovery
 from app.services.script_executor import execute_script
 
@@ -47,3 +48,22 @@ def passive_arp_discovery_task() -> None:
             await passive_arp_discovery(session, iface="eth0", duration=10)
 
     asyncio.run(_run())
+
+
+@celery_app.task(name="app.tasks.packet_capture_recent_task")
+def packet_capture_recent_task(
+    duration_seconds: int = 300,
+    bpf_filter: str | None = None,
+) -> int:
+    """Celery task that performs a time-bounded packet capture and returns a capture ID."""
+    async def _run() -> int:
+        async with async_session_factory() as session:
+            capture_id = await capture_to_pcap(
+                session,
+                duration_seconds=duration_seconds,
+                iface="eth0",
+                bpf_filter=bpf_filter,
+            )
+            return capture_id
+
+    return asyncio.run(_run())

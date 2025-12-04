@@ -13,7 +13,8 @@
  */
 
 import axios from "axios";
-import { computed, ref } from "vue";
+import cytoscape, { Core as CytoscapeCore } from "cytoscape";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 type ReconTargetService = {
   port: number;
@@ -26,11 +27,41 @@ type NmapRecommendation = {
   scripts: string[];
 };
 
+type TopologyNode = {
+  id: number;
+  label: string;
+  ip_address: string;
+  hostname?: string | null;
+  device_type?: string | null;
+  is_gateway: boolean;
+  vulnerability_severity?: string | null;
+  vulnerability_count: number;
+  last_seen?: string | null;
+};
+
+type TopologyEdge = {
+  source: number;
+  target: number;
+  kind: string;
+};
+
 const selectedTarget = ref("");
 const selectedServices = ref<ReconTargetService[]>([]);
 const recommendations = ref<NmapRecommendation[]>([]);
 const isScanning = ref(false);
 const scanError = ref<string | null>(null);
+
+const topologyLoading = ref(false);
+const topologyError = ref<string | null>(null);
+const hoveredNode = ref<TopologyNode | null>(null);
+let cy: CytoscapeCore | null = null;
+
+// Vault / PCAP capture state
+const isCapturingPcap = ref(false);
+const pcapTaskId = ref<string | null>(null);
+const pcapStatus = ref<string>("idle");
+const pcapCaptureId = ref<number | null>(null);
+const pcapError = ref<string | null>(null);
 
 /**
  * Trigger an on-demand Nmap scan for the selected target.
@@ -50,7 +81,7 @@ async function scanTarget(): Promise<void> {
     const { data } = await axios.post("/api/recon/scan", { target });
     selectedServices.value = data.services ?? [];
     recommendations.value = data.recommendations ?? [];
-  } catch (error: unknown) {
+  } catch {
     scanError.value = "Scan failed. Ensure the backend can reach the target and Nmap is installed.";
     selectedServices.value = [];
     recommendations.value = [];
@@ -60,6 +91,213 @@ async function scanTarget(): Promise<void> {
 }
 
 const hasRecommendations = computed(() => recommendations.value.length > 0);
+
+/**
+ * Load topology data and initialize Cytoscape graph.
+ * Nodes glow red when high/critical vulnerabilities are present.
+ */
+async function loadTopology(): Promise<void> {
+  topologyError.value = null;
+  topologyLoading.value = true;
+
+  try {
+    const { data } = await axios.get<{ nodes: TopologyNode[]; edges: TopologyEdge[] }>(
+      "/api/devices/topology"
+    );
+
+    const elements = [
+      ...data.nodes.map((n) => ({
+        data: {
+          id: String(n.id),
+          label: n.label,
+          ip: n.ip_address,
+          hostname: n.hostname,
+          deviceType: n.device_type,
+          isGateway: n.is_gateway,
+          vulnerabilitySeverity: n.vulnerability_severity,
+          vulnerabilityCount: n.vulnerability_count,
+          lastSeen: n.last_seen
+        }
+      })),
+      ...data.edges.map((e, index) => ({
+        data: {
+          id: `e-${index}`,
+          source: String(e.source),
+          target: String(e.target),
+          kind: e.kind
+        }
+      }))
+    ];
+
+    const container = document.getElementById("topology-graph") as HTMLElement | null;
+    if (!container) {
+      topologyError.value = "Topology container not found.";
+      return;
+    }
+
+    if (!cy) {
+      cy = cytoscape({
+        container,
+        elements,
+        style: [
+          {
+            selector: "node",
+            style: {
+              "background-color": "#00f3ff",
+              "border-width": 2,
+              "border-color": "#22d3ee",
+              "label": "data(label)",
+              "font-size": 8,
+              "text-outline-width": 1,
+              "text-outline-color": "#000000",
+              color: "#e0f7ff",
+              "overlay-opacity": 0
+            }
+          },
+          {
+            selector: "node[?isGateway]",
+            style: {
+              "background-color": "#22c55e",
+              "border-color": "#bbf7d0",
+              "shape": "hexagon"
+            }
+          },
+          {
+            selector:
+              "node[vulnerabilitySeverity = 'high'], node[vulnerabilitySeverity = 'critical']",
+            style: {
+              "background-color": "#ef4444",
+              "border-color": "#fecaca",
+              "shadow-blur": 20,
+              "shadow-color": "#ef4444",
+              "shadow-opacity": 0.9
+            }
+          },
+          {
+            selector: "edge",
+            style: {
+              width: 1,
+              "line-color": "#22d3ee55",
+              "target-arrow-color": "#22d3eeaa",
+              "target-arrow-shape": "triangle",
+              "curve-style": "bezier"
+            }
+          }
+        ],
+        layout: {
+          name: "cose",
+          animate: false
+        }
+      });
+
+      cy.on("mouseover", "node", (event) => {
+        const data = event.target.data();
+        hoveredNode.value = {
+          id: Number(data.id),
+          label: data.label,
+          ip_address: data.ip,
+          hostname: data.hostname,
+          device_type: data.deviceType,
+          is_gateway: Boolean(data.isGateway),
+          vulnerability_severity: data.vulnerabilitySeverity,
+          vulnerability_count: Number(data.vulnerabilityCount ?? 0),
+          last_seen: data.lastSeen
+        };
+      });
+
+      cy.on("mouseout", "node", () => {
+        hoveredNode.value = null;
+      });
+    } else {
+      cy.elements().remove();
+      cy.add(elements);
+      cy.layout({ name: "cose", animate: false }).run();
+    }
+  } catch {
+    topologyError.value = "Failed to load topology.";
+  } finally {
+    topologyLoading.value = false;
+  }
+}
+
+/**
+ * Vault: start a timed packet capture and prepare a PCAP for download.
+ */
+async function startRecentPcapCapture(): Promise<void> {
+  if (isCapturingPcap.value) {
+    return;
+  }
+
+  pcapError.value = null;
+  pcapStatus.value = "starting";
+  isCapturingPcap.value = true;
+
+  try {
+    const { data } = await axios.post<{ task_id: string }>("/api/vault/pcap/recent", {
+      duration_seconds: 300
+    });
+    pcapTaskId.value = data.task_id;
+    pcapStatus.value = "capturing";
+
+    // Poll task status until capture is ready.
+    const poll = async () => {
+      if (!pcapTaskId.value) {
+        return;
+      }
+      try {
+        const { data } = await axios.get<{
+          ready: boolean;
+          capture_id: number | null;
+          state: string;
+          error: string | null;
+        }>(`/api/vault/pcap/task/${pcapTaskId.value}`);
+
+        if (!data.ready) {
+          pcapStatus.value = `capturing (${data.state})`;
+          setTimeout(poll, 5000);
+          return;
+        }
+
+        if (data.error) {
+          pcapStatus.value = "error";
+          pcapError.value = data.error;
+          isCapturingPcap.value = false;
+          return;
+        }
+
+        if (data.capture_id != null) {
+          pcapCaptureId.value = data.capture_id;
+          pcapStatus.value = "ready";
+        }
+      } catch {
+        pcapStatus.value = "error";
+        pcapError.value = "Failed to query capture status.";
+        isCapturingPcap.value = false;
+      }
+    };
+
+    setTimeout(poll, 5000);
+  } catch {
+    pcapStatus.value = "error";
+    pcapError.value = "Failed to start capture.";
+    isCapturingPcap.value = false;
+  }
+}
+
+const hasPcapReady = computed(
+  () => pcapStatus.value === "ready" && pcapCaptureId.value !== null
+);
+
+onMounted(() => {
+  loadTopology();
+});
+
+onBeforeUnmount(() => {
+  if (cy) {
+    cy.destroy();
+    cy = null;
+  }
+});
 </script>
 
 <template>
@@ -148,10 +386,57 @@ const hasRecommendations = computed(() => recommendations.value.length > 0);
           class="relative h-52 w-full rounded-md border border-cyan-400/30 bg-black/40"
         >
           <div
+            v-if="topologyLoading"
             class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
           >
-            Topology placeholder (Cytoscape.js)
+            Building network graph…
           </div>
+          <div
+            v-else-if="topologyError"
+            class="absolute inset-0 flex items-center justify-center text-xs text-rose-300"
+          >
+            {{ topologyError }}
+          </div>
+        </div>
+
+        <div
+          v-if="hoveredNode"
+          class="rounded-md border border-cyan-400/40 bg-black/70 p-3 text-xs"
+        >
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-[0.7rem] uppercase tracking-[0.16em] text-cyan-200">
+                Device Focus
+              </p>
+              <p class="mt-1 font-mono text-cyan-100">
+                {{ hoveredNode.hostname || hoveredNode.ip_address }}
+              </p>
+            </div>
+            <span
+              v-if="hoveredNode.vulnerability_severity"
+              class="np-danger-glow rounded px-2 py-0.5 text-[0.65rem]"
+            >
+              {{ hoveredNode.vulnerability_severity.toUpperCase() }}
+            </span>
+          </div>
+          <dl class="mt-2 grid grid-cols-2 gap-1 text-[0.7rem]">
+            <div>
+              <dt class="text-[var(--np-muted-text)]">IP</dt>
+              <dd class="font-mono text-cyan-100">{{ hoveredNode.ip_address }}</dd>
+            </div>
+            <div>
+              <dt class="text-[var(--np-muted-text)]">Type</dt>
+              <dd>{{ hoveredNode.device_type || "unknown" }}</dd>
+            </div>
+            <div>
+              <dt class="text-[var(--np-muted-text)]">Gateway</dt>
+              <dd>{{ hoveredNode.is_gateway ? "yes" : "no" }}</dd>
+            </div>
+            <div>
+              <dt class="text-[var(--np-muted-text)]">Vulnerabilities</dt>
+              <dd>{{ hoveredNode.vulnerability_count }}</dd>
+            </div>
+          </dl>
         </div>
 
         <!-- Nmap script advisor / recon playbook -->
@@ -335,12 +620,32 @@ const hasRecommendations = computed(() => recommendations.value.length > 0);
 
         <button
           type="button"
+          @click="startRecentPcapCapture"
           class="mt-auto inline-flex items-center justify-center rounded-md border
                  border-cyan-400/40 bg-black/70 px-3 py-2 text-[0.75rem] font-medium
-                 text-cyan-200 hover:bg-cyan-500/10"
+                 text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+          :disabled="isCapturingPcap"
         >
-          Export Last 5 Minutes as PCAP
+          <span v-if="!isCapturingPcap">Export Last 5 Minutes as PCAP</span>
+          <span v-else>Capturing traffic…</span>
         </button>
+
+        <div class="mt-2 text-[0.7rem]">
+          <p v-if="pcapStatus === 'capturing'" class="text-cyan-100/80">
+            Capture in progress. This may take several minutes depending on the duration.
+          </p>
+          <p v-if="pcapError" class="text-rose-300">
+            {{ pcapError }}
+          </p>
+          <p v-if="hasPcapReady" class="text-emerald-300">
+            Capture ready:
+            <a
+              :href="`/api/vault/pcap/${pcapCaptureId}/download`"
+              class="underline hover:text-emerald-200"
+              >Download PCAP</a
+            >
+          </p>
+        </div>
       </div>
     </section>
   </div>
