@@ -3,6 +3,16 @@ from typing import List
 
 from pydantic import BaseSettings, Field
 
+"""
+Central application configuration.
+
+Settings are loaded from environment variables (and optional .env files)
+and used across the backend for:
+- database and Redis connections,
+- security and CORS,
+- script directories and allowlists.
+"""
+
 
 class Settings(BaseSettings):
     """Application configuration.

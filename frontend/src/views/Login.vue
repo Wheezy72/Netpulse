@@ -1,4 +1,12 @@
 <script setup lang="ts">
+/**
+ * Login.vue
+ *
+ * Simple credentials form. The look and feel is theme-driven:
+ *  - CyberDeck: dark, neon, "console" style.
+ *  - SysAdmin: light, clean, card-style.
+ */
+
 import axios from "axios";
 import { ref } from "vue";
 
@@ -39,17 +47,11 @@ async function handleSubmit(): Promise<void> {
 
 <template>
   <div class="flex h-full items-center justify-center">
-    <div
-      class="w-full max-w-sm rounded-lg border px-6 py-5 shadow-lg"
-      :class="[
-        'bg-black/70',
-        'border-cyan-400/40'
-      ]"
-    >
-      <h2 class="text-sm font-semibold tracking-[0.18em] uppercase text-cyan-200">
+    <div class="np-login-panel w-full max-w-sm rounded-lg px-6 py-5 shadow-lg">
+      <h2 class="text-sm font-semibold tracking-[0.18em] uppercase">
         Sign In
       </h2>
-      <p class="mt-1 text-[0.75rem] text-cyan-100/80">
+      <p class="mt-1 text-[0.75rem] text-[var(--np-muted-text)]">
         Enter your credentials to access NetPulse.
       </p>
 
@@ -60,8 +62,8 @@ async function handleSubmit(): Promise<void> {
             v-model="email"
             type="email"
             autocomplete="username"
-            class="mt-1 w-full rounded-md border border-cyan-400/40 bg-black/70 px-2 py-1 text-[0.8rem]
-                   focus:outline-none focus:ring-1 focus:ring-cyan-400"
+            class="mt-1 w-full rounded-md border px-2 py-1 text-[0.8rem]
+                   focus:outline-none focus:ring-1"
             placeholder="you@example.com"
           />
         </label>
@@ -72,17 +74,15 @@ async function handleSubmit(): Promise<void> {
             v-model="password"
             type="password"
             autocomplete="current-password"
-            class="mt-1 w-full rounded-md border border-cyan-400/40 bg-black/70 px-2 py-1 text-[0.8rem]
-                   focus:outline-none focus:ring-1 focus:ring-cyan-400"
+            class="mt-1 w-full rounded-md border px-2 py-1 text-[0.8rem]
+                   focus:outline-none focus:ring-1"
             placeholder="••••••••"
           />
         </label>
 
         <button
           type="submit"
-          class="mt-2 inline-flex w-full items-center justify-center rounded-md border
-                 border-cyan-400/60 bg-black/80 px-3 py-2 text-[0.8rem] font-medium
-                 text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+          class="mt-2 inline-flex w-full items-center justify-center rounded-md border px-3 py-2 text-[0.8rem] font-medium disabled:opacity-50"
           :disabled="isSubmitting"
         >
           <span v-if="!isSubmitting">Login</span>

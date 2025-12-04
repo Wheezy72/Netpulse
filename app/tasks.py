@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+"""
+Celery task definitions.
+
+These tasks wrap the core service functions used for:
+- Latency monitoring (Pulse).
+- Script execution (Brain).
+- Passive ARP discovery and packet capture (Eye/Vault).
+"""
+
 import asyncio
 
 from celery.utils.log import get_task_logger

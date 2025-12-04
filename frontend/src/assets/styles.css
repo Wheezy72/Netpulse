@@ -55,6 +55,27 @@ body.theme-cyberdeck .np-panel {
   box-shadow: 0 0 18px rgba(0, 243, 255, 0.18);
 }
 
+/* Login card styling per theme */
+body.theme-cyberdeck .np-login-panel {
+  border: 1px solid rgba(34, 211, 238, 0.6);
+  background: radial-gradient(circle at 0 0, rgba(0, 243, 255, 0.12), transparent 55%)
+      border-box,
+    radial-gradient(circle at 100% 100%, rgba(189, 0, 255, 0.12), transparent 55%)
+      border-box,
+    linear-gradient(145deg, rgba(3, 7, 18, 0.95), rgba(15, 23, 42, 0.98));
+  box-shadow:
+    0 0 18px rgba(0, 243, 255, 0.3),
+    0 18px 32px rgba(0, 0, 0, 0.7);
+}
+
+body.theme-sysadmin .np-login-panel {
+  border: 1px solid var(--np-border);
+  background-color: var(--np-surface);
+  box-shadow:
+    0 8px 18px rgba(15, 23, 42, 0.12),
+    0 0 0 1px rgba(15, 23, 42, 0.02);
+}
+
 /* Horizontal scanline effect for terminals and charts */
 body.theme-cyberdeck .np-scanlines::before {
   content: "";

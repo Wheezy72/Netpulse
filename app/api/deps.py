@@ -1,7 +1,17 @@
 from __future__ import annotations
 
+"""
+Shared FastAPI dependencies and security helpers.
+
+Provides:
+- db_session: async SQLAlchemy session dependency.
+- Password hashing helpers.
+- JWT creation and validation.
+- Role-based access control via require_role().
+"""
+
 from datetime import datetime, timedelta
-from typing import AsyncGenerator, Annotated, Optional
+from typing import Annotated, AsyncGenerator, Optional
 
 from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -14,14 +24,13 @@ from app.core.config import settings
 from app.db.session import async_session_factory
 from app.models.user import User, UserRole
 
-# Password hashing and JWT helpers for authentication.
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security_scheme = HTTPBearer(auto_error=True)
 
 
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    async with async_session_factory() as session:
-        yield session
+  async with async_session_factory() as session:
+      yield session
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -38,10 +47,7 @@ def create_access_token(
     expires_delta: Optional[timedelta] = None,
 ) -> str:
     """Create a signed JWT for the given subject and role."""
-    to_encode = {
-        "sub": subject,
-        "role": role,
-    }
+    to_encode = {"sub": subject, "role": role}
     expire = datetime.utcnow() + (
         expires_delta
         if expires_delta is not None
@@ -93,11 +99,9 @@ async def get_current_user(
 
 
 def require_role(*allowed_roles: UserRole):
-    """Dependency factory that enforces that the current user has one of the given roles."""
+    """Return a dependency that ensures the current user has one of the given roles."""
 
-    async def _require(
-        user: User = Depends(get_current_user),
-    ) -> User:
+    async def _require(user: User = Depends(get_current_user)) -> User:
         if user.role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -105,14 +109,4 @@ def require_role(*allowed_roles: UserRole):
             )
         return user
 
-    return _require_future__ import annotations
-
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.db.session import get_db
-
-
-# Re-export DB dependency for convenience
-async def db_session() -> AsyncSession:
-    async for session in get_db():
-        return session
+    return _require

@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+"""
+FastAPI application entrypoint.
+
+Responsible for:
+- Initialising the database schema (for simple deployments).
+- Configuring CORS.
+- Mounting the API router under /api.
+"""
+
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 

@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+"""
+Latency and Internet Health monitoring.
+
+This module:
+- pings a small set of targets,
+- calculates latency, jitter, and packet loss,
+- derives an Internet Health score,
+- persists everything as Metric rows for the Pulse dashboard.
+"""
+
 import asyncio
 import statistics
 from dataclasses import dataclass
