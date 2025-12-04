@@ -2,14 +2,11 @@
 /**
  * Dashboard.vue
  *
- * This is the "Single Pane of Glass" layout. It exposes:
- *  - Pulse: real-time telemetry (latency, jitter, Internet Health).
+ * Single Pane layout with four panels:
+ *  - Pulse: latency, jitter, Internet Health.
  *  - Eye: topology & reconnaissance.
  *  - Brain: automation and scripting.
- *  - Vault: historical data and PCAP exports.
- *
- * It is intentionally structured with clear regions so you can swap,
- * resize, or add panels without refactoring the entire layout.
+ *  - Vault: PCAP capture and quick inspection.
  */
 
 import axios from "axios";
@@ -56,27 +53,30 @@ type PacketHeaderView = {
   info: string | null;
 };
 
-const selectedTarget = ref("");
-const selectedServices = ref<ReconTargetService[]>([]);
-const recommendations = ref<NmapRecommendation[]>([]);
-const isScanning = ref(false);
-const scanError = ref<string | null>(null);dge = {
-  source: number;
-  target: number;
-  kind: string;
+type InternetHealthPoint = {
+  timestamp: string;
+  value: number;
 };
 
+// Recon / Nmap state
 const selectedTarget = ref("");
 const selectedServices = ref<ReconTargetService[]>([]);
 const recommendations = ref<NmapRecommendation[]>([]);
 const isScanning = ref(false);
 const scanError = ref<string | null>(null);
 
+// Topology state
 const topologyLoading = ref(false);
 const topologyError = ref<string | null>(null);
 const hoveredNode = ref<TopologyNode | null>(null);
 const selectedNode = ref<TopologyNode | null>(null);
 let cy: CytoscapeCore | null = null;
+
+// Pulse / Internet Health chart state
+const pulseLoading = ref(false);
+const pulseError = ref<string | null>(null);
+const internetHealthPoints = ref<InternetHealthPoint[]>([]);
+const pulseChartOption = ref<any>({});
 
 // Vault / PCAP capture state
 const isCapturingPcap = ref(false);
@@ -89,6 +89,109 @@ const captureHeaders = ref<PacketHeaderView[]>([]);
 // Device quick action state
 const isRunningAction = ref(false);
 const actionStatus = ref<string | null>(null);
+
+const hasRecommendations = computed(() => recommendations.value.length > 0);
+const hasPcapReady = computed(
+  () => pcapStatus.value === "ready" && pcapCaptureId.value !== null
+);
+const latestInternetHealth = computed(() => {
+  if (!internetHealthPoints.value.length) return 0;
+  return internetHealthPoints.value[internetHealthPoints.value.length - 1].value;
+});
+
+/**
+ * Build an ECharts option object for the Pulse Internet Health chart.
+ */
+function buildPulseChartOption(points: InternetHealthPoint[]): any {
+  const categories = points.map((p) =>
+    p.timestamp.split("T")[1]?.slice(0, 8) ?? p.timestamp
+  );
+  const values = points.map((p) => p.value);
+
+  return {
+    grid: {
+      left: 40,
+      right: 10,
+      top: 20,
+      bottom: 25,
+    },
+    tooltip: {
+      trigger: "axis",
+      axisPointer: {
+        type: "line",
+      },
+    },
+    xAxis: {
+      type: "category",
+      data: categories,
+      boundaryGap: false,
+      axisLine: { lineStyle: { color: "#22d3ee55" } },
+      axisLabel: {
+        color: "#a5f3fc",
+        fontSize: 10,
+      },
+    },
+    yAxis: {
+      type: "value",
+      min: 0,
+      max: 100,
+      axisLine: { lineStyle: { color: "#22d3ee55" } },
+      splitLine: { lineStyle: { color: "#164e635" } },
+      axisLabel: {
+        color: "#a5f3fc",
+        fontSize: 10,
+        formatter: "{value}%",
+      },
+    },
+    series: [
+      {
+        name: "Internet Health",
+        type: "line",
+        smooth: true,
+        symbol: "none",
+        data: values,
+        lineStyle: {
+          color: "#22c55e",
+          width: 2,
+        },
+        areaStyle: {
+          color: {
+            type: "linear",
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              { offset: 0, color: "rgba(34,197,94,0.6)" },
+              { offset: 1, color: "rgba(15,23,42,0.1)" },
+            ],
+          },
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * Load recent Internet Health metrics for the Pulse panel.
+ */
+async function loadPulse(): Promise<void> {
+  pulseError.value = null;
+  pulseLoading.value = true;
+
+  try {
+    const { data } = await axios.get<{ points: InternetHealthPoint[] }>(
+      "/api/metrics/internet-health-recent"
+    );
+    internetHealthPoints.value = data.points ?? [];
+    pulseChartOption.value = buildPulseChartOption(internetHealthPoints.value);
+  } catch {
+    pulseError.value = "Failed to load Internet Health metrics.";
+    internetHealthPoints.value = [];
+  } finally {
+    pulseLoading.value = false;
+  }
+}
 
 /**
  * Trigger an on-demand Nmap scan for the selected target.
@@ -109,15 +212,14 @@ async function scanTarget(): Promise<void> {
     selectedServices.value = data.services ?? [];
     recommendations.value = data.recommendations ?? [];
   } catch {
-    scanError.value = "Scan failed. Ensure the backend can reach the target and Nmap is installed.";
+    scanError.value =
+      "Scan failed. Ensure the backend can reach the target and Nmap is installed.";
     selectedServices.value = [];
     recommendations.value = [];
   } finally {
     isScanning.value = false;
   }
 }
-
-const hasRecommendations = computed(() => recommendations.value.length > 0);
 
 /**
  * Load topology data and initialize Cytoscape graph.
@@ -143,17 +245,17 @@ async function loadTopology(): Promise<void> {
           isGateway: n.is_gateway,
           vulnerabilitySeverity: n.vulnerability_severity,
           vulnerabilityCount: n.vulnerability_count,
-          lastSeen: n.last_seen
-        }
+          lastSeen: n.last_seen,
+        },
       })),
       ...data.edges.map((e, index) => ({
         data: {
           id: `e-${index}`,
           source: String(e.source),
           target: String(e.target),
-          kind: e.kind
-        }
-      }))
+          kind: e.kind,
+        },
+      })),
     ];
 
     const container = document.getElementById("topology-graph") as HTMLElement | null;
@@ -178,16 +280,16 @@ async function loadTopology(): Promise<void> {
               "text-outline-width": 1,
               "text-outline-color": "#000000",
               color: "#e0f7ff",
-              "overlay-opacity": 0
-            }
+              "overlay-opacity": 0,
+            },
           },
           {
             selector: "node[?isGateway]",
             style: {
               "background-color": "#22c55e",
               "border-color": "#bbf7d0",
-              "shape": "hexagon"
-            }
+              shape: "hexagon",
+            },
           },
           {
             selector:
@@ -197,8 +299,8 @@ async function loadTopology(): Promise<void> {
               "border-color": "#fecaca",
               "shadow-blur": 20,
               "shadow-color": "#ef4444",
-              "shadow-opacity": 0.9
-            }
+              "shadow-opacity": 0.9,
+            },
           },
           {
             selector: "edge",
@@ -207,14 +309,14 @@ async function loadTopology(): Promise<void> {
               "line-color": "#22d3ee55",
               "target-arrow-color": "#22d3eeaa",
               "target-arrow-shape": "triangle",
-              "curve-style": "bezier"
-            }
-          }
+              "curve-style": "bezier",
+            },
+          },
         ],
         layout: {
           name: "cose",
-          animate: false
-        }
+          animate: false,
+        },
       });
 
       cy.on("mouseover", "node", (event) => {
@@ -228,7 +330,7 @@ async function loadTopology(): Promise<void> {
           is_gateway: Boolean(data.isGateway),
           vulnerability_severity: data.vulnerabilitySeverity,
           vulnerability_count: Number(data.vulnerabilityCount ?? 0),
-          last_seen: data.lastSeen
+          last_seen: data.lastSeen,
         };
       });
 
@@ -247,7 +349,7 @@ async function loadTopology(): Promise<void> {
           is_gateway: Boolean(data.isGateway),
           vulnerability_severity: data.vulnerabilitySeverity,
           vulnerability_count: Number(data.vulnerabilityCount ?? 0),
-          last_seen: data.lastSeen
+          last_seen: data.lastSeen,
         };
       });
     } else {
@@ -277,7 +379,7 @@ async function startRecentPcapCapture(): Promise<void> {
 
   try {
     const { data } = await axios.post<{ task_id: string }>("/api/vault/pcap/recent", {
-      duration_seconds: 300
+      duration_seconds: 300,
     });
     pcapTaskId.value = data.task_id;
     pcapStatus.value = "capturing";
@@ -340,10 +442,6 @@ async function startRecentPcapCapture(): Promise<void> {
   }
 }
 
-const hasPcapReady = computed(
-  () => pcapStatus.value === "ready" && pcapCaptureId.value !== null
-);
-
 /**
  * Run a prebuilt Smart Script against the currently selected node.
  * This is wired to offensive/defensive templates (e.g., malformed packets).
@@ -365,8 +463,8 @@ async function runPrebuiltScriptForDevice(
       script_name: scriptName,
       params: {
         target_ip: node.ip_address,
-        ...extraParams
-      }
+        ...extraParams,
+      },
     };
     const { data } = await axios.post<{ job_id: number }>(
       "/api/scripts/prebuilt/run",
@@ -381,28 +479,8 @@ async function runPrebuiltScriptForDevice(
 }
 
 onMounted(() => {
+  loadPulse();
   loadTopology();
-});
-
-// When a node is selected in the Eye panel, fetch a compact device detail
-// bundle (vulnerabilities, recent scripts, and a simple metric snapshot).
-watch(selectedNode, async (node) => {
-  deviceDetail.value = null;
-  deviceDetailError.value = null;
-
-  if (!node) {
-    return;
-  }
-
-  deviceDetailLoading.value = true;
-  try {
-    const { data } = await axios.get<DeviceDetail>(`/api/devices/${node.id}/detail`);
-    deviceDetail.value = data;
-  } catch {
-    deviceDetailError.value = "Failed to load device details.";
-  } finally {
-    deviceDetailLoading.value = false;
-  }
 });
 
 onBeforeUnmount(() => {
@@ -411,6 +489,7 @@ onBeforeUnmount(() => {
     cy = null;
   }
 });
+</script>
 
 <template>
   <div class="grid gap-4 xl:grid-cols-3 xl:grid-rows-6">
@@ -434,15 +513,30 @@ onBeforeUnmount(() => {
       <div class="grid gap-4 md:grid-cols-4">
         <div class="md:col-span-3">
           <div
-            id="pulse-chart"
             class="relative h-48 w-full rounded-md border border-cyan-400/30 bg-black/40"
           >
+            <v-chart
+              v-if="!pulseLoading && internetHealthPoints.length"
+              :option="pulseChartOption"
+              autoresize
+              class="h-48 w-full"
+            />
             <div
+              v-else-if="pulseLoading"
               class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
             >
-              Telemetry chart placeholder (Apache ECharts)
+              Loading Internet Health…
+            </div>
+            <div
+              v-else
+              class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
+            >
+              No Internet Health data yet.
             </div>
           </div>
+          <p v-if="pulseError" class="mt-2 text-[0.7rem] text-rose-300">
+            {{ pulseError }}
+          </p>
         </div>
 
         <div class="flex flex-col gap-3 text-xs">
@@ -451,13 +545,16 @@ onBeforeUnmount(() => {
               <span class="text-[0.6rem] uppercase tracking-[0.18em] text-emerald-300">
                 Internet Health
               </span>
-              <span class="text-lg font-semibold text-emerald-300">92%</span>
+              <span class="text-lg font-semibold text-emerald-300">
+                {{ latestInternetHealth.toFixed(0) }}%
+              </span>
             </div>
             <p class="mt-1 text-[0.7rem] text-cyan-100/80">
               Based on current latency, jitter and packet loss across your WAN.
             </p>
           </div>
 
+          <!-- Static breakdown for now; can be wired to per-target metrics later -->
           <div class="space-y-2">
             <div class="flex items-center justify-between">
               <span>Gateway</span>
