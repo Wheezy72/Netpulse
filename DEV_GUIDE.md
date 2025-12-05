@@ -15,6 +15,71 @@ This guide explains:
 - Database schema and entity relationships.
 - Local development and deployment with Docker Compose.
 
+### 1.1 Developer Quick Start
+
+If you just want to get NetPulse running and see data on your dashboard, start
+here and then dive into later sections as needed.
+
+1. **Start with Docker (recommended)**  
+   From the repo root:
+
+   ```bash
+   docker-compose up --build
+   ```
+
+   Then:
+
+   - API: `http://localhost:8000` (Swagger at `/docs`).
+   - Frontend: `http://localhost:8080`.
+
+2. **Create your first user (admin)**  
+
+   ```bash
+   curl -X POST http://localhost:8000/api/auth/users \
+     -H "Content-Type: application/json" \
+     -d '{
+       "email": "admin@example.com",
+       "password": "ChangeMe123",
+       "full_name": "Admin User"
+     }'
+   ```
+
+   Log in at `http://localhost:8080` with these credentials, then explore:
+
+   - Pulse (Internet Health).
+   - Eye (topology & recon).
+   - Brain (Smart Scripts).
+   - Vault (PCAP export).
+
+3. **Switch themes & info modes**  
+
+   - Use the header toggle to switch between:
+     - **CyberDeck** (Batman/hacker console).
+     - **SysAdmin Pro** (enterprise console).
+   - In the Brain panel’s **Settings** card, choose:
+     - **Full detail** – all charts and panels.
+     - **Quick view** – compact, important metrics only.
+
+4. **Run a few prebuilt scripts (safe defaults)**  
+
+   In the Brain panel, try:
+
+   - `WAN Health Report`
+   - `New Device Report`
+   - `Config Drift Report`
+
+   Script output appears in the Brain console; see §6.3.4 for details on
+   prebuilt scripts and §6.5 for alerting behaviour.
+
+5. **For local dev without Docker**  
+
+   See §9.3 for how to run:
+
+   - `./scripts/dev_backend.sh`
+   - `./scripts/dev_worker.sh`
+   - `./scripts/dev_beat.sh`
+   - `./scripts/dev_frontend.sh`
+
 ---
 
 ## 2. High‑Level Architecture
