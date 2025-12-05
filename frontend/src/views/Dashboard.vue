@@ -493,12 +493,32 @@ async function runPrebuiltScriptForDevice(
   }
 }
 
+let pulseInterval: number | undefined;
+let topologyInterval: number | undefined;
+
 onMounted(() => {
+  // Initial load
   loadPulse();
   loadTopology();
+
+  // Periodic refresh for a \"live\" dashboard view.
+  // Pulse metrics are updated frequently; topology changes more slowly.
+  pulseInterval = window.setInterval(() => {
+    loadPulse();
+  }, 15000);
+
+  topologyInterval = window.setInterval(() => {
+    loadTopology();
+  }, 60000);
 });
 
 onBeforeUnmount(() => {
+  if (pulseInterval !== undefined) {
+    clearInterval(pulseInterval);
+  }
+  if (topologyInterval !== undefined) {
+    clearInterval(topologyInterval);
+  }
   if (cy) {
     cy.destroy();
     cy = null;
