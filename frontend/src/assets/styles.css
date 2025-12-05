@@ -216,6 +216,94 @@ body.theme-cyberdeck .np-text-glow {
   text-shadow: 0 0 4px rgba(0, 243, 255, 0.7);
 }
 
+/* Subtle glitch effect for CyberDeck headings (e.g. main title). */
+body.theme-cyberdeck .np-glitch {
+  position: relative;
+  animation: np-glitch-shift 3s infinite;
+}
+
+body.theme-cyberdeck .np-glitch::before,
+body.theme-cyberdeck .np-glitch::after {
+  content: attr(data-text);
+  position: absolute;
+  left: 0;
+  top: 0;
+  opacity: 0.6;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+body.theme-cyberdeck .np-glitch::before {
+  color: #22d3ee;
+  transform: translate(0, 0);
+  animation: np-glitch-before 3s infinite;
+}
+
+body.theme-cyberdeck .np-glitch::after {
+  color: #f97316;
+  transform: translate(0, 0);
+  animation: np-glitch-after 3s infinite;
+}
+
+@keyframes np-glitch-shift {
+  0%,
+  90% {
+    transform: translate(0, 0);
+  }
+  92% {
+    transform: translate(-1px, -1px);
+  }
+  94% {
+    transform: translate(1px, 1px);
+  }
+  96% {
+    transform: translate(-0.5px, 0.5px);
+  }
+  100% {
+    transform: translate(0, 0);
+  }
+}
+
+@keyframes np-glitch-before {
+  0%,
+  90% {
+    clip-path: inset(0 0 0 0);
+    transform: translate(0, 0);
+  }
+  92% {
+    clip-path: inset(0 0 60% 0);
+    transform: translate(-1px, -1px);
+  }
+  94% {
+    clip-path: inset(40% 0 0 0);
+    transform: translate(1px, 0);
+  }
+  100% {
+    clip-path: inset(0 0 0 0);
+    transform: translate(0, 0);
+  }
+}
+
+@keyframes np-glitch-after {
+  0%,
+  90% {
+    clip-path: inset(0 0 0 0);
+    transform: translate(0, 0);
+  }
+  92% {
+    clip-path: inset(0 0 30% 0);
+    transform: translate(1px, 1px);
+  }
+  94% {
+    clip-path: inset(70% 0 0 0);
+    transform: translate(-1px, 0);
+  }
+  100% {
+    clip-path: inset(0 0 0 0);
+    transform: translate(0, 0);
+  }
+}
+
 /* Utility for red glow around vulnerable nodes/cards */
 body.theme-cyberdeck .np-danger-glow {
   box-shadow: 0 0 18px rgba(239, 68, 68, 0.7);

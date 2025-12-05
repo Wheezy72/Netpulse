@@ -135,8 +135,11 @@ function handleLogout(): void {
           <h1
             class="text-sm font-semibold tracking-[0.18em] uppercase"
             :class="[
-              theme === 'cyberdeck' ? 'text-cyan-300 np-text-glow' : 'text-slate-800'
+              theme === 'cyberdeck'
+                ? 'text-cyan-300 np-text-glow np-glitch'
+                : 'text-slate-800'
             ]"
+            :data-text="'NetPulse Enterprise'"
           >
             NetPulse Enterprise
           </h1>
