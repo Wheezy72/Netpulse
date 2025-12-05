@@ -18,6 +18,7 @@ interface Props {
 }
 
 const props = defineProps<Props>();
+const infoMode = computed(() => props.infoMode);
 const emit = defineEmits<{
   (e: "update:infoMode", value: "full" | "compact"): void;
 }>();

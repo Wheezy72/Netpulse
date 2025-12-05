@@ -126,7 +126,7 @@ All services are orchestrated by `docker-compose.yml`. See that file for:
 ```text
 /app
   ├── main.py                 # FastAPI app entrypoint
-  ├── tasks.py                # Celery tasks (Pulse, Eye, Brain, Vault)
+  ├── tasks.py                # Celery tasks (Pulse, Eye, Brain, Vault, alerts)
   ├── core/
   │     ├── __init__.py
   │     ├── config.py         # Settings via Pydantic BaseSettings
@@ -139,22 +139,35 @@ All services are orchestrated by `docker-compose.yml`. See that file for:
   │     ├── __init__.py
   │     ├── device.py         # Device model
   │     ├── metric.py         # Metric model (Timescale hypertable)
+  │     ├── packet_capture.py # Metadata for PCAP captures
   │     ├── script_job.py     # ScriptJob model
+  │     ├── user.py           # User and role model
   │     └── vulnerability.py  # Vulnerability model
   ├── api/
   │     ├── __init__.py
-  │     ├── deps.py           # Common dependencies (DB, pagination, etc.)
+  │     ├── deps.py           # Common dependencies (DB, pagination, auth)
   │     └── routes/
   │           ├── __init__.py
+  │           ├── auth.py     # Login, user bootstrap, current user
+  │           ├── devices.py  # Device list, topology view, device detail
   │           ├── health.py   # Liveness/Readiness endpoints
-  │           └── scripts.py  # Script upload & monitoring endpoints
+  │           ├── metrics.py  # Internet Health + Pulse target summaries
+  │           ├── recon.py    # Nmap scan + NSE recommendations
+  │           ├── scripts.py  # Smart Script upload & execution
+  │           ├── vault.py    # PCAP capture and download
+  │           └── ws.py       # WebSocket for live ScriptJob logs
   └── services/
         ├── __init__.py
-        ├── latency_monitor.py  # Core logic for "Pulse"
-        └── script_executor.py  # Core logic for "Brain"
+        ├── alerts.py          # Email/WhatsApp alerts + vulnerability/health alerts
+        ├── latency_monitor.py # Core logic for "Pulse"
+        ├── packet_capture.py  # PCAP capture and header extraction
+        ├── recon.py           # Nmap scans + passive ARP discovery
+        └── script_executor.py # Core logic for "Brain"
 ```
 
-> Note: Only some of these files are required by the initial implementation; others define a scalable structure for future modules.
+> Note: This layout matches the current implementation; some modules (e.g. Vault,
+> WebSockets) are optional for minimal deployments but are part of the full
+> NetPulse experience.
 
 ### 4.2 FastAPI → Redis → Worker Flow
 
@@ -423,63 +436,193 @@ Future hardening options (for later versions):
 
 #### 6.3.4 Pre‑built Example Scripts
 
-Reside under `/scripts/prebuilt/`:
+Prebuilt scripts live under `/scripts/prebuilt/` and are governed by the
+allowlist in `Settings.allowed_prebuilt_scripts` (see §11.4).
 
-1. **`backup_switch.py`**
-   - Uses Netmiko to SSH into network devices and backup their running configs.
-   - Example logic:
-     - Read device list from DB (`Device` records with `device_type="switch"`).
-     - Connect via SSH.
-     - Issue `show running-config` or vendor‑specific equivalent.
-     - Store backups on disk or in a dedicated table/bucket.
+**Operations / reporting**
 
-2. **`kill_switch.py`**
-   - Uses Scapy or raw sockets to send TCP RST packets.
-   - Terminates a specific connection defined via script parameters.
-   - Example steps:
-     - Query DB to identify device IPs or connection parameters.
-     - Craft TCP packets with RST flag.
-     - Send multiple packets to ensure session teardown.
+1. **`device_inventory_export.py`**
+   - Exports the current `Device` inventory to CSV under `/data/reports`.
+   - Useful for quick asset snapshots or lab documentation.
 
-These scripts demonstrate how to consume `ctx` for DB access and network operations.
+2. **`wan_health_report.py`**
+   - Summarises recent Internet Health metrics (last 24h) into a JSON report
+     under `/data/reports`.
+   - Returns a structured result and logs the report path; also triggers a
+     “report ready” alert via the alerting service.
+
+3. **`new_device_report.py`**
+   - Lists devices seen within a recent time window (default 60 minutes).
+   - Intended for spotting new hosts on your LAN and training “new asset”
+     detection workflows.
+
+4. **`config_drift_report.py`**
+   - Looks at configuration backups produced by `backup_switch.py` in
+     `/data/backups` and compares the two most recent files per device.
+   - Reports whether configuration drift has occurred, including a short
+     unified diff excerpt for changed devices.
+
+**Network infrastructure**
+
+5. **`backup_switch.py`**
+   - Uses Netmiko to SSH into switches (or similar devices) and back up the
+     running configuration to `/data/backups`.
+   - Device selection is based on `Device` rows with `device_type="switch"`.
+
+6. **`defense_block_ip.py`**
+   - Defensive helper that applies iptables rules inside the worker container to
+     block traffic from a given IP in lab environments.
+   - Designed as a quick demonstration of “push a simple defensive control”.
+
+**Nmap profiles**
+
+7. **`nmap_web_recon.py`**
+   - Runs a web‑focused Nmap profile against a single target:
+     - Ports: `80,443,8080,8443`
+     - Scripts: `http-title`, `http-enum`, `http-methods`, `http-headers`,
+       `http-robots.txt`, `http-vuln-cve2017-5638`, `http-shellshock`.
+   - Useful for exploring web services on lab hosts without manually assembling
+     Nmap flags.
+
+8. **`nmap_smb_audit.py`**
+   - Runs an SMB audit profile against a target (ports `139,445`) with scripts
+     such as:
+     - `smb-enum-shares`, `smb-enum-users`, `smb-os-discovery`,
+       `smb-security-mode`, `smb2-security-mode`,
+       `smb-vuln-ms17-010`, `smb-vuln-ms08-067`.
+   - Suitable for auditing Samba/Windows hosts you control.
+
+**Lab‑only / packet manipulation**
+
+9. **`kill_switch.py`**
+   - Sends TCP RST packets to tear down a specific TCP connection based on
+     parameters from `ScriptJob.params`.
+   - Intended for controlled lab exercises.
+
+10. **Malformed packet templates and replay**
+    - `malformed_syn_flood.py`
+    - `malformed_xmas_scan.py`
+    - `malformed_overlap_fragments.py`
+    - `replay_pcap.py`
+    - These are explicitly lab‑only. They demonstrate how to craft and replay
+      packets using Scapy in a safe, self‑contained environment.
+
+All prebuilt scripts are invoked via `POST /api/scripts/prebuilt/run` and
+executed by the same `ScriptContext` / `ScriptJob` pipeline as uploaded scripts.
+The Brain panel in the frontend exposes common profiles as “Script Shortcuts”.
 
 ### 6.4 Module D – The Vault (Data & Reports)
 
 #### 6.4.1 Time Machine
 
-- Uses TimescaleDB to query historical views.
-- Backend exposes endpoints like:
+- Uses TimescaleDB to query historical views of metrics.
+- Backend exposes endpoints such as:
 
-  - `/api/metrics/internet_health?from=...&to=...`
-  - `/api/metrics/device/{device_id}?from=...&to=...`
-
-- These endpoints:
-
-  - Build SQL queries constrained by time window.
-  - Paginate results or downsample as needed for charting.
+  - `/api/metrics/internet-health-recent` – recent global Internet Health points.
+  - `/api/metrics/pulse-latest` – latest Pulse per‑target summary (latency/jitter/loss).
+  - (Additional range queries can be added for more advanced reporting.)
 
 - Frontend:
 
-  - Provides a timeline UI (date/time picker).
-  - When user selects "Yesterday 3:00 PM", it:
-    - Sends `from` and `to` parameters.
-    - Renders historical metrics in ECharts (e.g., line charts).
-    - Optionally replays historical states (animation of metrics over time).
+  - The Pulse panel renders recent Internet Health as an ECharts line chart.
+  - A time window control (in full mode) allows selecting a point in time to
+    contextualise metrics.
 
 #### 6.4.2 PCAP Export
 
 - Celery task for PCAP export (Vault module):
 
-  - Last 5 minutes of headers are persisted from sniffers into a ring buffer or DB representation.
-  - When user clicks "Export PCAP":
-    - API schedules a Celery task.
-    - Task reconstructs PCAP (e.g., using Scapy or dpkt) and writes to disk.
-    - API offers a download endpoint.
+  - When a user clicks "Export Last 5 Minutes as PCAP", the API schedules
+    `packet_capture_recent_task` via Celery.
+  - The worker runs a bounded `tcpdump`/Scapy capture on the configured
+    interface (`eth0`), writes a PCAP to disk, and records metadata in the
+    `PacketCapture` model.
+  - The API exposes:
+    - `/api/vault/pcap/{id}` – header summaries for quick inspection.
+    - `/api/vault/pcap/{id}/download` – raw PCAP download.
 
-- Implementation detail:
-  - For full fidelity, sniffers should write to rotating PCAP files; export would then copy/truncate the newest segments.
-  - For initially lightweight implementation:
-    - Store simplified packet metadata in DB and reconstruct a synthetic PCAP.
+- Frontend:
+
+  - Shows capture status and exposes a download link once ready.
+  - In full information mode, a small table previews packet headers (time,
+    src/dst, protocol, length, info) for the most recent ~50 packets.
+
+---
+
+### 6.5 Alerting & Notifications
+
+Alerting utilities live in `app/services/alerts.py` and are driven by settings
+in `app/core/config.py`.
+
+#### 6.5.1 Channels & Templates
+
+- Two primary transport channels:
+  - Email (SMTP).
+  - WhatsApp‑style webhook (generic HTTP POST).
+
+- Per‑event channel routing:
+
+  ```text
+  alert_vuln_channel   # "email" | "whatsapp" | "both" | "none"
+  alert_scan_channel
+  alert_report_channel
+  alert_health_channel
+  alert_device_channel
+  ```
+
+- Per‑event WhatsApp templates (Python `str.format`):
+
+  ```text
+  whatsapp_message_template  # default fallback
+  whatsapp_vuln_template
+  whatsapp_scan_template
+  whatsapp_report_template
+  whatsapp_health_template
+  whatsapp_device_template
+  ```
+
+All of these can be overridden via environment variables (e.g.
+`ALERT_SCAN_CHANNEL`, `WHATSAPP_SCAN_TEMPLATE`).
+
+The main entrypoint is:
+
+```python
+async def send_system_alert(
+    subject: str,
+    body: str,
+    *,
+    event_type: str | None = None,
+    channel: str | None = None,
+) -> None:
+    ...
+```
+
+- `event_type` selects the default channel/template.
+- `channel` overrides routing when provided.
+
+#### 6.5.2 Event Types & Scheduled Alerts
+
+Current event types include:
+
+- `vuln` – new high/critical vulnerabilities (see `process_vulnerability_alerts`).
+- `scan` – Nmap scan completion and a daily scheduled scan reminder.
+- `report` – WAN health report completion (`wan_health_report.py`).
+- `health` – Internet Health degradation.
+- `device` – reserved for device‑specific alerts (hook point for future use).
+
+Celery tasks involved:
+
+- `monitor_latency_task` (Pulse) – computes Internet Health and, via
+  `monitor_latency`, sends a `health` alert when the score drops below
+  `health_alert_threshold` and was previously above it.
+- `vulnerability_alert_task` – calls `process_vulnerability_alerts` to find
+  unresolved high/critical `Vulnerability` rows and send `vuln` alerts.
+- `scheduled_scan_reminder_task` – daily reminder to review/run scan playbooks
+  (`event_type="scan"`).
+
+The frontend doesn’t send alerts directly; instead, it triggers the underlying
+actions (scans, scripts, WAN reports) and the backend/worker side handles
+notifications according to configuration.
 
 ---
 
@@ -490,13 +633,14 @@ These scripts demonstrate how to consume `ctx` for DB access and network operati
 ```text
 /frontend
   ├── src/
-  │     ├── main.ts          # Vue app bootstrap
-  │     ├── App.vue          # Root component with theme toggle
+  │     ├── main.ts            # Vue app bootstrap (ECharts registration)
+  │     ├── App.vue            # Root component with theme toggle + auth shell
   │     ├── views/
-  │     │     └── Dashboard.vue  # "Single Pane of Glass"
-  │     ├── components/      # Shared UI components (charts, tables, etc.)
+  │     │     ├── Landing.vue  # Theme-aware landing + login shell
+  │     │     ├── Login.vue    # Login form (used inside Landing)
+  │     │     └── Dashboard.vue# "Single Pane of Glass" (Pulse, Eye, Brain, Vault)
   │     └── assets/
-  │           └── styles.css # Tailwind base + theme variables (optional)
+  │           └── styles.css   # Tailwind base + theme variables + flourishes
   ├── index.html
   ├── package.json
   └── tailwind.config.cjs
@@ -509,36 +653,49 @@ The theme system is based on:
 - A **CSS class on `<body>`**:
   - `theme-cyberdeck`
   - `theme-sysadmin`
-- **CSS variables** for colors and typography.
+- **CSS variables** for colors, typography, and accent styling.
 
-Example concepts (defined in `App.vue` or a global stylesheet):
+Highlights (see `frontend/src/assets/styles.css`):
 
 ```css
 body.theme-cyberdeck {
-  --np-bg: #0d0d0d;         /* Deep Void Black */
-  --np-accent-cyan: #00f3ff;  /* Neon Cyan */
-  --np-accent-purple: #bd00ff;/* Electric Purple */
-  --np-matrix-green: #00ff41; /* Matrix Green */
+  --np-bg: #0d0d0d;             /* Deep Void Black */
+  --np-surface: #151515;
+  --np-border: rgba(0, 243, 255, 0.35);
+  --np-accent-cyan: #00f3ff;    /* Neon Cyan */
+  --np-accent-purple: #bd00ff;  /* Electric Purple */
+  --np-matrix-green: #00ff41;   /* Matrix Green */
   --np-text: #e0f7ff;
-  --np-font-family: "JetBrains Mono", "Fira Code", monospace;
+  --np-muted-text: #7dd3fc;
+  --np-font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular,
+    Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 body.theme-sysadmin {
-  --np-bg: #f5f7fa;           /* Light Gray / White */
-  --np-accent-primary: #1f3a93; /* Navy Blue */
+  --np-bg: #f5f7fa;
+  --np-surface: #ffffff;
+  --np-border: rgba(15, 23, 42, 0.12);
+  --np-accent-primary: #1f3a93;
   --np-accent-secondary: #4b7bec;
-  --np-text: #1f2933;
-  --np-font-family: "Inter", "Roboto", system-ui, -apple-system, sans-serif;
+  --np-text: #111827;
+  --np-muted-text: #6b7280;
+  --np-font-family: "Inter", "Roboto", system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 ```
 
+On top of this, CyberDeck adds glitch/scanline effects and glowing panels,
+while SysAdmin Pro overrides neon backgrounds and borders to produce a clean,
+enterprise‑style console using the same markup.
+
 Vue logic:
 
-- A toggle switch calls `setTheme("cyberdeck" | "sysadmin")`.
-- `setTheme`:
-  - Updates a `ref` (reactive variable) inside `App.vue`.
-  - Adjusts the `<body>` class accordingly.
-  - Persists choice in `localStorage` for subsequent visits.
+- `App.vue` holds a `theme` ref (`"cyberdeck"` or `"sysadmin"`).
+- A toggle switch in the header calls `toggleTheme()`.
+- `toggleTheme`:
+  - Updates the `theme` ref.
+  - Applies the corresponding `<body>` class.
+  - Persists the choice in `localStorage` under `np-theme`.
 
 ---
 
@@ -733,11 +890,16 @@ async def run(ctx):
 
 ### 9.1 Prerequisites
 
-- Docker and Docker Compose.
-- Optional: Python 3.11+ on host (for direct FastAPI development).
-- Node.js 18+ (optional, if building frontend outside Docker).
+You can run NetPulse either via Docker Compose or directly on your host.
 
-### 9.2 One‑Command Start
+- Docker and Docker Compose (recommended for full‑stack dev).
+- Optional for non‑Docker dev:
+  - Python 3.11+
+  - Node.js 18+ and npm
+  - PostgreSQL 14+ with TimescaleDB extension
+  - Redis
+
+### 9.2 One‑Command Start with Docker
 
 From the project root:
 
@@ -754,12 +916,60 @@ This will:
   - Celery worker (`worker`).
   - Celery beat (`beat`).
   - Frontend Nginx+Vue (`frontend`).
-- Migrate/apply initial schema via SQLAlchemy (either automatically on startup or via migrations once added).
+- Apply the initial schema on startup via SQLAlchemy (for simple deployments).
 
-### 9.3 Access Points
+Access points:
 
 - API: `http://localhost:8000` (FastAPI, with `/docs` for Swagger UI).
 - Frontend: `http://localhost:8080` (or as configured in `docker-compose.yml`).
+
+### 9.3 Local Backend + Frontend without Docker
+
+For day‑to‑day development you can run services natively using the helper scripts
+under `/scripts`:
+
+1. Ensure you have PostgreSQL and Redis running and configured via
+   environment variables or `.env` (see `app/core/config.py` for defaults).
+
+2. Create and activate a virtualenv, then install backend deps (or install
+   via `pip install -r requirements.txt` if present):
+
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # Windows: .venv\Scripts\activate
+   ```
+
+3. Mark helper scripts as executable once:
+
+   ```bash
+   chmod +x scripts/dev_backend.sh scripts/dev_worker.sh scripts/dev_beat.sh scripts/dev_frontend.sh
+   ```
+
+4. In three terminals, from the repo root, run:
+
+   ```bash
+   ./scripts/dev_backend.sh    # FastAPI on http://0.0.0.0:8000
+   ./scripts/dev_worker.sh     # Celery worker
+   ./scripts/dev_beat.sh       # Celery beat (scheduled tasks)
+   ```
+
+5. In a fourth terminal, run the frontend dev server:
+
+   ```bash
+   ./scripts/dev_frontend.sh   # Vue dev server on http://localhost:5173
+   ```
+
+   Configure `CORS_ALLOW_ORIGINS` to include `http://localhost:5173` when
+   using this mode.
+
+Initial user bootstrap is the same as in the README:
+
+- Create the first user via `POST /api/auth/users`.
+- Log in via the frontend.
+- Switch themes and explore Pulse/Eye/Brain/Vault from there.
+
+For production‑like deployments, prefer the Docker Compose stack and override
+settings via environment variables.
 
 ---
 
