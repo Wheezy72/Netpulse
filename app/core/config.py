@@ -63,6 +63,18 @@ class Settings(BaseSettings):
     whatsapp_api_token: str | None = None
     whatsapp_recipient: str | None = None
 
+    # Alert routing per event type:
+    #  - "email"     -> email only
+    #  - "whatsapp"  -> WhatsApp/webhook only
+    #  - "both"      -> both channels (if enabled)
+    #  - "none"      -> no alerts for that event
+    alert_vuln_channel: str = "both"
+    alert_scan_channel: str = "both"
+
+    # Template for WhatsApp / webhook messages. Uses Python str.format with:
+    #  {subject}, {body}
+    whatsapp_message_template: str = "{subject}\n\n{body}"
+
     # CORS configuration: which origins are allowed to talk to the API.
     # For development this usually includes the local frontend; in production
     # override this via environment.

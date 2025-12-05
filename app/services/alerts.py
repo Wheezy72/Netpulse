@@ -126,16 +126,36 @@ async def send_whatsapp_alert(message: str) -> None:
     await asyncio.to_thread(_send_whatsapp_sync, message)
 
 
-async def send_system_alert(subject: str, body: str) -> None:
+async def send_system_alert(subject: str, body: str, channel: str | None = None) -> None:
     """
-    Send a generic system alert via all configured channels.
+    Send a generic system alert via configured channels.
 
-    Used for events such as scan completion or report generation.
+    `channel` can be one of:
+      - "email"
+      - "whatsapp"
+      - "both"
+      - "none"
+    If None, the caller is expected to provide event-specific routing (e.g.
+    settings.alert_scan_channel or settings.alert_vuln_channel).
     """
-    await asyncio.gather(
-        send_email_alert(subject, body),
-        send_whatsapp_alert(subject + "\n\n" + body),
-    )
+    if channel is None:
+        channel = "both"
+    channel = channel.lower()
+
+    tasks = []
+
+    if channel in {"email", "both"}:
+      tasks.append(send_email_alert(subject, body))
+
+    if channel in {"whatsapp", "both"}:
+        formatted = settings.whatsapp_message_template.format(
+            subject=subject,
+            body=body,
+        )
+        tasks.append(send_whatsapp_alert(formatted))
+
+    if tasks:
+        await asyncio.gather(*tasks)
 
 
 async def process_vulnerability_alerts(db: AsyncSession) -> None:

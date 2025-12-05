@@ -159,11 +159,14 @@ async def nmap_scan(
             f"Target: {target}",
             f"Services detected: {len(services)}",
         ]
-        # Include up to 5 services in the body for quick context.
         for svc in services[:5]:
             lines.append(f"- {svc.protocol}/{svc.port}: {svc.service}")
         subject = f"[NetPulse] Nmap scan completed for {target}"
         body = "\n".join(lines)
-        await send_system_alert(subject, body)
+        await send_system_alert(
+            subject,
+            body,
+            channel=settings.alert_scan_channel,
+        )
 
     return NmapScanResponse(services=services, recommendations=recs)
