@@ -34,6 +34,11 @@ def create_celery_app() -> Celery:
                 "task": "app.tasks.vulnerability_alert_task",
                 "schedule": 300.0,
             },
+            # Scheduled scan reminder once per day
+            "scheduled-scan-reminder-daily": {
+                "task": "app.tasks.scheduled_scan_reminder_task",
+                "schedule": 86400.0,
+            },
         },
     )
 

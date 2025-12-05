@@ -8,6 +8,7 @@ These tasks wrap the core service functions used for:
 - Script execution (Brain).
 - Passive ARP discovery and packet capture (Eye/Vault).
 - Vulnerability alerting (notifications).
+- Scheduled reminders (e.g. scan reminders).
 """
 
 import asyncio
@@ -17,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.celery_app import celery_app
 from app.db.session import async_session_factory
-from app.services.alerts import process_vulnerability_alerts
+from app.services.alerts import process_vulnerability_alerts, send_system_alert
 from app.services.latency_monitor import monitor_latency
 from app.services.packet_capture import capture_to_pcap
 from app.services.recon import passive_arp_discovery
@@ -86,5 +87,27 @@ def vulnerability_alert_task() -> None:
     async def _run() -> None:
         async with async_session_factory() as session:
             await process_vulnerability_alerts(session)
+
+    asyncio.run(_run())
+
+
+@celery_app.task(name="app.tasks.scheduled_scan_reminder_task")
+def scheduled_scan_reminder_task() -> None:
+    """
+    Celery task that sends a reminder about scheduled scans.
+
+    This does not perform a scan itself; it simply nudges operators that
+    it's time to run (or verify) their scheduled scan playbooks.
+    """
+    async def _run() -> None:
+        subject = "[NetPulse] Scheduled scan reminder"
+        body = (
+            "This is your scheduled reminder to review and run your scan playbooks.\n"
+            "Typical actions:\n"
+            "  - Verify recon targets are up to date.\n"
+            "  - Run Nmap profiles against critical segments.\n"
+            "  - Review the dashboard for new vulnerabilities or anomalies."
+        )
+        await send_system_alert(subject, body, event_type="scan")
 
     asyncio.run(_run())

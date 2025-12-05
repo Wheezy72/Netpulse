@@ -7,7 +7,7 @@ Handles:
 - Email alerts via SMTP.
 - WhatsApp (or similar) alerts via a generic HTTP webhook.
 - Periodic scanning of new high/critical vulnerabilities to trigger alerts.
-- Generic system alerts (e.g. scan completion, reports).
+- Generic system alerts (e.g. scan completion, reports, health degradation).
 """
 
 import asyncio
@@ -228,8 +228,11 @@ async def process_vulnerability_alerts(db: AsyncSession) -> None:
         subject = _build_vulnerability_subject(device, vuln)
         body = _build_vulnerability_body(device, vuln)
 
-        await send_email_alert(subject, body)
-        await send_whatsapp_alert(subject + "\n\n" + body)
+        await send_system_alert(
+            subject,
+            body,
+            event_type="vuln",
+        )
 
         vuln.alert_sent = True
 
