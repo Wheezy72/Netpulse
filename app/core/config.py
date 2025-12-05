@@ -70,10 +70,22 @@ class Settings(BaseSettings):
     #  - "none"      -> no alerts for that event
     alert_vuln_channel: str = "both"
     alert_scan_channel: str = "both"
+    alert_report_channel: str = "both"
+    alert_health_channel: str = "both"
+    alert_device_channel: str = "both"
 
     # Template for WhatsApp / webhook messages. Uses Python str.format with:
     #  {subject}, {body}
+    # Event-specific templates fall back to whatsapp_message_template if unset.
     whatsapp_message_template: str = "{subject}\n\n{body}"
+    whatsapp_vuln_template: str = "{subject}\n\n{body}"
+    whatsapp_scan_template: str = "{subject}\n\n{body}"
+    whatsapp_report_template: str = "{subject}\n\n{body}"
+    whatsapp_health_template: str = "{subject}\n\n{body}"
+    whatsapp_device_template: str = "{subject}\n\n{body}"
+
+    # Health alert tuning (Pulse)
+    health_alert_threshold: float = 40.0  # Internet Health below this triggers an alert
 
     # CORS configuration: which origins are allowed to talk to the API.
     # For development this usually includes the local frontend; in production

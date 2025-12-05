@@ -16,10 +16,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable, List, Tuple
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.metric import Metric
+from app.services.alerts import send_system_alert
 
 
 @dataclass
@@ -177,6 +179,16 @@ async def monitor_latency(db: AsyncSession) -> None:
 
     health_score = _internet_health_score(avg_latency_all, jitter_all, packet_loss_all)
 
+    # Check previous Internet Health to detect a degradation event
+    prev_result = await db.execute(
+        select(Metric)
+        .where(Metric.metric_type == "internet_health")
+        .order_by(Metric.timestamp.desc())
+        .limit(1)
+    )
+    prev_metric = prev_result.scalar_one_or_none()
+    prev_value = float(prev_metric.value) if prev_metric is not None else None
+
     db.add(
         Metric(
             device_id=None,
@@ -186,5 +198,42 @@ async def monitor_latency(db: AsyncSession) -> None:
             tags={},
         )
     )
+
+    # If health drops below the configured threshold and was previously above it,
+    # send a one-shot alert describing the current state.
+    if health_score < settings.health_alert_threshold and (
+        prev_value is None or prev_value >= settings.health_alert_threshold
+    ):
+        lines = [
+            f"Internet Health degraded to {health_score:.1f}%",
+            f"Average latency: {avg_latency_all:.1f} ms",
+            f"Average jitter: {jitter_all:.1f} ms",
+            f"Average packet loss: {packet_loss_all:.1f}%",
+            "",
+            "Per-target snapshot:",
+        ]
+        for result in results:
+            if result.latencies_ms:
+                avg_lat = float(statistics.mean(result.latencies_ms))
+                jit = _calculate_jitter(result.latencies_ms)
+            else:
+                avg_lat = 0.0
+                jit = 0.0
+
+            label = result.target
+            if result.target == settings.pulse_gateway_ip:
+                label = f"{result.target} (Gateway)"
+            elif result.target == settings.pulse_isp_ip:
+                label = f"{result.target} (ISP Edge)"
+            elif result.target == settings.pulse_cloudflare_ip:
+                label = f"{result.target} (Cloudflare)"
+
+            lines.append(
+                f"- {label}: {avg_lat:.1f} ms, jitter {jit:.1f} ms, loss {result.packet_loss_pct:.1f}%"
+            )
+
+        subject = f"[NetPulse] Internet Health degraded ({health_score:.1f}%)"
+        body = "\n".join(lines)
+        await send_system_alert(subject, body, event_type="health")
 
     await db.commit()

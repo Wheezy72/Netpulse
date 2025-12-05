@@ -166,7 +166,7 @@ async def nmap_scan(
         await send_system_alert(
             subject,
             body,
-            channel=settings.alert_scan_channel,
+            event_type="scan",
         )
 
     return NmapScanResponse(services=services, recommendations=recs)

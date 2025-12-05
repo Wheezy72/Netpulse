@@ -126,32 +126,71 @@ async def send_whatsapp_alert(message: str) -> None:
     await asyncio.to_thread(_send_whatsapp_sync, message)
 
 
-async def send_system_alert(subject: str, body: str, channel: str | None = None) -> None:
+async def send_system_alert(
+    subject: str,
+    body: str,
+    *,
+    event_type: str | None = None,
+    channel: str | None = None,
+) -> None:
     """
     Send a generic system alert via configured channels.
 
-    `channel` can be one of:
-      - "email"
-      - "whatsapp"
-      - "both"
-      - "none"
-    If None, the caller is expected to provide event-specific routing (e.g.
-    settings.alert_scan_channel or settings.alert_vuln_channel).
+    Parameters
+    ----------
+    subject:
+        Human-readable subject line (used as email subject and in templates).
+    body:
+        Detailed body text.
+    event_type:
+        Logical event type, e.g. "vuln", "scan", "report", "health", "device".
+        Used to select per-event channels and WhatsApp templates.
+    channel:
+        Override channel routing ("email", "whatsapp", "both", "none").
+        If omitted, per-event channel settings in `Settings` are used.
     """
+    event_key = (event_type or "").lower()
+
+    # Determine channel if not explicitly provided.
     if channel is None:
-        channel = "both"
-    channel = channel.lower()
+        if event_key == "vuln":
+            channel = settings.alert_vuln_channel
+        elif event_key == "scan":
+            channel = settings.alert_scan_channel
+        elif event_key == "report":
+            channel = settings.alert_report_channel
+        elif event_key == "health":
+            channel = settings.alert_health_channel
+        elif event_key == "device":
+            channel = settings.alert_device_channel
+        else:
+            channel = "both"
+
+    channel = (channel or "both").lower()
+
+    if channel == "none":
+        return
 
     tasks = []
 
     if channel in {"email", "both"}:
-      tasks.append(send_email_alert(subject, body))
+        tasks.append(send_email_alert(subject, body))
 
     if channel in {"whatsapp", "both"}:
-        formatted = settings.whatsapp_message_template.format(
-            subject=subject,
-            body=body,
-        )
+        # Choose per-event template if available.
+        template = settings.whatsapp_message_template
+        if event_key == "vuln":
+            template = settings.whatsapp_vuln_template or template
+        elif event_key == "scan":
+            template = settings.whatsapp_scan_template or template
+        elif event_key == "report":
+            template = settings.whatsapp_report_template or template
+        elif event_key == "health":
+            template = settings.whatsapp_health_template or template
+        elif event_key == "device":
+            template = settings.whatsapp_device_template or template
+
+        formatted = template.format(subject=subject, body=body)
         tasks.append(send_whatsapp_alert(formatted))
 
     if tasks:

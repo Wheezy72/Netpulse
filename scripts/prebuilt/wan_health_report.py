@@ -13,6 +13,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from app.services.alerts import send_system_alert
+
 
 async def run(ctx: Any) -> dict:
     """
@@ -69,4 +71,13 @@ async def run(ctx: Any) -> dict:
 
     path.write_text(json.dumps(summary, indent=2))
     ctx.logger(f"wan_health_report: wrote report to {path}")
+
+    # Optional: notify via alert channels that a report is ready.
+    subject = "[NetPulse] WAN health report ready"
+    body = (
+        f"Status: {summary.get('status')} | samples: {summary.get('samples', 0)}\n"
+        f"Report file: {path}"
+    )
+    await send_system_alert(subject, body, event_type="report")
+
     return {"status": summary.get("status"), "path": str(path), "samples": summary.get("samples", 0)}
