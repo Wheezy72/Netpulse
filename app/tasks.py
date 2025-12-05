@@ -7,6 +7,7 @@ These tasks wrap the core service functions used for:
 - Latency monitoring (Pulse).
 - Script execution (Brain).
 - Passive ARP discovery and packet capture (Eye/Vault).
+- Vulnerability alerting (notifications).
 """
 
 import asyncio
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.celery_app import celery_app
 from app.db.session import async_session_factory
+from app.services.alerts import process_vulnerability_alerts
 from app.services.latency_monitor import monitor_latency
 from app.services.packet_capture import capture_to_pcap
 from app.services.recon import passive_arp_discovery
@@ -76,3 +78,13 @@ def packet_capture_recent_task(
             return capture_id
 
     return asyncio.run(_run())
+
+
+@celery_app.task(name="app.tasks.vulnerability_alert_task")
+def vulnerability_alert_task() -> None:
+    """Celery task that scans for new high/critical vulnerabilities and sends alerts."""
+    async def _run() -> None:
+        async with async_session_factory() as session:
+            await process_vulnerability_alerts(session)
+
+    asyncio.run(_run())

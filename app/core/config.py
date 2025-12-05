@@ -49,6 +49,20 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
 
+    # Alerting / notifications
+    enable_email_alerts: bool = False
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    alert_email_from: str | None = None
+    alert_email_to: str | None = None
+
+    enable_whatsapp_alerts: bool = False
+    whatsapp_api_url: str | None = None
+    whatsapp_api_token: str | None = None
+    whatsapp_recipient: str | None = None
+
     # CORS configuration: which origins are allowed to talk to the API.
     # For development this usually includes the local frontend; in production
     # override this via environment.

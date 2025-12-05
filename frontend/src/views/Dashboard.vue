@@ -99,6 +99,10 @@ const captureHeaders = ref<PacketHeaderView[]>([]);
 const isRunningAction = ref(false);
 const actionStatus = ref<string | null>(null);
 
+// Brain console log stream
+const brainLogs = ref<string[]>([]);
+let logSocket: WebSocket | null = null;
+
 const hasRecommendations = computed(() => recommendations.value.length > 0);
 const hasPcapReady = computed(
   () => pcapStatus.value === "ready" && pcapCaptureId.value !== null
@@ -461,6 +465,57 @@ async function startRecentPcapCapture(): Promise<void> {
  * Run a prebuilt Smart Script against the currently selected node.
  * This is wired to offensive/defensive templates (e.g., malformed packets).
  */
+function attachLogStream(jobId: number): void {
+  const token = window.localStorage.getItem("np-token");
+  if (!token) {
+    brainLogs.value.push("[log] No auth token available for log stream.");
+    return;
+  }
+
+  if (logSocket) {
+    logSocket.close();
+    logSocket = null;
+  }
+
+  const apiBase =
+    (import.meta as any).env?.VITE_API_BASE_URL || window.location.origin;
+  const wsBase = apiBase.replace(/^http/, "ws");
+  const url = `${wsBase}/api/ws/scripts/${jobId}?token=${encodeURIComponent(
+    token
+  )}`;
+
+  try {
+    const socket = new WebSocket(url);
+    logSocket = socket;
+    brainLogs.value.push(`[log] Attached to job #${jobId}`);
+
+    socket.onmessage = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data as string);
+        if (payload.event === "log") {
+          brainLogs.value.push(payload.message);
+        } else if (payload.event === "complete") {
+          brainLogs.value.push(
+            `[log] Job completed with status: ${payload.status}`
+          );
+        } else if (payload.event === "error") {
+          brainLogs.value.push(`[error] ${payload.message}`);
+        }
+      } catch {
+        brainLogs.value.push("[error] Failed to parse log message.");
+      }
+    };
+
+    socket.onclose = () => {
+      if (logSocket === socket) {
+        logSocket = null;
+      }
+    };
+  } catch {
+    brainLogs.value.push("[error] Could not open log WebSocket.");
+  }
+}
+
 async function runPrebuiltScriptForDevice(
   scriptName: string,
   extraParams: Record<string, unknown> = {}
@@ -485,7 +540,11 @@ async function runPrebuiltScriptForDevice(
       "/api/scripts/prebuilt/run",
       payload
     );
-    actionStatus.value = `Script queued (job #${data.job_id}).`;
+    const jobId = data.job_id;
+    actionStatus.value = `Script queued (job #${jobId}).`;
+
+    // Attach log stream to Brain console
+    attachLogStream(jobId);
   } catch {
     actionStatus.value = "Failed to queue script for this device.";
   } finally {
@@ -518,6 +577,10 @@ onBeforeUnmount(() => {
   }
   if (topologyInterval !== undefined) {
     clearInterval(topologyInterval);
+  }
+  if (logSocket) {
+    logSocket.close();
+    logSocket = null;
   }
   if (cy) {
     cy.destroy();
@@ -838,13 +901,20 @@ onBeforeUnmount(() => {
       <div class="grid gap-4 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
         <div
           id="brain-terminal"
-          class="relative h-56 rounded-md border border-cyan-400/30 bg-black/90 np-scanlines"
+          class="relative h-56 rounded-md border border-cyan-400/30 bg-black/90 np-scanlines overflow-auto"
         >
           <div
+            v-if="brainLogs.length === 0"
             class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
           >
             XTerm.js terminal placeholder (script output, interactive shell)
           </div>
+          <pre
+            v-else
+            class="h-full w-full whitespace-pre-wrap break-words bg-transparent p-2 text-xs font-mono text-cyan-100"
+          >
+{{ brainLogs.join('\n') }}
+          </pre>
         </div>
 
         <div class="flex flex-col gap-3 text-xs">

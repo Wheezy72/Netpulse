@@ -29,6 +29,11 @@ def create_celery_app() -> Celery:
                 "task": "app.tasks.passive_arp_discovery_task",
                 "schedule": 60.0,
             },
+            # Alerts: scan for new high/critical vulnerabilities every 5 minutes
+            "vulnerability-alerts-every-5m": {
+                "task": "app.tasks.vulnerability_alert_task",
+                "schedule": 300.0,
+            },
         },
     )
 
