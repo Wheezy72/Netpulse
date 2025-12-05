@@ -948,6 +948,30 @@ onBeforeUnmount(() => {
               </span>
             </li>
             <li class="flex items-center justify-between">
+              <span class="font-mono text-cyan-200">new_device_report.py</span>
+              <span class="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-300">
+                Prebuilt · New Device Report
+              </span>
+            </li>
+            <li class="flex items-center justify-between">
+              <span class="font-mono text-cyan-200">config_drift_report.py</span>
+              <span class="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-300">
+                Prebuilt · Config Drift
+              </span>
+            </li>
+            <li class="flex items-center justify-between">
+              <span class="font-mono text-cyan-200">nmap_web_recon.py</span>
+              <span class="rounded bg-sky-500/20 px-2 py-0.5 text-sky-300">
+                Prebuilt · Web Recon Profile
+              </span>
+            </li>
+            <li class="flex items-center justify-between">
+              <span class="font-mono text-cyan-200">nmap_smb_audit.py</span>
+              <span class="rounded bg-sky-500/20 px-2 py-0.5 text-sky-300">
+                Prebuilt · SMB Audit Profile
+              </span>
+            </li>
+            <li class="flex items-center justify-between">
               <span class="font-mono text-cyan-200">kill_switch.py</span>
               <span class="rounded bg-rose-500/20 px-2 py-0.5 text-rose-300">
                 Prebuilt · Connection Reset

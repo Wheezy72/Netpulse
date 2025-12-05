@@ -41,30 +41,59 @@ class NmapScanResponse(BaseModel):
 
 
 def build_recommendations(services: List[ServicePort]) -> List[NmapRecommendation]:
-    """Heuristic mapping from detected services to Nmap scripts."""
+    """
+    Heuristic mapping from detected services to Nmap NSE scripts.
+
+    Rather than dumping a flat list, we group scripts by what you're trying
+    to achieve (enumeration, authentication checks, vulnerability probing).
+    """
     recommendations: list[NmapRecommendation] = []
 
     normalized = {s.service.lower() for s in services}
 
+    # Web services (HTTP/HTTPS)
     if "http" in normalized or "https" in normalized:
+        # General web enumeration
         recommendations.append(
             NmapRecommendation(
-                reason="HTTP/HTTPS service detected",
+                reason="Web app recon and enumeration",
                 scripts=[
                     "http-title",
                     "http-enum",
                     "http-methods",
+                    "http-headers",
                     "http-robots.txt",
+                ],
+            )
+        )
+        # Common web vulnerabilities / misconfigurations
+        recommendations.append(
+            NmapRecommendation(
+                reason="Check web application for common vulnerabilities",
+                scripts=[
                     "http-vuln-cve2017-5638",
                     "http-shellshock",
+                    "http-sql-injection",
+                    "http-vuln-cve2006-3392",
+                ],
+            )
+        )
+        # Auth and brute-force style checks (lab use only)
+        recommendations.append(
+            NmapRecommendation(
+                reason="Web auth and brute-force oriented checks (lab only)",
+                scripts=[
+                    "http-auth",
+                    "http-brute",
                 ],
             )
         )
 
+    # SSH
     if "ssh" in normalized:
         recommendations.append(
             NmapRecommendation(
-                reason="SSH service detected",
+                reason="SSH fingerprinting and crypto hygiene",
                 scripts=[
                     "ssh2-enum-algos",
                     "ssh-hostkey",
@@ -72,40 +101,86 @@ def build_recommendations(services: List[ServicePort]) -> List[NmapRecommendatio
                 ],
             )
         )
-
-    if "ssl" in normalized or "tls" in normalized:
         recommendations.append(
             NmapRecommendation(
-                reason="TLS/SSL detected",
+                reason="SSH brute-force/auth stress (lab use only)",
                 scripts=[
-                    "ssl-cert",
-                    "ssl-enum-ciphers",
-                    "ssl-heartbleed",
-                    "ssl-known-key",
+                    "ssh-brute",
                 ],
             )
         )
 
+    # TLS/SSL
+    if "ssl" in normalized or "tls" in normalized:
+        recommendations.append(
+            NmapRecommendation(
+                reason="TLS/SSL certificate and cipher review",
+                scripts=[
+                    "ssl-cert",
+                    "ssl-enum-ciphers",
+                    "ssl-known-key",
+                ],
+            )
+        )
+        recommendations.append(
+            NmapRecommendation(
+                reason="Check for legacy TLS/SSL vulnerabilities",
+                scripts=[
+                    "ssl-heartbleed",
+                    "ssl-poodle",
+                    "sslv2-drown",
+                ],
+            )
+        )
+
+    # FTP
     if "ftp" in normalized:
         recommendations.append(
             NmapRecommendation(
-                reason="FTP service detected",
+                reason="FTP configuration and anonymous access",
                 scripts=[
                     "ftp-anon",
                     "ftp-bounce",
                 ],
             )
         )
+        recommendations.append(
+            NmapRecommendation(
+                reason="FTP auth and brute-force (lab use only)",
+                scripts=[
+                    "ftp-brute",
+                ],
+            )
+        )
 
+    # SMB / Windows file sharing
     if "smb" in normalized or "microsoft-ds" in normalized:
         recommendations.append(
             NmapRecommendation(
-                reason="SMB/Windows file sharing detected",
+                reason="SMB share and user enumeration",
                 scripts=[
                     "smb-enum-shares",
                     "smb-enum-users",
+                    "smb-os-discovery",
+                ],
+            )
+        )
+        recommendations.append(
+            NmapRecommendation(
+                reason="SMB vulnerability checks (EternalBlue and others)",
+                scripts=[
                     "smb-vuln-ms17-010",
                     "smb-vuln-ms08-067",
+                    "smb-vuln-ms10-054",
+                ],
+            )
+        )
+        recommendations.append(
+            NmapRecommendation(
+                reason="SMB security posture review",
+                scripts=[
+                    "smb-security-mode",
+                    "smb2-security-mode",
                 ],
             )
         )
