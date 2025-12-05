@@ -58,6 +58,14 @@ type InternetHealthPoint = {
   value: number;
 };
 
+type PulseTargetSummary = {
+  target: string;
+  label: string;
+  latency_ms: number | null;
+  jitter_ms: number | null;
+  packet_loss_pct: number | null;
+};
+
 // Recon / Nmap state
 const selectedTarget = ref("");
 const selectedServices = ref<ReconTargetService[]>([]);
@@ -77,6 +85,7 @@ const pulseLoading = ref(false);
 const pulseError = ref<string | null>(null);
 const internetHealthPoints = ref<InternetHealthPoint[]>([]);
 const pulseChartOption = ref<any>({});
+const pulseTargets = ref<PulseTargetSummary[]>([]);
 
 // Vault / PCAP capture state
 const isCapturingPcap = ref(false);
@@ -180,14 +189,20 @@ async function loadPulse(): Promise<void> {
   pulseLoading.value = true;
 
   try {
-    const { data } = await axios.get<{ points: InternetHealthPoint[] }>(
-      "/api/metrics/internet-health-recent"
-    );
-    internetHealthPoints.value = data.points ?? [];
+    const [healthRes, pulseRes] = await Promise.all([
+      axios.get<{ points: InternetHealthPoint[] }>(
+        "/api/metrics/internet-health-recent"
+      ),
+      axios.get<{ targets: PulseTargetSummary[] }>("/api/metrics/pulse-latest"),
+    ]);
+
+    internetHealthPoints.value = healthRes.data.points ?? [];
     pulseChartOption.value = buildPulseChartOption(internetHealthPoints.value);
+    pulseTargets.value = pulseRes.data.targets ?? [];
   } catch {
-    pulseError.value = "Failed to load Internet Health metrics.";
+    pulseError.value = "Failed to load Pulse metrics.";
     internetHealthPoints.value = [];
+    pulseTargets.value = [];
   } finally {
     pulseLoading.value = false;
   }
@@ -554,20 +569,29 @@ onBeforeUnmount(() => {
             </p>
           </div>
 
-          <!-- Static breakdown for now; can be wired to per-target metrics later -->
+          <!-- Dynamic per-target Pulse summary -->
           <div class="space-y-2">
-            <div class="flex items-center justify-between">
-              <span>Gateway</span>
-              <span class="text-cyan-200">4 ms</span>
+            <div
+              v-for="target in pulseTargets"
+              :key="target.target"
+              class="flex items-center justify-between"
+            >
+              <span>{{ target.label }}</span>
+              <span class="text-cyan-200">
+                <template v-if="target.latency_ms != null">
+                  {{ target.latency_ms.toFixed(1) }} ms
+                </template>
+                <template v-else>
+                  n/a
+                </template>
+              </span>
             </div>
-            <div class="flex items-center justify-between">
-              <span>ISP Edge</span>
-              <span class="text-cyan-200">18 ms</span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span>Cloudflare</span>
-              <span class="text-cyan-200">22 ms</span>
-            </div>
+            <p
+              v-if="!pulseTargets.length && !pulseLoading"
+              class="text-[0.7rem] text-[var(--np-muted-text)]"
+            >
+              Waiting for Pulse data from latency monitor…
+            </p>
           </div>
         </div>
       </div>
@@ -819,6 +843,18 @@ onBeforeUnmount(() => {
               <span class="font-mono text-cyan-200">backup_switch.py</span>
               <span class="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-300">
                 Prebuilt · Config Backup
+              </span>
+            </li>
+            <li class="flex items-center justify-between">
+              <span class="font-mono text-cyan-200">device_inventory_export.py</span>
+              <span class="rounded bg-sky-500/20 px-2 py-0.5 text-sky-300">
+                Prebuilt · Inventory Export
+              </span>
+            </li>
+            <li class="flex items-center justify-between">
+              <span class="font-mono text-cyan-200">wan_health_report.py</span>
+              <span class="rounded bg-sky-500/20 px-2 py-0.5 text-sky-300">
+                Prebuilt · WAN Health Report
               </span>
             </li>
             <li class="flex items-center justify-between">

@@ -13,9 +13,11 @@ This README focuses on how to get it running and what you need in a typical lab 
 
 ## 1. Prerequisites
 
-You can run NetPulse either via Docker Compose (recommended) or directly.
+You can run NetPulse either via Docker Compose or directly on your host. For
+local development without Docker, the helper scripts under `scripts/` are the
+simplest way to start the services.
 
-### 1.1 Docker-based setup (recommended)
+### 1.1 Docker-based setup
 
 - Docker (recent version)
 - Docker Compose (v2+)
@@ -129,10 +131,10 @@ You can add a `.env` file at the repo root and Docker will pick it up if `docker
 
 ## 3. Running backend only (without Docker)
 
-If you prefer to run the backend directly:
+If you prefer to run the backend directly, create a virtual environment and
+install dependencies:
 
 ```bash
-cd app
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\\Scripts\\activate
 
@@ -140,20 +142,37 @@ pip install fastapi "uvicorn[standard]" sqlalchemy[asyncio] asyncpg \
   pydantic celery redis scapy python-nmap "python-jose[cryptography]" "passlib[bcrypt]"
 ```
 
-Then start the API:
+You will need PostgreSQL and Redis running separately and configured via
+environment variables or `.env`.
+
+### 3.1 Helper scripts (recommended for local use)
+
+From the repository root, mark the helper scripts as executable once:
 
 ```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+chmod +x scripts/dev_backend.sh scripts/dev_worker.sh scripts/dev_beat.sh scripts/dev_frontend.sh
 ```
 
-You will need PostgreSQL and Redis running separately and configured via environment variables or `.env`.
-
-The Celery worker/beat can be started with something like:
+Then in one terminal, start the API:
 
 ```bash
-celery -A app.core.celery_app.celery_app worker -l info
-celery -A app.core.celery_app.celery_app beat -l info
+./scripts/dev_backend.sh
 ```
+
+In another terminal, start the Celery worker:
+
+```bash
+./scripts/dev_worker.sh
+```
+
+And the scheduler:
+
+```bash
+./scripts/dev_beat.sh
+```
+
+These commands assume your `DATABASE_URL`/PostgreSQL and Redis are reachable as
+configured in `app/core/config.py` or via environment variables.
 
 ---
 

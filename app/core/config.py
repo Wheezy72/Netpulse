@@ -64,6 +64,8 @@ class Settings(BaseSettings):
         default_factory=lambda: [
             "backup_switch.py",
             "defense_block_ip.py",
+            "device_inventory_export.py",
+            "wan_health_report.py",
             "custom_probe.py",
         ]
     )
