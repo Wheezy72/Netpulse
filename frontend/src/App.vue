@@ -3,9 +3,11 @@ import axios from "axios";
 import { computed, onMounted, ref, watch } from "vue";
 
 import Dashboard from "./views/Dashboard.vue";
+import Landing from "./views/Landing.vue";
 import Login from "./views/Login.vue";
 
 type Theme = "cyberdeck" | "sysadmin";
+type InfoMode = "full" | "compact";
 
 type CurrentUser = {
   id: number;
@@ -19,6 +21,12 @@ type CurrentUser = {
  * This drives the <body> class and therefore which CSS variables are active.
  */
 const theme = ref<Theme>("cyberdeck");
+
+/**
+ * Information density mode.
+ * "full" shows all panels and explanatory detail, "compact" is for quick scans.
+ */
+const infoMode = ref<InfoMode>("full");
 
 /**
  * Authentication state.
@@ -51,6 +59,11 @@ function setAuthToken(token: string | null): void {
   }
 }
 
+function setInfoMode(next: InfoMode): void {
+  infoMode.value = next;
+  localStorage.setItem("np-info-mode", next);
+}
+
 async function loadCurrentUser(): Promise<void> {
   try {
     const { data } = await axios.get<CurrentUser>("/api/auth/me");
@@ -68,6 +81,12 @@ onMounted(() => {
     applyTheme(storedTheme);
   } else {
     applyTheme(theme.value);
+  }
+
+  // Restore info mode
+  const storedMode = localStorage.getItem("np-info-mode") as InfoMode | null;
+  if (storedMode === "full" || storedMode === "compact") {
+    infoMode.value = storedMode;
   }
 
   // Restore auth token if present
@@ -230,7 +249,10 @@ function handleLogout(): void {
     </header>
 
     <main class="flex-1 px-4 py-4 md:px-6 md:py-6">
-      <Login v-if="!isAuthenticated" @login-success="handleLoginSuccess" />
+     <<Landing
+        v-if="!isAuthenticated"
+        :theme="theme"
+s" />
       <Dashboard v-else />
     </main>
   </div>

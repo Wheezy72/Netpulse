@@ -13,6 +13,15 @@ import axios from "axios";
 import cytoscape, { Core as CytoscapeCore } from "cytoscape";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
+interface Props {
+  infoMode: "full" | "compact";
+}
+
+const props = defineProps<Props>();
+const emit = defineEmits<{
+  (e: "update:infoMode", value: "full" | "compact"): void;
+}>();
+
 type ReconTargetService = {
   port: number;
   protocol: string;
@@ -552,6 +561,66 @@ async function runPrebuiltScriptForDevice(
   }
 }
 
+/**
+ * Run a prebuilt Smart Script without binding it to a specific device.
+ * Results and logs are streamed into the Brain console.
+ */
+async function runPrebuiltScript(
+  scriptName: string,
+  params: Record<string, unknown> = {}
+): Promise<void> {
+  isRunningAction.value = true;
+  actionStatus.value = null;
+
+  try {
+    const payload = {
+      script_name: scriptName,
+      params,
+    };
+    const { data } = await axios.post<{ job_id: number }>(
+      "/api/scripts/prebuilt/run",
+      payload
+    );
+    const jobId = data.job_id;
+    actionStatus.value = `Script queued (job #${jobId}).`;
+    attachLogStream(jobId);
+  } catch {
+    actionStatus.value = "Failed to queue script.";
+  } finally {
+    isRunningAction.value = false;
+  }
+}
+
+async function runWanHealthReport(): Promise<void> {
+  await runPrebuiltScript("wan_health_report.py");
+}
+
+async function runNewDeviceReport(): Promise<void> {
+  await runPrebuiltScript("new_device_report.py");
+}
+
+async function runConfigDriftReport(): Promise<void> {
+  await runPrebuiltScript("config_drift_report.py");
+}
+
+async function runNmapWebRecon(): Promise<void> {
+  const target = selectedTarget.value.trim();
+  if (!target) {
+    actionStatus.value = "Set a target in Recon Playbook first.";
+    return;
+  }
+  await runPrebuiltScript("nmap_web_recon.py", { target });
+}
+
+async function runNmapSmbAudit(): Promise<void> {
+  const target = selectedTarget.value.trim();
+  if (!target) {
+    actionStatus.value = "Set a target in Recon Playbook first.";
+    return;
+  }
+  await runPrebuiltScript("nmap_smb_audit.py", { target });
+}
+
 let pulseInterval: number | undefined;
 let topologyInterval: number | undefined;
 
@@ -614,7 +683,7 @@ onBeforeUnmount(() => {
             class="relative h-48 w-full rounded-md border border-cyan-400/30 bg-black/40"
           >
             <v-chart
-              v-if="!pulseLoading && internetHealthPoints.length"
+              v-if="infoMode === 'full' && !pulseLoading && internetHealthPoints.length"
               :option="pulseChartOption"
               autoresize
               class="h-48 w-full"
@@ -626,10 +695,17 @@ onBeforeUnmount(() => {
               Loading Internet Health…
             </div>
             <div
-              v-else
+              v-else-if="infoMode === 'full'"
               class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
             >
               No Internet Health data yet.
+            </div>
+            <div
+              v-else
+              class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
+            >
+              Compact mode: Internet Health
+              {{ latestInternetHealth.toFixed(0) }}%.
             </div>
           </div>
           <p v-if="pulseError" class="mt-2 text-[0.7rem] text-rose-300">
@@ -881,12 +957,12 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </div>
-      </div>
-    </section>
+    </</div>
+  </</section>
 
     <!-- Brain: Automation & Script Hub -->
-    <section class="np-panel col-span-3 xl:col-span-2 xl:row-span-2 p-4">
-      <header class="np-panel-header">
+   <<section class="np-panel col-span-3 xl:col-span-2 xl:row-span-2 p-4">
+     <<header class="np-panel-header">
         <div class="flex flex-col">
           <span class="np-panel-title">Brain: Automation Hub</span>
           <span class="text-[0.7rem] text-[var(--np-muted-text)]">
@@ -984,6 +1060,102 @@ onBeforeUnmount(() => {
               </span>
             </li>
           </ul>
+
+          <!-- Settings panel for information density -->
+          <div class="rounded-md border border-cyan-400/30 bg-black/50 p-3">
+            <h3 class="text-[0.7rem] uppercase tracking-[0.16em] text-cyan-200">
+              Settings
+            </h3>
+            <p class="mt-1 text-[0.7rem] text-cyan-100/80">
+              Toggle between a detailed console and a compact quick-look mode.
+            </p>
+            <div class="mt-2 flex items-center gap-3 text-[0.7rem]">
+              <button
+                type="button"
+                @click="emit('update:infoMode', 'full')"
+                class="rounded border px-2 py-1"
+                :class="[
+                  infoMode === 'full'
+                    ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-300'
+                    : 'border-cyan-400/40 text-cyan-200 hover:bg-cyan-500/10'
+                ]"
+              >
+                Full detail
+              </button>
+              <button
+                type="button"
+                @click="emit('update:infoMode', 'compact')"
+                class="rounded border px-2 py-1"
+                :class="[
+                  infoMode === 'compact'
+                    ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-300'
+                    : 'border-cyan-400/40 text-cyan-200 hover:bg-cyan-500/10'
+                ]"
+              >
+                Quick view
+              </button>
+            </div>
+          </div>
+
+          <!-- Quick actions for prebuilt scripts -->
+          <div class="rounded-md border border-cyan-400/30 bg-black/50 p-3 space-y-2">
+            <h3 class="text-[0.7rem] uppercase tracking-[0.16em] text-cyan-200">
+              Script Shortcuts
+            </h3>
+            <p class="text-[0.7rem] text-cyan-100/80">
+              Run common automation playbooks and Nmap profiles. Output appears in the Brain console.
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <button
+                type="button"
+                @click="runWanHealthReport"
+                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                :disabled="isRunningAction"
+              >
+                WAN Health Report
+              </button>
+              <button
+                type="button"
+                @click="runNewDeviceReport"
+                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                :disabled="isRunningAction"
+              >
+                New Device Report
+              </button>
+              <button
+                type="button"
+                @click="runConfigDriftReport"
+                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                :disabled="isRunningAction"
+              >
+                Config Drift Report
+              </button>
+              <button
+                type="button"
+                @click="runNmapWebRecon"
+                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                :disabled="isRunningAction"
+              >
+                Web Recon Profile
+              </button>
+              <button
+                type="button"
+                @click="runNmapSmbAudit"
+                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                :disabled="isRunningAction"
+              >
+                SMB Audit Profile
+              </button>
+            </div>
+            <p v-if="actionStatus" class="text-[0.65rem] text-cyan-100/80">
+              {{ actionStatus }}
+            </p>
+          </div>
         </div>
       </div>
     </section>
@@ -1000,7 +1172,10 @@ onBeforeUnmount(() => {
       </header>
 
       <div class="flex h-full flex-col gap-3 text-xs">
-        <div class="rounded-md border border-cyan-400/30 bg-black/50 p-3">
+        <div
+          v-if="infoMode === 'full'"
+          class="rounded-md border border-cyan-400/30 bg-black/50 p-3"
+        >
           <label class="flex flex-col gap-1 text-[0.7rem]">
             Time Window
             <input
