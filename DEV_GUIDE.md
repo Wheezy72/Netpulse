@@ -1112,6 +1112,255 @@ settings via environment variables.
 
 ---
 
+## 10. Calling the API Directly
+
+NetPulse exposes a JSON API that can be used from tools other than the built-in
+web app. This section shows how to authenticate and call key endpoints using
+`curl`. All responses use a consistent JSON error envelope when something
+goes wrong.
+
+### 10.1 Authentication and Tokens
+
+1. **Create a user (once) – usually via curl or an admin tool**
+
+   ```bash
+   curl -X POST http://localhost:8000/api/auth/users \
+     -H "Content-Type: application/json" \
+     -d '{
+       "email": "admin@example.com",
+       "password": "ChangeMe123",
+       "full_name": "Admin User"
+     }'
+   ```
+
+2. **Obtain a JWT access token**
+
+   ```bash
+   curl -X POST http://localhost:8000/api/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{
+       "email": "admin@example.com",
+       "password": "ChangeMe123"
+     }'
+   ```
+
+   You will receive:
+
+   ```json
+   {
+     "access_token": "eyJhbGciOiJIUzI1...",
+     "token_type": "bearer"
+   }
+   ```
+
+3. **Use the token in subsequent requests**
+
+   All protected endpoints require:
+
+   ```http
+   Authorization: Bearer <access_token>
+   ```
+
+   Example:
+
+   ```bash
+   TOKEN="eyJhbGciOi..."
+   curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/health
+   ```
+
+### 10.2 Error Responses
+
+Errors are returned in a consistent envelope, e.g.:
+
+- Validation error (422):
+
+  ```json
+  {
+    "error": {
+      "code": 422,
+      "message": "Validation error",
+      "details": [
+        {
+          "loc": ["body", "target"],
+          "msg": "field required",
+          "type": "value_error.missing"
+        }
+      ]
+    }
+  }
+  ```
+
+- Auth failure (401):
+
+  ```json
+  {
+    "error": {
+      "code": 401,
+      "message": "Invalid authentication credentials"
+    }
+  }
+  ```
+
+- Generic server error (500):
+
+  ```json
+  {
+    "error": {
+      "code": 500,
+      "message": "Internal server error"
+    }
+  }
+  ```
+
+This makes it easier for external tools to parse and react to failures.
+
+### 10.3 Example: Pulse & Metrics
+
+Get recent Internet Health points:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/metrics/internet-health-recent
+```
+
+Get latest per-target Pulse summary (latency/jitter/loss):
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/metrics/pulse-latest
+```
+
+### 10.4 Example: Recon (Nmap Scan & Recommendations)
+
+Run an on-demand Nmap scan against a target (operator/admin role required):
+
+```bash
+curl -X POST http://localhost:8000/api/recon/scan \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "target": "192.168.1.10"
+  }'
+```
+
+The response includes:
+
+- Detected services (port/protocol/service).
+- Recommended NSE scripts per service type.
+
+Alternatively, if you already know the services, you can call
+`/api/recon/nmap-recommendations` with a list of ports/services and receive
+recommendations only.
+
+### 10.5 Example: Scripts (Brain)
+
+Upload and run an ad-hoc script:
+
+```bash
+curl -X POST http://localhost:8000/api/scripts/upload \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@my_script.py"
+```
+
+Run a prebuilt script (e.g. WAN health PDF report):
+
+```bash
+curl -X POST http://localhost:8000/api/scripts/prebuilt/run \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "script_name": "wan_health_pdf_report.py",
+    "params": {}
+  }'
+```
+
+Check job status and logs:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/scripts/123
+```
+
+For real-time logs, connect a WebSocket client to:
+
+```text
+ws://localhost:8000/api/ws/scripts/123?token=<access_token>
+```
+
+### 10.6 Example: Vault (PCAP Capture)
+
+Start a recent PCAP capture (operator/admin role required):
+
+```bash
+curl -X POST http://localhost:8000/api/vault/pcap/recent \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "duration_seconds": 300
+  }'
+```
+
+Check capture task status:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/vault/pcap/task/<task_id>
+```
+
+Once `ready` and you have a `capture_id`, you can:
+
+- Inspect headers:
+
+  ```bash
+  curl -H "Authorization: Bearer $TOKEN" \
+    http://localhost:8000/api/vault/pcap/<capture_id>
+  ```
+
+- Download the PCAP:
+
+  ```bash
+  curl -H "Authorization: Bearer $TOKEN" \
+    -o capture.pcap \
+    http://localhost:8000/api/vault/pcap/<capture_id>/download
+  ```
+
+### 10.7 Example: Devices & Topology
+
+List devices:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/devices
+```
+
+Get topology:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/devices/topology
+```
+
+Get detailed information for a single device:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/devices/42/detail
+```
+
+### 10.8 Notes for External Consumers
+
+- **Auth & roles**: ensure the calling identity has the right role for the
+  operation (e.g. `operator` for scans/captures).
+- **Input validation**: all payloads are validated by Pydantic models; invalid
+  requests return a 422 with detailed field errors.
+- **Rate & safety**: consider fronting the API with an API gateway or rate
+  limiter if exposing beyond your internal network.
+- **Alerting**: long-running or impactful operations (WAN reports, scans,
+  health changes) produce alerts via the configured channels (email/webhook),
+  which external systems can also subscribe to.
+
+---
+
 ## 10. Extensibility & Future Enhancements
 
 NetPulse Enterprise is designed to be practical to extend:
