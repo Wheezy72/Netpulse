@@ -768,6 +768,13 @@ Vue logic:
 
 This section explains how to write a custom Python script for NetPulse, using the `Brain` module.
 
+You can add additional scripts at any time in two ways:
+
+1. **Uploaded scripts** – ad‑hoc `.py` files sent via the API and stored under
+   `/scripts/uploads`.
+2. **Prebuilt scripts** – versioned scripts stored under `/scripts/prebuilt`
+   and governed by the allowlist in `Settings.allowed_prebuilt.
+
 ### 8.1 Script Contract
 
 Each script must:
@@ -941,7 +948,64 @@ async def run(ctx):
 
 > Note: `ctx.params` is a convenient attribute that the executor populates from `ScriptJob.params`.
 
-### 8.6 Best Practices
+### 8.6 Adding New Scripts
+
+You can extend NetPulse with your own automation in two main ways:
+
+1. **Upload a standalone script**
+
+   - Implement `run(ctx)` in a `.py` file as described above.
+   - Call the upload endpoint:
+
+     ```http
+     POST /api/scripts/upload
+     Content-Type: multipart/form-data
+     file: your_script.py
+     ```
+
+   - The backend will:
+     - Store the script under `/scripts/uploads`.
+     - Create a `ScriptJob` with `status="pending"`.
+     - Enqueue it for execution via Celery.
+
+   - You can monitor status/logs via:
+
+     ```http
+     GET /api/scripts/{job_id}
+     ```
+
+   - This is ideal for one‑off experiments in your lab.
+
+2. **Register a new prebuilt script**
+
+   - Place your script under `scripts/prebuilt/` in the repository.
+   - Ensure it defines a `run(ctx)` function and uses `ctx` for DB/logging.
+   - Add the filename to the allowlist, either by:
+     - Editing `Settings.allowed_prebuilt_scripts` in `app/core/config.py`, or
+     - Overriding via environment, e.g.:
+
+       ```env
+       ALLOWED_PREBUILT_SCRIPTS='["backup_switch.py","your_script.py"]'
+       ```
+
+   - Invoke it through:
+
+     ```http
+     POST /api/scripts/prebuilt/run
+     Content-Type: application/json
+
+     {
+       "script_name": "your_script.py",
+       "params": { "...": "..." }
+     }
+     ```
+
+   - The Brain panel already lists several prebuilt scripts and exposes
+     shortcuts for common profiles (WAN reports, new device report, Nmap
+     profiles). You can follow the same pattern to add UI triggers for your
+     own scripts if needed.
+
+### 8.7 Best Practices
 
 - Keep scripts **idempotent** when possible (safe to re‑run).
 - Avoid blocking calls that last longer than a schedule period unless the script is explicitly long‑running.
