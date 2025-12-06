@@ -596,12 +596,12 @@ async function runWanHealthReport(): Promise<void> {
   await runPrebuiltScript("wan_health_report.py");
 }
 
-async function runNewDeviceReport(): Promise<void> {
-  await runPrebuiltScript("new_device_report.py");
+async function runWanHealthPdfReport(): Promise<void> {
+  await runPrebuiltScript("wan_health_pdf_report.py");
 }
 
-async function runConfigDriftReport(): Promise<void> {
-  await runPrebuiltScript("config_drift_report.py");
+async function runNewDeviceReport(): Promise<void> {
+  await runPrebuiltScript("new_device_report");
 }
 
 async function runNmapWebRecon(): Promise<void> {
@@ -1021,7 +1021,13 @@ onBeforeUnmount(() => {
             <li class="flex items-center justify-between">
               <span class="font-mono text-cyan-200">wan_health_report.py</span>
               <span class="rounded bg-sky-500/20 px-2 py-0.5 text-sky-300">
-                Prebuilt · WAN Health Report
+                Prebuilt · WAN Health Report (JSON)
+              </span>
+            </li>
+            <li class="flex items-center justify-between">
+              <span class="font-mono text-cyan-200">wan_health_pdf_report.py</span>
+              <span class="rounded bg-sky-500/20 px-2 py-0.5 text-sky-300">
+                Prebuilt · WAN PDF Report
               </span>
             </li>
             <li class="flex items-center justify-between">
@@ -1133,6 +1139,15 @@ onBeforeUnmount(() => {
                 :disabled="isRunningAction"
               >
                 Config Drift Report
+              </button>
+              <button
+                type="button"
+                @click="runWanHealthPdfReport"
+                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                :disabled="isRunningAction"
+              >
+                WAN PDF Report
               </button>
               <button
                 type="button"

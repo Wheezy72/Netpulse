@@ -516,7 +516,13 @@ allowlist in `Settings.allowed_prebuilt_scripts` (see §11.4).
    - Returns a structured result and logs the report path; also triggers a
      “report ready” alert via the alerting service.
 
-3. **`new_device_report.py`**
+3. **`wan_health_pdf_report.py`**
+   - Generates a WAN health PDF report under `/data/reports`, suitable for
+     printing or sharing with both technical and non‑technical stakeholders.
+   - Includes a summary of Internet Health, per‑target metrics, a snapshot of
+     high/critical vulnerabilities, and plain‑language recommendations.
+
+4. **`new_device_report.py`**
    - Lists devices seen within a recent time window (default 60 minutes).
    - Intended for spotting new hosts on your LAN and training “new asset”
      detection workflows.
@@ -1066,6 +1072,10 @@ under `/scripts`:
    ```bash
    python -m venv .venv
    source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+   pip install fastapi "uvicorn[standard]" sqlalchemy[asyncio] asyncpg \
+     pydantic celery redis scapy python-nmap fpdf2 \
+     "python-jose[cryptography]" "passlib[bcrypt]"
    ```
 
 3. Mark helper scripts as executable once:

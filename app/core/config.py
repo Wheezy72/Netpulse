@@ -104,6 +104,7 @@ class Settings(BaseSettings):
             "defense_block_ip.py",
             "device_inventory_export.py",
             "wan_health_report.py",
+            "wan_health_pdf_report.py",
             "new_device_report.py",
             "config_drift_report.py",
             "nmap_web_recon.py",

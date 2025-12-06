@@ -28,6 +28,7 @@ RUN pip install --no-cache-dir \
       redis \
       scapy \
       python-nmap \
+      fpdf2 \
       "python-jose[cryptography]" \
       "passlib[bcrypt]"
 
