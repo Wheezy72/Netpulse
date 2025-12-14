@@ -80,7 +80,7 @@ async def _ping_target(target: str, count: int = 3, timeout: int = 2) -> PingRes
 def _calculate_jitter(latencies: Iterable[float]) -> float:
     """Compute jitter as the mean absolute difference between consecutive RTTs."""
     lat_list = list(latencies)
-    if len(lat_list) &lt; 2:
+    if len(lat_list) < 2:
         return 0.0
     diffs = [abs(b - a) for a, b in zip(lat_list, lat_list[1:])]
     return float(statistics.mean(diffs))
@@ -95,13 +95,13 @@ def _internet_health_score(
     score = 100.0
 
     # Latency penalty
-    if avg_latency_ms &gt; 30:
+    if avg_latency_ms > 30:
         score -= (avg_latency_ms - 30) * 0.5
-    if avg_latency_ms &gt; 100:
+    if avg_latency_ms > 100:
         score -= (avg_latency_ms - 100) * 0.5
 
     # Jitter penalty
-    if jitter_ms &gt; 10:
+    if jitter_ms > 10:
         score -= (jitter_ms - 10) * 0.7
 
     # Packet loss penalty (very strong signal)
