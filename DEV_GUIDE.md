@@ -1110,6 +1110,68 @@ Initial user bootstrap is the same as in the README:
 For production‑like deployments, prefer the Docker Compose stack and override
 settings via environment variables.
 
+### 9.4 Linux Helper Scripts (One‑Command Setup/Run)
+
+For Debian/Ubuntu hosts, two convenience scripts are provided to make setup
+and running the stack a single command each.
+
+> These scripts are intended for lab/dev use. They assume `apt-get` and
+> systemd services for PostgreSQL and Redis.
+
+1. **One‑time setup**
+
+   From the repo root:
+
+   ```bash
+   sudo chmod +x scripts/setup_linux.sh scripts/run_stack.sh
+   sudo ./scripts/setup_linux.sh
+   ```
+
+   This will:
+
+   - Install system packages:
+     - `python3`, `python3-venv`, `python3-pip`
+     - `nodejs`, `npm`
+     - `postgresql`, `postgresql-contrib`
+     - `redis-server`
+     - `iputils-ping`, `nmap`, `tcpdump`
+   - Ensure PostgreSQL and Redis are started (via `systemctl` when available).
+   - Create a `netpulse` PostgreSQL user and database (password `netpulse`).
+   - Create a `.env` file pointing to `localhost` for DB and Redis if one does
+     not already exist.
+   - Create a `.venv` virtual environment and install backend Python
+     dependencies (matching the Docker backend image).
+   - Run `npm install` in `frontend/` on first setup.
+
+   After this script, all required tools and dependencies should be in place.
+
+2. **Starting the full stack**
+
+   On subsequent runs you can start all services with a single command:
+
+   ```bash
+   ./scripts/run_stack.sh
+   ```
+
+   This script:
+
+   - Activates `.venv` if present.
+   - Starts:
+     - FastAPI backend (`dev_backend.sh`)
+     - Celery worker (`dev_worker.sh`)
+     - Celery beat (`dev_beat.sh`)
+     - Vue dev frontend (`dev_frontend.sh`)
+   - Runs them in the foreground of your shell.
+   - Stops all child processes cleanly when you press `Ctrl+C`.
+
+   Endpoints will then be available at:
+
+   - Backend API: `http://localhost:8000`
+   - Frontend (dev server): `http://localhost:5173`
+
+   You can still use Docker Compose for production‑like testing; these scripts
+   are purely for simplifying local Linux dev.
+
 ---
 
 ## 10. Calling the API Directly

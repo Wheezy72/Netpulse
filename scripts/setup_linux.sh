@@ -1,131 +1,118 @@
 #!/usr/bin/env bash
 # setup_linux.sh
 #
-# Convenience script to help you get NetPulse running on a Linux machine.
-# This script is intentionally simple and targets Debian/Ubuntu-style systems.
-# It will:
-#   - Check for Docker and Docker Compose.
-#   - Attempt to install them via apt if missing.
-#   - Run `docker compose up --build` (or `docker-compose up --build`) to start
-#     the full stack.
+# One-time setup helper for running NetPulse directly on a Debian/Ubuntu
+# Linux machine without Docker.
 #
-# If you prefer a native (non-Docker) setup, see DEV_GUIDE.md §9.3 for details.
+# This script will:
+#  - Install system packages (Python, Node, PostgreSQL, Redis, Nmap, tcpdump).
+#  - Create a PostgreSQL database/user for NetPulse.
+#  - Create a Python virtual environment and install backend dependencies.
+#  - Install frontend dependencies (npm install).
+#
+# It is intended for lab/dev use. Run it once, then use run_stack.sh to
+# start the services.
 
 set -euo pipefail
+
+if ! command -v apt-get >/dev/null 2>&1; then
+  echo "This setup script currently supports Debian/Ubuntu (apt-get) only."
+  exit 1
+fi
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Please run this script as root (e.g. via sudo)."
+  exit 1
+fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-echo "[setup_linux] NetPulse setup helper (Linux)"
+echo "==> Installing system packages (Python, Node, PostgreSQL, Redis, Nmap, tcpdump)..."
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+  python3 python3-venv python3-pip \
+  nodejs npm \
+  postgresql postgresql-contrib \
+  redis-server \
+  iputils-ping nmap tcpdump
 
-if [[ "$(uname -s)" != "Linux" ]]; then
-  echo "[setup_linux] This script is intended for Linux hosts."
-  exit 1
+echo "==> Ensuring PostgreSQL and Redis services are running..."
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl enable postgresql redis-server || true
+  systemctl start postgresql redis-server || true
 fi
 
-if [[ $EUID -ne 0 ]]; then
-  SUDO="sudo"
+DB_NAME="netpulse"
+DB_USER="netpulse"
+DB_PASS="netpulse"
+
+echo "==> Creating PostgreSQL user/database if they do not exist..."
+sudo -u postgres psql <<EOF || true
+DO
+\$do\$
+BEGIN
+   IF NOT EXISTS (
+      SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_USER}'
+   ) THEN
+      CREATE ROLE ${DB_USER} LOGIN PASSWORD '${DB_PASS}';
+   END IF;
+END
+\$do\$;
+
+CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};
+GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};
+EOF
+
+ENV_FILE="$ROOT_DIR/.env"
+if [ ! -f "$ENV_FILE" ]; then
+  echo "==> Writing default .env for local dev at $ENV_FILE"
+  cat > "$ENV_FILE" <<EOF
+# Local development settings (non-Docker)
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=${DB_NAME}
+POSTGRES_USER=${DB_USER}
+POSTGRES_PASSWORD=${DB_PASS}
+
+REDIS_URL=redis://localhost:6379/0
+
+# CORS for local frontend dev (Vite)
+CORS_ALLOW_ORIGINS='["http://localhost:5173","http://localhost:8080"]'
+EOF
 else
-  SUDO=""
+  echo "==> .env already exists, leaving it unchanged."
 fi
 
-install_docker_debian() {
-  echo "[setup_linux] Installing Docker for Debian/Ubuntu via apt..."
+echo "==> Creating Python virtualenv and installing backend dependencies..."
+if [ ! -d ".venv" ]; then
+  python3 -m venv .venv
+fi
+# shellcheck disable=SC1091
+source .venv/bin/activate
 
-  # Basic packages
-  $SUDO apt-get update
-  $SUDO apt-get install -y ca-certificates curl gnupg lsb-release
+pip install --upgrade pip
+pip install \
+  fastapi \
+  "uvicorn[standard]" \
+  "sqlalchemy[asyncio]" \
+  asyncpg \
+  pydantic \
+  celery \
+  redis \
+  scapy \
+  python-nmap \
+  fpdf2 \
+  "python-jose[cryptography]" \
+  "passlib[bcrypt]"
 
-  # Docker's official GPG key and repository
-  if [[ ! -f /etc/apt/keyrings/docker.gpg ]]; then
-    $SUDO mkdir -p /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/$(. /etc/os-release && echo "$ID")/gpg | \
-      $SUDO gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-  fi
+echo "==> Installing frontend dependencies (npm install)..."
+cd "$ROOT_DIR/frontend"
+if [ ! -d "node_modules" ]; then
+  npm install
+else
+  echo "node_modules already present, skipping npm install."
+fi
 
-  echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") \
-    $(lsb_release -cs) stable" | $SUDO tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-  $SUDO apt-get update
-  $SUDO apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-  echo "[setup_linux] Docker installation complete."
-}
-
-ensure_docker() {
-  if command -v docker >/dev/null 2>&1; then
-    echo "[setup_linux] Docker detected: $(docker --version)"
-    return 0
-  fi
-
-  echo "[setup_linux] Docker not found. Attempting installation..."
-
-  if [[ -r /etc/os-release ]]; then
-    . /etc/os-release
-    case "$ID" in
-      ubuntu|debian)
-        install_docker_debian
-        ;;
-      *)
-        echo "[setup_linux] Unsupported distro for automatic Docker install ($ID)."
-        echo "             Please install Docker manually and re-run this script."
-        exit 1
-        ;;
-    esac
-  else
-    echo "[setup_linux] Cannot detect distribution (no /etc/os-release)."
-    echo "             Please install Docker manually and re-run this script."
-    exit 1
-  fi
-}
-
-ensure_compose() {
-  # Prefer `docker compose` (plugin) if available.
-  if docker compose version >/dev/null 2>&1; then
-    echo "[setup_linux] Using 'docker compose' (plugin)."
-    echo "docker compose"
-    return 0
-  fi
-
-  # Fallback to classic docker-compose binary.
-  if command -v docker-compose >/dev/null 2>&1; then
-    echo "[setup_linux] Using 'docker-compose' binary."
-    echo "docker-compose"
-    return 0
-  fi
-
-  echo "[setup_linux] Docker Compose not found. Attempting to install plugin..."
-
-  if [[ -r /etc/os-release ]]; then
-    . /etc/os-release
-    case "$ID" in
-      ubuntu|debian)
-        $SUDO apt-get update
-        $SUDO apt-get install -y docker-compose-plugin
-        ;;
-      *)
-        echo "[setup_linux] Unsupported distro for automatic docker-compose installation."
-        echo "             Please install Docker Compose manually."
-        ;;
-    esac
-  fi
-
-  if docker compose version >/dev/null 2>&1; then
-    echo "[setup_linux] Using 'docker compose' after installation."
-    echo "docker compose"
-  elif command -v docker-compose >/dev/null 2>&1; then
-    echo "[setup_linux] Using 'docker-compose' after installation."
-    echo "docker-compose"
-  else
-    echo "[setup_linux] Failed to find Docker Compose. Please install it and re-run."
-    exit 1
-  fi
-}
-
-ensure_docker
-
-COMPOSE_CMD="$(ensure_compose)"
-
-echo "[setup_linux] Starting NetPulse stack via: $COMPOSE_CMD up --build"
-$COMPOSE_CMD up --build
+echo "==> Setup complete."
+echo "You can now start the full stack with: scripts/run_stack.sh (from the repo root)."
