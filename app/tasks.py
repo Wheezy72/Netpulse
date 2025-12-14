@@ -14,10 +14,11 @@ These tasks wrap the core service functions used for:
 import asyncio
 
 from celery.utils.log import get_task_logger
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
 
 from app.core.celery_app import celery_app
-from app.db.session import async_session_factory
+from app.core.config import settings
 from app.services.alerts import process_vulnerability_alerts, send_system_alert
 from app.services.latency_monitor import monitor_latency
 from app.services.packet_capture import capture_to_pcap
@@ -27,17 +28,28 @@ from app.services.script_executor import execute_script
 logger = get_task_logger(__name__)
 
 
-async def _get_session() -> AsyncSession:
-    async with async_session_factory() as session:
-        yield session
+def _create_session_factory():
+    """Create a fresh async engine and session factory for a Celery task.
+
+    This avoids reusing an async engine across multiple event loops, which can
+    cause 'Future attached to a different loop' errors when tasks are invoked
+    repeatedly via asyncio.run().
+    """
+    engine = create_async_engine(settings.database_url, echo=False, future=True)
+    factory = sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    return engine, factory
 
 
 @celery_app.task(name="app.tasks.monitor_latency_task")
 def monitor_latency_task() -> None:
     """Celery task wrapper for the Pulse module's latency monitoring."""
     async def _run() -> None:
-        async with async_session_factory() as session:
-            await monitor_latency(session)
+        engine, factory = _create_session_factory()
+        try:
+            async with factory() as session:
+                await monitor_latency(session)
+        finally:
+            await engine.dispose()
 
     asyncio.run(_run())
 
@@ -46,18 +58,34 @@ def monitor_latency_task() -> None:
 def execute_script_job_task(job_id: int) -> None:
     """Celery task that executes a ScriptJob by ID."""
     async def _run() -> None:
-        async with async_session_factory() as session:
-            await execute_script(session, job_id)
+        engine, factory = _create_session_factory()
+        try:
+            async with factory() as session:
+                await execute_script(session, job_id)
+        finally:
+            await engine.dispose()
 
     asyncio.run(_run())
 
 
 @celery_app.task(name="app.tasks.passive_arp_discovery_task")
 def passive_arp_discovery_task() -> None:
-    """Celery task that performs short passive ARP discovery on eth0."""
+    """Celery task that performs short passive ARP discovery.
+
+    Uses the OS default interface instead of hard-coding 'eth0' to avoid
+    failures on systems where that interface name does not exist.
+    """
     async def _run() -> None:
-        async with async_session_factory() as session:
-            await passive_arp_discovery(session, iface="eth0", duration=10)
+        engine, factory = _create_session_factory()
+        try:
+            async with factory() as session:
+                try:
+                    await passive_arp_discovery(session, iface=None, duration=10)
+                except ValueError as exc:
+                    # Interface not found or not usable; log and skip rather than crashing.
+                    logger.warning("Passive ARP discovery skipped: %s", exc)
+        finally:
+            await engine.dispose()
 
     asyncio.run(_run())
 
@@ -69,14 +97,18 @@ def packet_capture_recent_task(
 ) -> int:
     """Celery task that performs a time-bounded packet capture and returns a capture ID."""
     async def _run() -> int:
-        async with async_session_factory() as session:
-            capture_id = await capture_to_pcap(
-                session,
-                duration_seconds=duration_seconds,
-                iface="eth0",
-                bpf_filter=bpf_filter,
-            )
-            return capture_id
+        engine, factory = _create_session_factory()
+        try:
+            async with factory() as session:
+                capture_id = await capture_to_pcap(
+                    session,
+                    duration_seconds=duration_seconds,
+                    iface="eth0",
+                    bpf_filter=bpf_filter,
+                )
+                return capture_id
+        finally:
+            await engine.dispose()
 
     return asyncio.run(_run())
 
@@ -85,8 +117,12 @@ def packet_capture_recent_task(
 def vulnerability_alert_task() -> None:
     """Celery task that scans for new high/critical vulnerabilities and sends alerts."""
     async def _run() -> None:
-        async with async_session_factory() as session:
-            await process_vulnerability_alerts(session)
+        engine, factory = _create_session_factory()
+        try:
+            async with factory() as session:
+                await process_vulnerability_alerts(session)
+        finally:
+            await engine.dispose()
 
     asyncio.run(_run())
 
