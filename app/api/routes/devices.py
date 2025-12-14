@@ -90,7 +90,9 @@ class DeviceDetail(BaseModel):
     summary="List discovered devices",
     dependencies=[Depends(require_role(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN))],
 )
-async def list_devices(db:Device))
+async def list_devices(db: AsyncSession = Depends(db_session)) -> List[DeviceOut]:
+    """Return all discovered devices for the Device table."""
+    result = await db.execute(select(Device))
     devices = result.scalars().all()
     return [DeviceOut.from_orm(d) for d in devices]
 

@@ -98,6 +98,7 @@ pip install \
   "sqlalchemy[asyncio]" \
   asyncpg \
   pydantic \
+  pydantic-settings \
   celery \
   redis \
   scapy \

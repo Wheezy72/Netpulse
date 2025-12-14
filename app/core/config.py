@@ -111,11 +111,9 @@ class Settings(BaseSettings):
         ]
     )
 
-    # Pydantic v2 settings config
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-    )
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
 
     @property
     def database_url(self) -> str:
