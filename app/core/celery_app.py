@@ -11,6 +11,7 @@ def create_celery_app() -> Celery:
         "netpulse",
         broker=settings.celery_broker_url,
         backend=settings.celery_result_backend,
+        include=["app.tasks"],
     )
 
     # Ensure tasks are autodiscovered from the app.tasks module

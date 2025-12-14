@@ -1,7 +1,8 @@
 from functools import lru_cache
 from typing import List
 
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 """
 Central application configuration.
@@ -122,9 +123,10 @@ class Settings(BaseSettings):
         ]
     )
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
 
     @property
     def database_url(self) -> str:
