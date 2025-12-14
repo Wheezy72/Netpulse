@@ -6,7 +6,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR/frontend"
 
-if [ ! -d "node_modules" ]; then
+# Install dependencies if missing or if vite is not present in node_modules/.bin.
+if [ ! -d "node_modules" ] || [ ! -f "node_modules/.bin/vite" ]; then
   npm install
 fi
 

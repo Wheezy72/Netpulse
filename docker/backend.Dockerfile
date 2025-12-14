@@ -24,6 +24,7 @@ RUN pip install --no-cache-dir \
       sqlalchemy[asyncio] \
       asyncpg \
       pydantic \
+      pydantic-settings \
       celery \
       redis \
       scapy \
