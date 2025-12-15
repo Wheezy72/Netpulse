@@ -131,6 +131,19 @@ function buildPulseChartOption(points: InternetHealthPoint[]): any {
   );
   const values = points.map((p) => p.value);
 
+  const isSysAdminTheme = document.body.classList.contains("theme-sysadmin");
+
+  const axisLineColor = isSysAdminTheme ? "#9ca3af" : "#22d3ee55";
+  const axisLabelColor = isSysAdminTheme ? "#4b5563" : "#a5f3fc";
+  const splitLineColor = isSysAdminTheme ? "#e5e7eb" : "#164e635";
+  const lineColor = isSysAdminTheme ? "#2563eb" : "#22c55e";
+  const areaTop = isSysAdminTheme
+    ? "rgba(37,99,235,0.35)"
+    : "rgba(34,197,94,0.6)";
+  const areaBottom = isSysAdminTheme
+    ? "rgba(255,255,255,0.0)"
+    : "rgba(15,23,42,0.1)";
+
   return {
     animation: true,
     animationDuration: 1000,
@@ -153,9 +166,9 @@ function buildPulseChartOption(points: InternetHealthPoint[]): any {
       type: "category",
       data: categories,
       boundaryGap: false,
-      axisLine: { lineStyle: { color: "#22d3ee55" } },
+      axisLine: { lineStyle: { color: axisLineColor } },
       axisLabel: {
-        color: "#a5f3fc",
+        color: axisLabelColor,
         fontSize: 10,
       },
     },
@@ -163,10 +176,10 @@ function buildPulseChartOption(points: InternetHealthPoint[]): any {
       type: "value",
       min: 0,
       max: 100,
-      axisLine: { lineStyle: { color: "#22d3ee55" } },
-      splitLine: { lineStyle: { color: "#164e635" } },
+      axisLine: { lineStyle: { color: axisLineColor } },
+      splitLine: { lineStyle: { color: splitLineColor } },
       axisLabel: {
-        color: "#a5f3fc",
+        color: axisLabelColor,
         fontSize: 10,
         formatter: "{value}%",
       },
@@ -179,7 +192,7 @@ function buildPulseChartOption(points: InternetHealthPoint[]): any {
         symbol: "none",
         data: values,
         lineStyle: {
-          color: "#22c55e",
+          color: lineColor,
           width: 2,
         },
         areaStyle: {
@@ -190,8 +203,8 @@ function buildPulseChartOption(points: InternetHealthPoint[]): any {
             x2: 0,
             y2: 1,
             colorStops: [
-              { offset: 0, color: "rgba(34,197,94,0.6)" },
-              { offset: 1, color: "rgba(15,23,42,0.1)" },
+              { offset: 0, color: areaTop },
+              { offset: 1, color: areaBottom },
             ],
           },
         },
