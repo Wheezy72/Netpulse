@@ -706,7 +706,7 @@ onBeforeUnmount(() => {
             class="relative h-48 w-full rounded-md border border-cyan-400/30 bg-black/40"
           >
             <v-chart
-              v-if="infoMode === 'full' && !pulseLoading && internetHealthPoints.length"
+              v-if="!pulseLoading && internetHealthPoints.length"
               :option="pulseChartOption"
               autoresize
               class="h-48 w-full"
@@ -715,20 +715,13 @@ onBeforeUnmount(() => {
               v-else-if="pulseLoading"
               class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
             >
-              Loading Internet Health…
-            </div>
-            <div
-              v-else-if="infoMode === 'full'"
-              class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
-            >
-              No Internet Health data yet.
+              Loading Internet Health...
             </div>
             <div
               v-else
               class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
             >
-              Compact mode: Internet Health
-              {{ latestInternetHealth.toFixed(0) }}%.
+              No Internet Health data yet.
             </div>
           </div>
           <p v-if="pulseError" class="mt-2 text-[0.7rem] text-rose-300">
@@ -791,8 +784,8 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <p
-              v-if="!pulseTargets.length && !pulseLoading"
-              class="text-[0.7rem] text-[var(--np-muted-text)]"
+            v-if="!pulseTargets.length && !pulseLoading"
+            classlass="text-[0.7rem] text-[var(--np-muted-text)]"
             >
               Waiting for Pulse data from latency monitor…
             </p>
@@ -951,8 +944,8 @@ onBeforeUnmount(() => {
                        text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
                 :disabled="isScanning"
               >
-                <span v-if="!isScanning">Scan with Nmap</span>
-                <span v-else>Scanning…</span>
+                <span v-if="!isScanning">Scan with Nm</</span>
+               <<span v-else>Scanning…</span>
               </button>
               <span v-if="scanError" class="text-rose-300">
                 {{ scanError }}
