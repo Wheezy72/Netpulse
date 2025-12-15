@@ -1,9 +1,19 @@
 import asyncio
+import os
+import sys
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from redis import asyncio as redis_async  # type: ignore[import]
+
+
+
+# Ensure the repo root (where the `app` package lives) is on sys.path
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 
 
 async def check_database() -> None:
@@ -22,6 +32,7 @@ async def check_database() -> None:
         await engine.dispose()
 
 
+
 async def check_redis() -> None:
     from app.core.config import settings
 
@@ -37,9 +48,11 @@ async def check_redis() -> None:
         await client.close()
 
 
+
 async def main() -> None:
     await check_database()
     await check_redis()
+
 
 
 if __name__ == "__main__":
