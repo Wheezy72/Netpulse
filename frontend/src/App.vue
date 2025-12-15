@@ -10,12 +10,13 @@ import Settings from "./views/Settings.vue";
 type Theme = "cyberdeck" | "sysadmin";
 type InfoMode = "full" | "compact";
 type View = "dashboard" | "settings";
+type Role = "viewer" | "operator" | "admin";
 
 type CurrentUser = {
   id: number;
   email: string;
   full_name: string | null;
-  role: "viewer" | "operator" | "admin";
+  role: Role;
 };
 
 /**
@@ -47,6 +48,10 @@ const isAuthenticated = computed(() => !!accessToken.value);
  * Current user profile for display in the header.
  */
 const currentUser = ref<CurrentUser | null>(null);
+
+const userRole = computed<Role>(() => currentUser.value?.role ?? "viewer");
+const canRunScripts = computed(() => userRole.value === "operator" || userRole.value === "admin");
+const isAdmin = computed(() => userRole.value === "admin");
 
 function applyTheme(next: Theme): void {
   const body = document.body;
@@ -300,12 +305,14 @@ function handleLogout(): void {
       <Dashboard
         v-else-if="currentView === 'dashboard'"
         :info-mode="infoMode"
+        :user-role="userRole"
         @update:infoMode="setInfoMode"
       />
       <Settings
         v-else
         :theme="theme"
         :info-mode="infoMode"
+        :role="userRole"
         @update:infoMode="setInfoMode"
       />
     </main>

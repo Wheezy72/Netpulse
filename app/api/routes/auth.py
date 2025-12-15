@@ -106,10 +106,11 @@ async def create_user(
     """Create a new local user.
 
     Bootstrapping rules:
-      - If there are no users yet, allow creation without authentication.
-      - If at least one user exists, this should be called by an admin only
-        (enforced at the edge, e.g. via an API gateway or by disabling this
-        route in production).
+      - If there are no users yet, allow creation without authentication and
+        force the first account to be ADMIN.
+      - If at least one user exists and allow_open_signup is False, block
+        open signups entirely; additional users must be created by an admin
+        through a controlled path (e.g. internal tooling or SSO provisioning).
     """
     # Check whether any user exists yet
     existing_any = await db.execute(select(User).limit(1))
@@ -122,10 +123,13 @@ async def create_user(
             detail="User with this email already exists",
         )
 
-    # In a fully hardened setup, you would:
-    #   - Remove this endpoint after bootstrap, or
-    #   - Require ADMIN role via a dependency like require_role(UserRole.ADMIN).
-    # We keep it minimal here and rely on deployment-time policy.
+    # If at least one user exists and open signup is disabled, reject.
+    if first_user and not settings.allow_open_signup:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User signup is disabled. Ask an administrator to provision access.",
+        )
+
     user = User(
         email=payload.email,
         full_name=payload.full_name,

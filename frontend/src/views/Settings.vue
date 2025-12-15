@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import axios from "axios";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref }";
 
 type Theme = "cyberdeck" | "sysadmin";
 type InfoMode = "full" | "compact";
+type Role = "viewer" | "operator" | "admin";
 
 interface Props {
   theme: Theme;
   infoMode: InfoMode;
+  role: Role;
 }
 
 interface ScriptSettingsItem {
@@ -25,6 +27,8 @@ const emit = defineEmits<{
 function setInfoMode(mode: InfoMode): void {
   emit("update:infoMode", mode);
 }
+
+const canEditScripts = computed(() => props.role === "admin");
 
 const scripts = ref<ScriptSettingsItem[]>([]);
 const scriptsLoading = ref(false);
@@ -281,34 +285,43 @@ onMounted(() => {
                       <input
                         type="checkbox"
                         v-model="s.allowed"
+                        :disabled="!canEditScripts"
                       />
                     </td>
                     <td class="px-2 py-1 text-center">
                       <input
                         type="checkbox"
                         v-model="s.lab_only"
+                        :disabled="!canEditScripts"
                       />
                     </td>
                   </tr>
                 </tbody>
               </table>
             </div>
-            <div class="mt-2 flex justify-end gap-2">
-              <button
-                type="button"
-                @click="loadScriptSettings"
-                class="rounded border border-cyan-400/40 px-2 py-0.5 text-[0.7rem] text-cyan-200 hover:bg-cyan-500/10"
+            <div class="mt-2 flex justify-between items-center gap-2">
+              <p
+                class="text-[0.65rem] text-[var(--np-muted-text)]"
               >
-                Reload
-              </button>
-              <button
-                type="button"
-                @click="saveScriptSettings"
-                class="rounded border border-emerald-400/60 bg-emerald-500/20 px-2 py-0.5 text-[0.7rem] text-emerald-200 disabled:opacity-50"
-                :disabled="savingScripts"
-              >
-                {{ savingScripts ? "Saving..." : "Save changes" }}
-              </button>
+                {{ canEditScripts ? "Changes apply immediately to new script runs." : "Script policy is managed by admins." }}
+              </p>
+              <div class="flex gap-2">
+                <button
+                  type="button"
+                  @click="loadScriptSettings"
+                  class="rounded border border-cyan-400/40 px-2 py-0.5 text-[0.7rem] text-cyan-200 hover:bg-cyan-500/10"
+                >
+                  Reload
+                </button>
+                <button
+                  type="button"
+                  @click="saveScriptSettings"
+                  class="rounded border border-emerald-400/60 bg-emerald-500/20 px-2 py-0.5 text-[0.7rem] text-emerald-200 disabled:opacity-50"
+                  :disabled="savingScripts || !canEditScripts"
+                >
+                  {{ savingScripts ? "Saving..." : "Save changes" }}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -350,34 +363,41 @@ onMounted(() => {
                       <input
                         type="checkbox"
                         v-model="s.allowed"
+                        :disabled="!canEditScripts"
                       />
                     </td>
                     <td class="px-2 py-1 text-center">
                       <input
                         type="checkbox"
                         v-model="s.lab_only"
+                        :disabled="!canEditScripts"
                       />
                     </td>
                   </tr>
                 </tbody>
               </table>
             </div>
-            <div class="mt-2 flex justify-end gap-2">
-              <button
-                type="button"
-                @click="loadScriptSettings"
-                class="rounded border border-slate-300 px-2 py-0.5 text-[0.7rem] text-slate-700 hover:bg-slate-100"
-              >
-                Reload
-              </button>
-              <button
-                type="button"
-                @click="saveScriptSettings"
-                class="rounded border border-blue-500 bg-blue-50 px-2 py-0.5 text-[0.7rem] text-blue-700 disabled:opacity-50"
-                :disabled="savingScripts"
-              >
-                {{ savingScripts ? "Saving..." : "Save changes" }}
-              </button>
+            <div class="mt-2 flex justify-between items-center gap-2">
+              <p class="text-[0.7rem] text-slate-500">
+                {{ canEditScripts ? "Changes apply immediately to new script runs." : "Script policy is managed by admins." }}
+              </p>
+              <div class="flex gap-2">
+                <button
+                  type="button"
+                  @click="loadScriptSettings"
+                  class="rounded border border-slate-300 px-2 py-0.5 text-[0.7rem] text-slate-700 hover:bg-slate-100"
+                >
+                  Reload
+                </button>
+                <button
+                  type="button"
+                  @click="saveScriptSettings"
+                  class="rounded border border-blue-500 bg-blue-50 px-2 py-0.5 text-[0.7rem] text-blue-700 disabled:opacity-50"
+                  :disabled="savingScripts || !canEditScripts"
+                >
+                  {{ savingScripts ? "Saving..." : "Save changes" }}
+                </button>
+              </div>
             </div>
           </div>
         </div>

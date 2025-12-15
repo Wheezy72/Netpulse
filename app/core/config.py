@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     alert_health_channel: str = "both"
     alert_device_channel: str = "both"
 
+    # User signup policy
+    # When False, only the very first user can be created via /api/auth/users.
+    # Additional accounts must be created by an admin through a controlled path
+    # (e.g. internal tooling or direct DB/management commands).
+    allow_open_signup: bool = True
+
     # Template for WhatsApp / webhook messages. Uses Python str.format with:
     #  {subject}, {body}
     # Event-specific templates fall back to whatsapp_message_template if unset.

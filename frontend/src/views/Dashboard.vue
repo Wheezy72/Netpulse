@@ -15,10 +15,17 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 interface Props {
   infoMode: "full" | "compact";
+  userRole: "viewer" | "operator" | "admin";
 }
 
 const props = defineProps<Props>();
 const infoMode = computed(() => props.infoMode);
+const userRole = computed(() => props.userRole);
+const canRunScripts = computed(
+  () => userRole.value === "operator" || userRole.value === "admin"
+);
+const canRunRecon = canRunScripts;
+const canStartCaptures = canRunScripts;
 const emit = defineEmits<{
   (e: "update:infoMode", value: "full" | "compact"): void;
 }>();
@@ -784,10 +791,10 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <p
-            v-if="!pulseTargets.length && !pulseLoading"
-            classlass="text-[0.7rem] text-[var(--np-muted-text)]"
+              v-if="!pulseTargets.length && !pulseLoading"
+              class="text-[0.7rem] text-[var(--np-muted-text)]"
             >
-              Waiting for Pulse data from latency monitor…
+              Waiting for Pulse data from latency monitor...
             </p>
           </div>
         </div>
@@ -872,35 +879,40 @@ onBeforeUnmount(() => {
             <p class="text-[0.65rem] uppercase tracking-[0.16em] text-cyan-200">
               Quick Actions
             </p>
-            <div class="flex flex-wrap gap-2">
-              <button
-                type="button"
-                @click="runPrebuiltScriptForDevice('malformed_syn_flood.py', { count: 30 })"
-                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
-                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-                :disabled="isRunningAction"
-              >
-                SYN Storm (template)
-              </button>
-              <button
-                type="button"
-                @click="runPrebuiltScriptForDevice('malformed_xmas_scan.py')"
-                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
-                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-                :disabled="isRunningAction"
-              >
-                Xmas Scan (template)
-              </button>
-              <button
-                type="button"
-                @click="runPrebuiltScriptForDevice('malformed_overlap_fragments.py')"
-                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
-                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-                :disabled="isRunningAction"
-              >
-                Overlap Fragments
-              </button>
-            </div>
+            <template v-if="canRunScripts">
+              <div class="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  @click="runPrebuiltScriptForDevice('malformed_syn_flood.py', { count: 30 })"
+                  class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                         text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                  :disabled="isRunningAction"
+                >
+                  SYN Storm (template)
+                </button>
+                <button
+                  type="button"
+                  @click="runPrebuiltScriptForDevice('malformed_xmas_scan.py')"
+                  class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                         text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                  :disabled="isRunningAction"
+                >
+                  Xmas Scan (template)
+                </button>
+                <button
+                  type="button"
+                  @click="runPrebuiltScriptForDevice('malformed_overlap_fragments.py')"
+                  class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                         text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                  :disabled="isRunningAction"
+                >
+                  Overlap Fragments
+                </button>
+              </div>
+            </template>
+            <p v-else class="text-[0.65rem] text-[var(--np-muted-text)]">
+              Script quick actions require operator or admin role.
+            </p>
             <p v-if="actionStatus" class="text-[0.65rem] text-cyan-100/80">
               {{ actionStatus }}
             </p>
@@ -942,13 +954,19 @@ onBeforeUnmount(() => {
                 class="inline-flex items-center justify-center rounded-md border
                        border-cyan-400/60 bg-black/80 px-2.5 py-1 text-[0.7rem] font-medium
                        text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-                :disabled="isScanning"
+                :disabled="isScanning || !canRunRecon"
               >
-                <span v-if="!isScanning">Scan with Nm</</span>
-               <<span v-else>Scanning…</span>
+                <span v-if="!isScanning">Scan with Nmap</span>
+                <span v-else>Scanning...</span>
               </button>
               <span v-if="scanError" class="text-rose-300">
                 {{ scanError }}
+              </span>
+              <span
+                v-if="!scanError && !canRunRecon"
+                class="text-[0.65rem] text-[var(--np-muted-text)]"
+              >
+                Scans require operator or admin role.
               </span>
             </div>
 
@@ -1036,9 +1054,12 @@ onBeforeUnmount(() => {
             <h3 class="text-[0.7rem] uppercase tracking-[0.16em] text-cyan-200">
               Script Hub
             </h3>
-            <p class="mt-1 text-[0.7rem] text-cyan-100/80">
+            <p class="mt-1 text-[0.7rem] text-cyan-100/80" v-if="canRunScripts">
               Drag &amp; drop Python files to run them as Smart Scripts. NetPulse will capture
               logs, results, and surface them here.
+            </p>
+            <p class="mt-1 text-[0.7rem] text-[var(--np-muted-text)]" v-else>
+              Script execution is available to operator and admin roles. You have viewer access.
             </p>
           </div>
 
@@ -1146,10 +1167,13 @@ onBeforeUnmount(() => {
             <h3 class="text-[0.7rem] uppercase tracking-[0.16em] text-cyan-200">
               Script Shortcuts
             </h3>
-            <p class="text-[0.7rem] text-cyan-100/80">
+            <p class="text-[0.7rem] text-cyan-100/80" v-if="canRunScripts">
               Run common automation playbooks and Nmap profiles. Output appears in the Brain console.
             </p>
-            <div class="flex flex-wrap gap-2">
+            <p class="text-[0.7rem] text-[var(--np-muted-text)]" v-else>
+              Script shortcuts are available to operator and admin roles.
+            </p>
+            <div class="flex flex-wrap gap-2" v-if="canRunScripts">
               <button
                 type="button"
                 @click="runWanHealthReport"
@@ -1249,11 +1273,17 @@ onBeforeUnmount(() => {
           class="mt-auto inline-flex items-center justify-center rounded-md border
                  border-cyan-400/40 bg-black/70 px-3 py-2 text-[0.75rem] font-medium
                  text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-          :disabled="isCapturingPcap"
+          :disabled="isCapturingPcap || !canStartCaptures"
         >
           <span v-if="!isCapturingPcap">Export Last 5 Minutes as PCAP</span>
-          <span v-else>Capturing traffic…</span>
+          <span v-else>Capturing traffic...</span>
         </button>
+        <p
+          v-if="!canStartCaptures"
+          class="mt-1 text-[0.65rem] text-[var(--np-muted-text)]"
+        >
+          Packet capture requires operator or admin role.
+        </p>
 
         <div class="mt-2 text-[0.7rem]">
           <p v-if="pcapStatus === 'capturing'" class="text-cyan-100/80">
