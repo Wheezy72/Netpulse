@@ -65,25 +65,13 @@ class Settings(BaseSettings):
     whatsapp_recipient: str | None = None
 
     # Alert routing per event type:
-    #  - "email"     -> email only
-    #  - "whatsapp"  -> WhatsApp/webhook only
-    #  - "both"      -> both channels (if enabled)
-    #  - "none"      -> no alerts for that event
     alert_vuln_channel: str = "both"
     alert_scan_channel: str = "both"
     alert_report_channel: str = "both"
     alert_health_channel: str = "both"
     alert_device_channel: str = "both"
 
-    # User signup policy
-    # When False, only the very first user can be created via /api/auth/users.
-    # Additional accounts must be created by an admin through a controlled path
-    # (e.g. internal tooling or direct DB/management commands).
-    allow_open_signup: bool = True
-
-    # Template for WhatsApp / webhook messages. Uses Python str.format with:
-    #  {subject}, {body}
-    # Event-specific templates fall back to whatsapp_message_template if unset.
+    # WhatsApp templates
     whatsapp_message_template: str = "{subject}\n\n{body}"
     whatsapp_vuln_template: str = "{subject}\n\n{body}"
     whatsapp_scan_template: str = "{subject}\n\n{body}"
@@ -92,19 +80,14 @@ class Settings(BaseSettings):
     whatsapp_device_template: str = "{subject}\n\n{body}"
 
     # Health alert tuning (Pulse)
-    health_alert_threshold: float = 40.0  # Internet Health below this triggers an alert
+    health_alert_threshold: float = 40.0
 
-    # CORS configuration: which origins are allowed to talk to the API.
-    # For development this usually includes the local frontend; in production
-    # override this via environment.
+    # CORS configuration
     cors_allow_origins: List[str] = Field(
         default_factory=lambda: ["http://localhost:8080"]
     )
 
-    # Script governance for business environments
-    # These lists let you explicitly control which prebuilt scripts can run
-    # in different modes. You can override them via env vars such as:
-    #  ALLOWED_PREBUILT_SCRIPTS="backup_switch.py,defense_block_ip.py"
+    # Script governance
     allowed_prebuilt_scripts: List[str] = Field(
         default_factory=lambda: [
             "backup_switch.py",
@@ -119,7 +102,6 @@ class Settings(BaseSettings):
             "custom_probe.py",
         ]
     )
-    # Scripts that are only intended for lab / red-team environments.
     lab_only_prebuilt_scripts: List[str] = Field(
         default_factory=lambda: [
             "malformed_syn_flood.py",
@@ -129,10 +111,9 @@ class Settings(BaseSettings):
         ]
     )
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-    )
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
 
     @property
     def database_url(self) -> str:
@@ -151,7 +132,6 @@ class Settings(BaseSettings):
 
     @property
     def pulse_targets(self) -> List[str]:
-        """Return the list of targets to probe for latency and jitter."""
         return [
             self.pulse_gateway_ip,
             self.pulse_isp_ip,

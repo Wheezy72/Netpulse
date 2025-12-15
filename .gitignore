@@ -25,6 +25,7 @@ yarn-debug.log*
 yarn-error.log*
 dist/
 *.log
+package-lock.json
 
 # Editor / OS
 .DS_Store
@@ -40,3 +41,4 @@ dist/
 
 # Docker
 docker-data/
+celerybeat-schedule.db
