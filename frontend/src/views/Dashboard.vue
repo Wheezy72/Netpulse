@@ -601,11 +601,7 @@ async function runWanHealthPdfReport(): Promise<void> {
 }
 
 async function runNewDeviceReport(): Promise<void> {
-  await runPrebuiltScript("new_device_report.py");
-}
-
-async function runConfigDriftReport(): Promise<void> {
-  await runPrebuiltScript("config_drift_report.py");
+  await runPrebuiltScript("new_device_report");
 }
 
 async function runNmapWebRecon(): Promise<void> {
