@@ -24,7 +24,9 @@ from app.core.config import settings
 from app.db.session import async_session_factory
 from app.models.user import User, UserRole
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Use a password hashing scheme that doesn't rely on the external bcrypt module
+# to avoid compatibility issues with newer bcrypt releases.
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 security_scheme = HTTPBearer(auto_error=True)
 
 
