@@ -132,6 +132,11 @@ function buildPulseChartOption(points: InternetHealthPoint[]): any {
   const values = points.map((p) => p.value);
 
   return {
+    animation: true,
+    animationDuration: 1000,
+    animationEasing: "cubicOut",
+    animationDurationUpdate: 700,
+    animationEasingUpdate: "cubicOut",
     grid: {
       left: 40,
       right: 10,
@@ -601,7 +606,11 @@ async function runWanHealthPdfReport(): Promise<void> {
 }
 
 async function runNewDeviceReport(): Promise<void> {
-  await runPrebuiltScript("new_device_report");
+  await runPrebuiltScript("new_device_report.py");
+}
+
+async function runConfigDriftReport(): Promise<void> {
+  await runPrebuiltScript("config_drift_report.py");
 }
 
 async function runNmapWebRecon(): Promise<void> {
@@ -734,17 +743,39 @@ onBeforeUnmount(() => {
             <div
               v-for="target in pulseTargets"
               :key="target.target"
-              class="flex items-center justify-between"
+              class="rounded-md border border-cyan-400/20 bg-black/40 px-2 py-1.5"
             >
-              <span>{{ target.label }}</span>
-              <span class="text-cyan-200">
-                <template v-if="target.latency_ms != null">
-                  {{ target.latency_ms.toFixed(1) }} ms
-                </template>
-                <template v-else>
-                  n/a
-                </template>
-              </span>
+              <div class="flex items-center justify-between">
+                <span class="font-mono text-cyan-200 text-[0.7rem]">
+                  {{ target.label }}
+                </span>
+                <span class="text-[0.7rem] text-cyan-200">
+                  <template v-if="target.latency_ms != null">
+                    {{ target.latency_ms.toFixed(1) }} ms
+                  </template>
+                  <template v-else>
+                    n/a
+                  </template>
+                </span>
+              </div>
+              <div
+                class="mt-0.5 flex items-center justify-between text-[0.65rem] text-[var(--np-muted-text)]"
+              >
+                <span>
+                  Jitter:
+                  <template v-if="target.jitter_ms != null">
+                    {{ target.jitter_ms.toFixed(1) }} ms
+                  </template>
+                  <template v-else>n/a</template>
+                </span>
+                <span>
+                  Loss:
+                  <template v-if="target.packet_loss_pct != null">
+                    {{ target.packet_loss_pct.toFixed(1) }}%
+                  </template>
+                  <template v-else>n/a</template>
+                </span>
+              </div>
             </div>
             <p
               v-if="!pulseTargets.length && !pulseLoading"
