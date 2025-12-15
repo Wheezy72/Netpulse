@@ -51,7 +51,36 @@ const emit = defineEmits<{
               all on your own Wi‑Fi.
             </p>
           </header>
-...
+
+          <div class="grid gap-4 md:grid-cols-2 text-xs text-cyan-100/90">
+            <div class="rounded border border-cyan-400/40 bg-black/60 p-3">
+              <p class="text-[0.7rem] uppercase tracking-[0.18em] text-cyan-300">
+                Live Pulse
+              </p>
+              <p class="mt-1">
+                Internet Health gauge, latency &amp; jitter per target, and
+                alerts when things get weird. Learn how a real NOC watches the
+                WAN.
+              </p>
+            </div>
+            <div class="rounded border border-cyan-400/40 bg-black/60 p-3">
+              <p class="text-[0.7rem] uppercase tracking-[0.18em] text-cyan-300">
+                Eye &amp; Brain
+              </p>
+              <p class="mt-1">
+                Visual topology plus Smart Scripts that can run Nmap profiles,
+                backups, reports, and lab‑only packet tricks.
+              </p>
+            </div>
+            <div class="rounded border border-cyan-400/40 bg-black/60 p-3">
+              <p class="text-[0.7rem] uppercase tracking-[0.18em] text-cyan-300">
+                Vault
+              </p>
+              <p class="mt-1">
+                Capture and replay PCAP slices, skim packet headers right in
+                the UI, and download traces for deeper analysis.
+              </p>
+            </div>
             <div class="rounded border border-cyan-400/40 bg-black/60 p-3">
               <p class="text-[0.7rem] uppercase tracking-[0.18em] text-cyan-300">
                 Built for learning
@@ -71,24 +100,6 @@ const emit = defineEmits<{
               A compact console for curious operators.
             </span>
           </footer>
-...
-            <p class="mt-3 text-sm text-slate-600">
-              NetPulse Enterprise gives you a practical view of connectivity,
-              devices, and automation – suitable for a small team, lab, or
-              internal SOC. Clear metrics, scripts, and reports you can trust.
-            </p>
-...
-            <p class="mt-1">
-              Role‑based access, script allowlists, and clear boundaries
-              between lab‑only experiments and production‑safe actions.
-            </p>
-...
-        <footer class="flex items-center justify-between text-[0.7rem] text-slate-500">
-          <span>FastAPI · PostgreSQL/TimescaleDB · Redis/Celery · Vue 3</span>
-          <span>
-            A focused console for practical operations work.
-          </span>
-        </footer>
         </div>
       </div>
 
@@ -115,8 +126,7 @@ const emit = defineEmits<{
           <p class="mt-3 text-sm text-slate-600">
             NetPulse Enterprise gives you a practical view of connectivity,
             devices, and automation – suitable for a small team, lab, or
-            internal SOC. No black boxes, just clear metrics, scripts, and
-            reports you can trust.
+            internal SOC. Clear metrics, scripts, and reports you can trust.
           </p>
         </div>
 
@@ -154,8 +164,7 @@ const emit = defineEmits<{
             </p>
             <p class="mt-1">
               Role‑based access, script allowlists, and clear boundaries
-              between lab‑only experiments and production‑safe actions – all
-              built by wheezy72 &amp; Genie.
+              between lab‑only experiments and production‑safe actions.
             </p>
           </div>
         </div>
@@ -163,8 +172,7 @@ const emit = defineEmits<{
         <footer class="flex items-center justify-between text-[0.7rem] text-slate-500">
           <span>FastAPI · PostgreSQL/TimescaleDB · Redis/Celery · Vue 3</span>
           <span>
-            Built by <span class="font-semibold text-slate-700">wheezy72</span>
-            &amp; <span class="font-semibold text-slate-700">Genie</span>
+            A focused console for practical operations work.
           </span>
         </footer>
       </div>
