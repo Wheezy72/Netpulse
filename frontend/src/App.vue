@@ -6,10 +6,11 @@ import Dashboard from "./views/Dashboard.vue";
 import Landing from "./views/Landing.vue";
 import Login from "./views/Login.vue";
 import Settings from "./views/Settings.vue";
+import Playbooks from "./views/Playbooks.vue";
 
 type Theme = "cyberdeck" | "sysadmin";
 type InfoMode = "full" | "compact";
-type View = "dashboard" | "settings";
+type View = "dashboard" | "playbooks" | "settings";
 type Role = "viewer" | "operator" | "admin";
 
 type CurrentUser = {
@@ -243,6 +244,23 @@ function handleLogout(): void {
               ]"
             >
               Dashboard
+            </button>
+            <button
+              v-if="canRunScripts"
+              type="button"
+              @click="currentView = 'playbooks'"
+              class="rounded border px-2 py-0.5"
+              :class="[
+                currentView === 'playbooks'
+                  ? theme === 'cyberdeck'
+                    ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-300'
+                    : 'border-blue-500 bg-blue-50 text-blue-700'
+                  : theme === 'cyberdeck'
+                    ? 'border-cyan-400/40 text-cyan-200 hover:bg-cyan-500/10'
+                    : 'border-slate-300 text-slate-700 hover:bg-slate-100'
+              ]"
+            >
+              Playbooks
             </button>
             <button
               type="button"

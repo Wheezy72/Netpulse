@@ -103,7 +103,7 @@ async def upload_script(
     "/settings",
     response_model=PrebuiltScriptSettingsResponse,
     summary="Get prebuilt script allowlist configuration",
-    dependencies=[Depends(require_role(UserRole.ADMIN))],
+    dependencies=[Depends(require_role(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN))],
 )
 async def get_prebuilt_script_settings() -> PrebuiltScriptSettingsResponse:
     """Return all prebuilt scripts and their allowlist flags.
