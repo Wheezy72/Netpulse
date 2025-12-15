@@ -601,7 +601,11 @@ async function runWanHealthPdfReport(): Promise<void> {
 }
 
 async function runNewDeviceReport(): Promise<void> {
-  await runPrebuiltScript("new_device_report");
+  await runPrebuiltScript("new_device_report.py");
+}
+
+async function runConfigDriftReport(): Promise<void> {
+  await runPrebuiltScript("config_drift_report.py");
 }
 
 async function runNmapWebRecon(): Promise<void> {
@@ -958,12 +962,12 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </div>
-    </</div>
-  </</section>
+      </div>
+    </section>
 
     <!-- Brain: Automation & Script Hub -->
-   <<section class="np-panel col-span-3 xl:col-span-2 xl:row-span-2 p-4">
-     <<header class="np-panel-header">
+    <section class="np-panel col-span-3 xl:col-span-2 xl:row-span-2 p-4">
+      <header class="np-panel-header">
         <div class="flex flex-col">
           <span class="np-panel-title">Brain: Automation Hub</span>
           <span class="text-[0.7rem] text-[var(--np-muted-text)]">
