@@ -55,7 +55,13 @@ body.theme-cyberdeck .np-panel {
   box-shadow: 0 0 18px rgba(0, 243, 255, 0.18);
 }
 
-/* Login card styling per theme */
+/* Login card base + per-theme styling */
+.np-login-panel {
+  position: relative;
+  z-index: 10;
+}
+
+/* CyberDeck login */
 body.theme-cyberdeck .np-login-panel {
   border: 1px solid rgba(34, 211, 238, 0.6);
   background: radial-gradient(circle at 0 0, rgba(0, 243, 255, 0.12), transparent 55%)
@@ -81,6 +87,18 @@ body.theme-cyberdeck .np-login-title {
     np-cursor-blink 0.8s step-end infinite;
 }
 
+/* CyberDeck login inputs */
+body.theme-cyberdeck .np-login-panel input {
+  background-color: rgba(15, 23, 42, 0.96);
+  border-color: rgba(34, 211, 238, 0.6);
+  color: var(--np-text);
+}
+body.theme-cyberdeck .np-login-panel input:focus {
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.8);
+}
+
+/* SysAdmin login */
 body.theme-sysadmin .np-login-panel {
   border: 1px solid var(--np-border);
   background-color: var(--np-surface);
@@ -91,6 +109,17 @@ body.theme-sysadmin .np-login-panel {
 
 body.theme-sysadmin .np-login-title {
   color: var(--np-accent-primary);
+}
+
+/* SysAdmin login inputs */
+body.theme-sysadmin .np-login-panel input {
+  background-color: #f9fafb;
+  border-color: #d1d5db;
+  color: #111827;
+}
+body.theme-sysadmin .np-login-panel input:focus {
+  outline: none;
+  box-shadow: 0 0 0 1px #2563eb;
 }
 
 /* Typewriter keyframes for CyberDeck login title */
