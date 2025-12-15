@@ -248,11 +248,12 @@ function handleLogout(): void {
       </div>
     </header>
 
-    <main class="flex-1 px-4 py-4 md:px-6 md:py-6">
-     <<Landing
+        <main class="flex-1 px-4 py-4 md:px-6 md:py-6">
+      <Landing
         v-if="!isAuthenticated"
         :theme="theme"
-s" />
+        @login-success="handleLoginSuccess"
+      />
       <Dashboard v-else />
     </main>
   </div>
