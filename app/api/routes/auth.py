@@ -44,6 +44,8 @@ class CreateUserRequest(BaseModel):
 class UserMeResponse(BaseModel):
     id: int
     email: EmailStr
+    full_name: str | None = None
+    role: UserRole
 
 
 
