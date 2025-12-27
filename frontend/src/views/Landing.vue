@@ -45,10 +45,10 @@ const emit = defineEmits<{
               See your entire network in a cool ops console.
             </h2>
             <p class="mt-3 text-sm text-cyan-100/80">
-              NetPulse Enterprise is your home‑lab NOC and SOC in one view.
+              NetPulse Enterprise is your home-lab NOC and SOC in one view.
               Monitor Internet Health, map devices, run Smart Scripts, capture
-              PCAPs, and explore your network in a focused, operator‑style console –
-              all on your own Wi‑Fi.
+              PCAPs, and explore your network in a focused, operator-style console -
+              all on your own Wi-Fi.
             </p>
           </header>
 
@@ -69,7 +69,7 @@ const emit = defineEmits<{
               </p>
               <p class="mt-1">
                 Visual topology plus Smart Scripts that can run Nmap profiles,
-                backups, reports, and lab‑only packet tricks.
+                backups, reports, and lab-only packet tricks.
               </p>
             </div>
             <div class="rounded border border-cyan-400/40 bg-black/60 p-3">
@@ -121,7 +121,7 @@ const emit = defineEmits<{
             Operations Console · SysAdmin Mode
           </p>
           <h2 class="mt-3 text-3xl font-semibold text-slate-900">
-            A single, business‑ready pane for network health and automation.
+            A single, business-ready pane for network health and automation.
           </h2>
           <p class="mt-3 text-sm text-slate-600">
             NetPulse Enterprise gives you a practical view of connectivity,
@@ -154,7 +154,7 @@ const emit = defineEmits<{
               Automation &amp; Reporting
             </p>
             <p class="mt-1">
-              Prebuilt WAN health and new‑device reports, plus a controlled
+              Prebuilt WAN health and new-device reports, plus a controlled
               framework for running internal Python automation.
             </p>
           </div>
@@ -163,8 +163,8 @@ const emit = defineEmits<{
               Built for teams
             </p>
             <p class="mt-1">
-              Role‑based access, script allowlists, and clear boundaries
-              between lab‑only experiments and production‑safe actions.
+              Role-based access, script allowlists, and clear boundaries
+              between lab-only experiments and production-safe actions.
             </p>
           </div>
         </div>

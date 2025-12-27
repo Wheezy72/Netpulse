@@ -129,7 +129,7 @@ async function handleSubmit(): Promise<void> {
             {{ mode === "login" ? "Login" : "Register & Sign In" }}
           </span>
           <span v-else>
-            {{ mode === "login" ? "Signing in…" : "Creating account…" }}
+            {{ mode === "login" ? "Signing in..." : "Creating account..." }}
           </span>
         </button>
 

@@ -5,15 +5,19 @@ import { computed, onMounted, ref, watch } from "vue";
 import Dashboard from "./views/Dashboard.vue";
 import Landing from "./views/Landing.vue";
 import Login from "./views/Login.vue";
+import Settings from "./views/Settings.vue";
+import Playbooks from "./views/Playbooks.vue";
 
 type Theme = "cyberdeck" | "sysadmin";
 type InfoMode = "full" | "compact";
+type View = "dashboard" | "playbooks" | "settings";
+type Role = "viewer" | "operator" | "admin";
 
 type CurrentUser = {
   id: number;
   email: string;
   full_name: string | null;
-  role: "viewer" | "operator" | "admin";
+  role: Role;
 };
 
 /**
@@ -29,6 +33,12 @@ const theme = ref<Theme>("cyberdeck");
 const infoMode = ref<InfoMode>("full");
 
 /**
+ * Simple view switcher for authenticated users.
+ * We keep this client-side without vue-router for now.
+ */
+const currentView = ref<View>("dashboard");
+
+/**
  * Authentication state.
  * A non-empty token means the user is considered logged in.
  */
@@ -39,6 +49,10 @@ const isAuthenticated = computed(() => !!accessToken.value);
  * Current user profile for display in the header.
  */
 const currentUser = ref<CurrentUser | null>(null);
+
+const userRole = computed<Role>(() => currentUser.value?.role ?? "viewer");
+const canRunScripts = computed(() => userRole.value === "operator" || userRole.value === "admin");
+const isAdmin = computed(() => userRole.value === "admin");
 
 function applyTheme(next: Theme): void {
   const body = document.body;
@@ -212,8 +226,60 @@ function handleLogout(): void {
           </span>
         </button>
 
-        <!-- User indicator and logout -->
+        <!-- Navigation + user indicator and logout -->
         <div v-if="isAuthenticated" class="flex items-center gap-4">
+          <nav class="flex items-center gap-2 text-[0.7rem]">
+            <button
+              type="button"
+              @click="currentView = 'dashboard'"
+              class="rounded border px-2 py-0.5"
+              :class="[
+                currentView === 'dashboard'
+                  ? theme === 'cyberdeck'
+                    ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-300'
+                    : 'border-blue-500 bg-blue-50 text-blue-700'
+                  : theme === 'cyberdeck'
+                    ? 'border-cyan-400/40 text-cyan-200 hover:bg-cyan-500/10'
+                    : 'border-slate-300 text-slate-700 hover:bg-slate-100'
+              ]"
+            >
+              Dashboard
+            </button>
+            <button
+              v-if="canRunScripts"
+              type="button"
+              @click="currentView = 'playbooks'"
+              class="rounded border px-2 py-0.5"
+              :class="[
+                currentView === 'playbooks'
+                  ? theme === 'cyberdeck'
+                    ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-300'
+                    : 'border-blue-500 bg-blue-50 text-blue-700'
+                  : theme === 'cyberdeck'
+                    ? 'border-cyan-400/40 text-cyan-200 hover:bg-cyan-500/10'
+                    : 'border-slate-300 text-slate-700 hover:bg-slate-100'
+              ]"
+            >
+              Playbooks
+            </button>
+            <button
+              type="button"
+              @click="currentView = 'settings'"
+              class="rounded border px-2 py-0.5"
+              :class="[
+                currentView === 'settings'
+                  ? theme === 'cyberdeck'
+                    ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-300'
+                    : 'border-blue-500 bg-blue-50 text-blue-700'
+                  : theme === 'cyberdeck'
+                    ? 'border-cyan-400/40 text-cyan-200 hover:bg-cyan-500/10'
+                    : 'border-slate-300 text-slate-700 hover:bg-slate-100'
+              ]"
+            >
+              Settings
+            </button>
+          </nav>
+
           <div v-if="currentUser" class="flex flex-col items-end text-xs">
             <span
               class="font-mono"
@@ -254,7 +320,19 @@ function handleLogout(): void {
         :theme="theme"
         @login-success="handleLoginSuccess"
       />
-      <Dashboard v-else />
+      <Dashboard
+        v-else-if="currentView === 'dashboard'"
+        :info-mode="infoMode"
+        :user-role="userRole"
+        @update:infoMode="setInfoMode"
+      />
+      <Settings
+        v-else
+        :theme="theme"
+        :info-mode="infoMode"
+        :role="userRole"
+        @update:infoMode="setInfoMode"
+      />
     </main>
   </div>
 </template>

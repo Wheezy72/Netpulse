@@ -37,6 +37,22 @@ class RunPrebuiltScriptRequest(BaseModel):
     device_id: Optional[int] = None
 
 
+class PrebuiltScriptSettingsItem(BaseModel):
+    """Single prebuilt script and its policy flags."""
+
+    name: str
+    allowed: bool
+    lab_only: bool
+
+
+class PrebuiltScriptSettingsResponse(BaseModel):
+    scripts: list[PrebuiltScriptSettingsItem]
+
+
+class PrebuiltScriptSettingsUpdateRequest(BaseModel):
+    scripts: list[PrebuiltScriptSettingsItem]
+
+
 @router.post(
     "/upload",
     status_code=status.HTTP_201_CREATED,
@@ -81,6 +97,57 @@ async def upload_script(
     background_tasks.add_task(execute_script_job_task.delay, job.id)
 
     return {"job_id": job.id, "script_name": job.script_name}
+
+
+@router.get(
+    "/settings",
+    response_model=PrebuiltScriptSettingsResponse,
+    summary="Get prebuilt script allowlist configuration",
+    dependencies=[Depends(require_role(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN))],
+)
+async def get_prebuilt_script_settings() -> PrebuiltScriptSettingsResponse:
+    """Return all prebuilt scripts and their allowlist flags.
+
+    This inspects the prebuilt scripts directory and marks each file as
+    allowed / lab-only based on the current Settings values.
+    """
+    scripts_dir = Path(settings.scripts_base_dir) / settings.scripts_prebuilt_subdir
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+
+    files = sorted(p.name for p in scripts_dir.glob("*.py"))
+    items: list[PrebuiltScriptSettingsItem] = []
+    for name in files:
+        items.append(
+            PrebuiltScriptSettingsItem(
+                name=name,
+                allowed=name in settings.allowed_prebuilt_scripts,
+                lab_only=name in settings.lab_only_prebuilt_scripts,
+            )
+        )
+
+    return PrebuiltScriptSettingsResponse(scripts=items)
+
+
+@router.put(
+    "/settings",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Update prebuilt script allowlist configuration",
+    dependencies=[Depends(require_role(UserRole.ADMIN))],
+)
+async def update_prebuilt_script_settings(
+    payload: PrebuiltScriptSettingsUpdateRequest,
+) -> None:
+    """Update the in-memory allowlist configuration for prebuilt scripts.
+
+    Changes take effect immediately for new script runs but are not persisted
+    across process restarts; for persistent policy, also update environment
+    variables or configuration.
+    """
+    allowed = [item.name for item in payload.scripts if item.allowed]
+    lab_only = [item.name for item in payload.scripts if item.lab_only]
+
+    settings.allowed_prebuilt_scripts = allowed
+    settings.lab_only_prebuilt_scripts = lab_only
 
 
 @router.post(

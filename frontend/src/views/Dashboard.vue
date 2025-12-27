@@ -15,10 +15,17 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 interface Props {
   infoMode: "full" | "compact";
+  userRole: "viewer" | "operator" | "admin";
 }
 
 const props = defineProps<Props>();
 const infoMode = computed(() => props.infoMode);
+const userRole = computed(() => props.userRole);
+const canRunScripts = computed(
+  () => userRole.value === "operator" || userRole.value === "admin"
+);
+const canRunRecon = canRunScripts;
+const canStartCaptures = canRunScripts;
 const emit = defineEmits<{
   (e: "update:infoMode", value: "full" | "compact"): void;
 }>();
@@ -131,7 +138,25 @@ function buildPulseChartOption(points: InternetHealthPoint[]): any {
   );
   const values = points.map((p) => p.value);
 
+  const isSysAdminTheme = document.body.classList.contains("theme-sysadmin");
+
+  const axisLineColor = isSysAdminTheme ? "#9ca3af" : "#22d3ee55";
+  const axisLabelColor = isSysAdminTheme ? "#4b5563" : "#a5f3fc";
+  const splitLineColor = isSysAdminTheme ? "#e5e7eb" : "#164e635";
+  const lineColor = isSysAdminTheme ? "#2563eb" : "#22c55e";
+  const areaTop = isSysAdminTheme
+    ? "rgba(37,99,235,0.35)"
+    : "rgba(34,197,94,0.6)";
+  const areaBottom = isSysAdminTheme
+    ? "rgba(255,255,255,0.0)"
+    : "rgba(15,23,42,0.1)";
+
   return {
+    animation: true,
+    animationDuration: 1000,
+    animationEasing: "cubicOut",
+    animationDurationUpdate: 700,
+    animationEasingUpdate: "cubicOut",
     grid: {
       left: 40,
       right: 10,
@@ -148,9 +173,9 @@ function buildPulseChartOption(points: InternetHealthPoint[]): any {
       type: "category",
       data: categories,
       boundaryGap: false,
-      axisLine: { lineStyle: { color: "#22d3ee55" } },
+      axisLine: { lineStyle: { color: axisLineColor } },
       axisLabel: {
-        color: "#a5f3fc",
+        color: axisLabelColor,
         fontSize: 10,
       },
     },
@@ -158,10 +183,10 @@ function buildPulseChartOption(points: InternetHealthPoint[]): any {
       type: "value",
       min: 0,
       max: 100,
-      axisLine: { lineStyle: { color: "#22d3ee55" } },
-      splitLine: { lineStyle: { color: "#164e635" } },
+      axisLine: { lineStyle: { color: axisLineColor } },
+      splitLine: { lineStyle: { color: splitLineColor } },
       axisLabel: {
-        color: "#a5f3fc",
+        color: axisLabelColor,
         fontSize: 10,
         formatter: "{value}%",
       },
@@ -174,7 +199,7 @@ function buildPulseChartOption(points: InternetHealthPoint[]): any {
         symbol: "none",
         data: values,
         lineStyle: {
-          color: "#22c55e",
+          color: lineColor,
           width: 2,
         },
         areaStyle: {
@@ -185,8 +210,8 @@ function buildPulseChartOption(points: InternetHealthPoint[]): any {
             x2: 0,
             y2: 1,
             colorStops: [
-              { offset: 0, color: "rgba(34,197,94,0.6)" },
-              { offset: 1, color: "rgba(15,23,42,0.1)" },
+              { offset: 0, color: areaTop },
+              { offset: 1, color: areaBottom },
             ],
           },
         },
@@ -601,7 +626,11 @@ async function runWanHealthPdfReport(): Promise<void> {
 }
 
 async function runNewDeviceReport(): Promise<void> {
-  await runPrebuiltScript("new_device_report");
+  await runPrebuiltScript("new_device_report.py");
+}
+
+async function runConfigDriftReport(): Promise<void> {
+  await runPrebuiltScript("config_drift_report.py");
 }
 
 async function runNmapWebRecon(): Promise<void> {
@@ -684,7 +713,7 @@ onBeforeUnmount(() => {
             class="relative h-48 w-full rounded-md border border-cyan-400/30 bg-black/40"
           >
             <v-chart
-              v-if="infoMode === 'full' && !pulseLoading && internetHealthPoints.length"
+              v-if="!pulseLoading && internetHealthPoints.length"
               :option="pulseChartOption"
               autoresize
               class="h-48 w-full"
@@ -693,20 +722,13 @@ onBeforeUnmount(() => {
               v-else-if="pulseLoading"
               class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
             >
-              Loading Internet Health…
-            </div>
-            <div
-              v-else-if="infoMode === 'full'"
-              class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
-            >
-              No Internet Health data yet.
+              Loading Internet Health...
             </div>
             <div
               v-else
               class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
             >
-              Compact mode: Internet Health
-              {{ latestInternetHealth.toFixed(0) }}%.
+              No Internet Health data yet.
             </div>
           </div>
           <p v-if="pulseError" class="mt-2 text-[0.7rem] text-rose-300">
@@ -734,23 +756,45 @@ onBeforeUnmount(() => {
             <div
               v-for="target in pulseTargets"
               :key="target.target"
-              class="flex items-center justify-between"
+              class="rounded-md border border-cyan-400/20 bg-black/40 px-2 py-1.5"
             >
-              <span>{{ target.label }}</span>
-              <span class="text-cyan-200">
-                <template v-if="target.latency_ms != null">
-                  {{ target.latency_ms.toFixed(1) }} ms
-                </template>
-                <template v-else>
-                  n/a
-                </template>
-              </span>
+              <div class="flex items-center justify-between">
+                <span class="font-mono text-cyan-200 text-[0.7rem]">
+                  {{ target.label }}
+                </span>
+                <span class="text-[0.7rem] text-cyan-200">
+                  <template v-if="target.latency_ms != null">
+                    {{ target.latency_ms.toFixed(1) }} ms
+                  </template>
+                  <template v-else>
+                    n/a
+                  </template>
+                </span>
+              </div>
+              <div
+                class="mt-0.5 flex items-center justify-between text-[0.65rem] text-[var(--np-muted-text)]"
+              >
+                <span>
+                  Jitter:
+                  <template v-if="target.jitter_ms != null">
+                    {{ target.jitter_ms.toFixed(1) }} ms
+                  </template>
+                  <template v-else>n/a</template>
+                </span>
+                <span>
+                  Loss:
+                  <template v-if="target.packet_loss_pct != null">
+                    {{ target.packet_loss_pct.toFixed(1) }}%
+                  </template>
+                  <template v-else>n/a</template>
+                </span>
+              </div>
             </div>
             <p
               v-if="!pulseTargets.length && !pulseLoading"
               class="text-[0.7rem] text-[var(--np-muted-text)]"
             >
-              Waiting for Pulse data from latency monitor…
+              Waiting for Pulse data from latency monitor...
             </p>
           </div>
         </div>
@@ -835,35 +879,40 @@ onBeforeUnmount(() => {
             <p class="text-[0.65rem] uppercase tracking-[0.16em] text-cyan-200">
               Quick Actions
             </p>
-            <div class="flex flex-wrap gap-2">
-              <button
-                type="button"
-                @click="runPrebuiltScriptForDevice('malformed_syn_flood.py', { count: 30 })"
-                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
-                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-                :disabled="isRunningAction"
-              >
-                SYN Storm (template)
-              </button>
-              <button
-                type="button"
-                @click="runPrebuiltScriptForDevice('malformed_xmas_scan.py')"
-                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
-                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-                :disabled="isRunningAction"
-              >
-                Xmas Scan (template)
-              </button>
-              <button
-                type="button"
-                @click="runPrebuiltScriptForDevice('malformed_overlap_fragments.py')"
-                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
-                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-                :disabled="isRunningAction"
-              >
-                Overlap Fragments
-              </button>
-            </div>
+            <template v-if="canRunScripts">
+              <div class="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  @click="runPrebuiltScriptForDevice('malformed_syn_flood.py', { count: 30 })"
+                  class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                         text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                  :disabled="isRunningAction"
+                >
+                  SYN Storm (template)
+                </button>
+                <button
+                  type="button"
+                  @click="runPrebuiltScriptForDevice('malformed_xmas_scan.py')"
+                  class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                         text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                  :disabled="isRunningAction"
+                >
+                  Xmas Scan (template)
+                </button>
+                <button
+                  type="button"
+                  @click="runPrebuiltScriptForDevice('malformed_overlap_fragments.py')"
+                  class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                         text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                  :disabled="isRunningAction"
+                >
+                  Overlap Fragments
+                </button>
+              </div>
+            </template>
+            <p v-else class="text-[0.65rem] text-[var(--np-muted-text)]">
+              Script quick actions require operator or admin role.
+            </p>
             <p v-if="actionStatus" class="text-[0.65rem] text-cyan-100/80">
               {{ actionStatus }}
             </p>
@@ -905,13 +954,19 @@ onBeforeUnmount(() => {
                 class="inline-flex items-center justify-center rounded-md border
                        border-cyan-400/60 bg-black/80 px-2.5 py-1 text-[0.7rem] font-medium
                        text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-                :disabled="isScanning"
+                :disabled="isScanning || !canRunRecon"
               >
                 <span v-if="!isScanning">Scan with Nmap</span>
-                <span v-else>Scanning…</span>
+                <span v-else>Scanning...</span>
               </button>
               <span v-if="scanError" class="text-rose-300">
                 {{ scanError }}
+              </span>
+              <span
+                v-if="!scanError && !canRunRecon"
+                class="text-[0.65rem] text-[var(--np-muted-text)]"
+              >
+                Scans require operator or admin role.
               </span>
             </div>
 
@@ -999,9 +1054,12 @@ onBeforeUnmount(() => {
             <h3 class="text-[0.7rem] uppercase tracking-[0.16em] text-cyan-200">
               Script Hub
             </h3>
-            <p class="mt-1 text-[0.7rem] text-cyan-100/80">
+            <p class="mt-1 text-[0.7rem] text-cyan-100/80" v-if="canRunScripts">
               Drag &amp; drop Python files to run them as Smart Scripts. NetPulse will capture
               logs, results, and surface them here.
+            </p>
+            <p class="mt-1 text-[0.7rem] text-[var(--np-muted-text)]" v-else>
+              Script execution is available to operator and admin roles. You have viewer access.
             </p>
           </div>
 
@@ -1109,10 +1167,13 @@ onBeforeUnmount(() => {
             <h3 class="text-[0.7rem] uppercase tracking-[0.16em] text-cyan-200">
               Script Shortcuts
             </h3>
-            <p class="text-[0.7rem] text-cyan-100/80">
+            <p class="text-[0.7rem] text-cyan-100/80" v-if="canRunScripts">
               Run common automation playbooks and Nmap profiles. Output appears in the Brain console.
             </p>
-            <div class="flex flex-wrap gap-2">
+            <p class="text-[0.7rem] text-[var(--np-muted-text)]" v-else>
+              Script shortcuts are available to operator and admin roles.
+            </p>
+            <div class="flex flex-wrap gap-2" v-if="canRunScripts">
               <button
                 type="button"
                 @click="runWanHealthReport"
@@ -1212,11 +1273,17 @@ onBeforeUnmount(() => {
           class="mt-auto inline-flex items-center justify-center rounded-md border
                  border-cyan-400/40 bg-black/70 px-3 py-2 text-[0.75rem] font-medium
                  text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-          :disabled="isCapturingPcap"
+          :disabled="isCapturingPcap || !canStartCaptures"
         >
           <span v-if="!isCapturingPcap">Export Last 5 Minutes as PCAP</span>
-          <span v-else>Capturing traffic…</span>
+          <span v-else>Capturing traffic...</span>
         </button>
+        <p
+          v-if="!canStartCaptures"
+          class="mt-1 text-[0.65rem] text-[var(--np-muted-text)]"
+        >
+          Packet capture requires operator or admin role.
+        </p>
 
         <div class="mt-2 text-[0.7rem]">
           <p v-if="pcapStatus === 'capturing'" class="text-cyan-100/80">
