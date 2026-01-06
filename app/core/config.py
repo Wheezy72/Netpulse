@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     for typical defaults in a containerized deployment.
     """
 
+    # Pydantic v2 model configuration: load from .env by default
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
     app_name: str = "NetPulse Enterprise"
     environment: str = "development"
 
@@ -112,12 +115,10 @@ class Settings(BaseSettings):
     )
 
     @property
-    def celery_broker_url(self) -> str:
-        return self.redis_url
-
-    @property
-    def celery_result_backend(self) -> str:
-        return self.redis_url
+    def database_url(self) -> str:
+        """Build an async SQLAlchemy database URL from Postgres components."""
+        return (
+            f"postgresql+asyncpg://{self.postgres_user}:{self.postgresrl
 
     @property
     def pulse_targets(self) -> List[str]:
