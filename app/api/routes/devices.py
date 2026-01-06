@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,11 +12,10 @@ from app.api.deps import db_session, require_role
 from app.models.device import Device
 from app.models.metric import Metric
 from app.models.script_job import ScriptJob
-from app.models.user import UserRole
 from app.models.vulnerability import Vulnerability, VulnerabilitySeverity
 
-# Device and topology endpoints. In production deployments these are
-# restricted to authenticated viewers/operators.
+# Device and topology endpoints. In this personal deployment, they are
+# available to any authenticated user.
 router = APIRouter()
 
 
@@ -27,6 +26,7 @@ class DeviceOut(BaseModel):
     mac_address: Optional[str]
     device_type: Optional[str]
     is_gateway: bool
+    zone: Optional[str]
     last_seen: Optional[datetime]
 
     class Config:
@@ -40,6 +40,7 @@ class TopologyNode(BaseModel):
     hostname: Optional[str]
     device_type: Optional[str]
     is_gateway: bool
+    zone: Optional[str]
     vulnerability_severity: Optional[str]
     vulnerability_count: int
     last_seen: Optional[datetime]
@@ -54,6 +55,10 @@ class TopologyEdge(BaseModel):
 class TopologyResponse(BaseModel):
     nodes: List[TopologyNode]
     edges: List[TopologyEdge]
+
+
+class ZoneListResponse(BaseModel):
+    zones: List[str]
 
 
 class VulnerabilitySummary(BaseModel):
@@ -88,24 +93,52 @@ class DeviceDetail(BaseModel):
     "",
     response_model=List[DeviceOut],
     summary="List discovered devices",
-    dependencies=[Depends(require_role(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN))],
+    dependencies=[Depends(require_role())],
 )
-async def list_devices(db: AsyncSession = Depends(db_session)) -> List[DeviceOut]:
-    """Return all discovered devices for the Device table."""
-    result = await db.execute(select(Device))
+async def list_devices(
+    db: AsyncSession = Depends(db_session),
+    zone: Optional[str] = Query(None, description="Filter devices by zone label"),
+) -> List[DeviceOut]:
+    """Return discovered devices, optionally filtered by zone."""
+    stmt = select(Device)
+    if zone:
+        stmt = stmt.where(Device.zone == zone)
+    result = await db.execute(stmt)
     devices = result.scalars().all()
     return [DeviceOut.from_orm(d) for d in devices]
+
+
+@router.get(
+    "/zones",
+    response_model=ZoneListResponse,
+    summary="List distinct device zones",
+    dependencies=[Depends(require_role())],
+)
+async def list_zones(db: AsyncSession = Depends(db_session)) -> ZoneListResponse:
+    """
+    Return a list of distinct non-empty zone labels present in the Device table.
+    """
+    result = await db.execute(select(Device.zone).distinct())
+    zones_raw = [row[0] for row in result.fetchall()]
+    zones = sorted({z for z in zones_raw if z})
+    return ZoneListResponse(zones=zones)
 
 
 @router.get(
     "/topology",
     response_model=TopologyResponse,
     summary="Get a simple device topology for visualization",
-    dependencies=[Depends(require_role(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN))],
+    dependencies=[Depends(require_role())],
 )
-async def get_topology(db: AsyncSession = Depends(db_session)) -> TopologyResponse:
+async def get_topology(
+    db: AsyncSession = Depends(db_session),
+    zone: Optional[str] = Query(None, description="Filter topology by zone label"),
+) -> TopologyResponse:
     """Return a minimal topology view for the Eye panel's graph."""
-    result = await db.execute(select(Device))
+    stmt = select(Device)
+    if zone:
+        stmt = stmt.where(Device.zone == zone)
+    result = await db.execute(stmt)
     devices = result.scalars().all()
 
     if not devices:
@@ -139,6 +172,7 @@ async def get_topology(db: AsyncSession = Depends(db_session)) -> TopologyRespon
                 hostname=d.hostname,
                 device_type=d.device_type,
                 is_gateway=d.is_gateway,
+                zone=d.zone,
                 vulnerability_severity=max_sev.value if max_sev else None,
                 vulnerability_count=vuln_count,
                 last_seen=d.last_seen,

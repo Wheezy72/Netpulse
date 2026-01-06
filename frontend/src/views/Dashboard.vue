@@ -46,6 +46,7 @@ type TopologyNode = {
   hostname?: string | null;
   device_type?: string | null;
   is_gateway: boolean;
+  zone?: string | null;
   vulnerability_severity?: string | null;
   vulnerability_count: number;
   last_seen?: string | null;
@@ -93,6 +94,8 @@ const topologyLoading = ref(false);
 const topologyError = ref<string | null>(null);
 const hoveredNode = ref<TopologyNode | null>(null);
 const selectedNode = ref<TopologyNode | null>(null);
+const zones = ref<string[]>([]);
+const selectedZone = ref<string | null>(null);
 let cy: CytoscapeCore | null = null;
 
 // Pulse / Internet Health chart state
@@ -282,8 +285,13 @@ async function loadTopology(): Promise<void> {
   topologyLoading.value = true;
 
   try {
+    const params: Record<string, string> = {};
+    if (selectedZone.value) {
+      params.zone = selectedZone.value;
+    }
     const { data } = await axios.get<{ nodes: TopologyNode[]; edges: TopologyEdge[] }>(
-      "/api/devices/topology"
+      "/api/devices/topology",
+      { params }
     );
 
     const elements = [
@@ -295,6 +303,7 @@ async function loadTopology(): Promise<void> {
           hostname: n.hostname,
           deviceType: n.device_type,
           isGateway: n.is_gateway,
+          zone: n.zone,
           vulnerabilitySeverity: n.vulnerability_severity,
           vulnerabilityCount: n.vulnerability_count,
           lastSeen: n.last_seen,
@@ -380,6 +389,7 @@ async function loadTopology(): Promise<void> {
           hostname: data.hostname,
           device_type: data.deviceType,
           is_gateway: Boolean(data.isGateway),
+          zone: data.zone,
           vulnerability_severity: data.vulnerabilitySeverity,
           vulnerability_count: Number(data.vulnerabilityCount ?? 0),
           last_seen: data.lastSeen,
@@ -399,6 +409,7 @@ async function loadTopology(): Promise<void> {
           hostname: data.hostname,
           device_type: data.deviceType,
           is_gateway: Boolean(data.isGateway),
+          zone: data.zone,
           vulnerability_severity: data.vulnerabilitySeverity,
           vulnerability_count: Number(data.vulnerabilityCount ?? 0),
           last_seen: data.lastSeen,
@@ -652,12 +663,26 @@ async function runNmapSmbAudit(): Promise<void> {
 let pulseInterval: number | undefined;
 let topologyInterval: number | undefined;
 
+async function loadZones(): Promise<void> {
+  try {
+    const { data } = await axios.get<{ zones: string[] }>("/api/devices/zones");
+    zones.value = data.zones ?? [];
+    if (!selectedZone.value && zones.value.length) {
+      selectedZone.value = zones.value[0];
+    }
+  } catch {
+    // Non-fatal; zones will remain empty and topology will show all devices.
+  }
+}
+
 onMounted(() => {
   // Initial load
   loadPulse();
-  loadTopology();
+  loadZones().then(() => {
+    loadTopology();
+  });
 
-  // Periodic refresh for a \"live\" dashboard view.
+  // Periodic refresh for a "live" dashboard view.
   // Pulse metrics are updated frequently; topology changes more slowly.
   pulseInterval = window.setInterval(() => {
     loadPulse();
@@ -810,9 +835,23 @@ onBeforeUnmount(() => {
             Passive discovery + Nmap insights.
           </span>
         </div>
-        <span class="text-[0.65rem] uppercase tracking-[0.16em] text-[var(--np-muted-text)]">
-          Cytoscape.js Graph
-        </span>
+        <div class="flex items-center gap-3 text-[0.7rem] text-[var(--np-muted-text)]">
+          <span class="hidden sm:inline">Zone</span>
+          <select
+            v-model="selectedZone"
+            @change="loadTopology"
+            class="rounded border bg-black/40 px-2 py-0.5 text-[0.7rem] focus:outline-none focus:ring-1 focus:ring-cyan-400"
+          >
+            <option :value="null">All zones</option>
+            <option
+              v-for="z in zones"
+              :key="z"
+              :value="z"
+            >
+              {{ z }}
+            </option>
+          </select>
+        </div>
       </header>
 
       <div class="grid gap-3 lg:grid-rows-[minmax(0,2fr)_minmax(0,1.4fr)]">

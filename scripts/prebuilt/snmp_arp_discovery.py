@@ -140,8 +140,7 @@ async def _upsert_devices(
 
             device.mac_address = mac
             if zone:
-                # type: ignore[attr-defined]
-                setattr(device, "zone", zone)
+                device.zone = zone
             count += 1
 
         await session.commit()
