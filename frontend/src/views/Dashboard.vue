@@ -105,6 +105,11 @@ const internetHealthPoints = ref<InternetHealthPoint[]>([]);
 const pulseChartOption = ref<any>({});
 const pulseTargets = ref<PulseTargetSummary[]>([]);
 
+// AI copilot for Pulse and device analysis
+const aiAnswerPulse = ref<string | null>(null);
+const aiLoadingPulse = ref(false);
+const aiErrorPulse = ref<string | null>(null);
+
 // Vault / PCAP capture state
 const isCapturingPcap = ref(false);
 const pcapTaskId = ref<string | null>(null);
@@ -764,6 +769,27 @@ async function askAiAboutSelectedDevice(): Promise<void> {
   }
 }
 
+/**
+ * Ask the AI copilot to analyse recent Pulse (Internet Health) metrics.
+ */
+async function askAiAboutPulse(): Promise<void> {
+  aiLoadingPulse.value = true;
+  aiErrorPulse.value = null;
+  aiAnswerPulse.value = null;
+  try {
+    const { data } = await axios.post<{ answer: string }>("/api/assist/analyze", {
+      mode: "pulse",
+      target_id: null,
+      question: null,
+    });
+    aiAnswerPulse.value = data.answer;
+  } catch {
+    aiErrorPulse.value = "AI analysis failed. Check AI provider configuration.";
+  } finally {
+    aiLoadingPulse.value = false;
+  }
+}
+
 onMounted(() => {
   // Initial load
   loadPulse();
@@ -816,37 +842,55 @@ onBeforeUnmount(() => {
         <div class="flex items-center gap-3 text-xs text-[var(--np-muted-text)]">
           <span>Gateway / ISP / Cloudflare</span>
           <span class="h-1 w-10 rounded-full bg-emerald-400/60"></span>
+          <button
+            type="button"
+            @click="askAiAboutPulse"
+            class="rounded border border-cyan-400/40 bg-black/70 px-2 py-0.5 text-[0.65rem]
+                   text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+            :disabled="aiLoadingPulse"
+          >
+            {{ aiLoadingPulse ? "Asking AI..." : "Ask AI" }}
+          </button>
         </div>
       </header>
 
       <div class="grid gap-4 md:grid-cols-4">
         <div class="md:col-span-3">
-          <div
-            class="relative h-48 w-full rounded-md border border-cyan-400/30 bg-black/40"
-          >
-            <v-chart
-              v-if="!pulseLoading && internetHealthPoints.length"
-              :option="pulseChartOption"
-              autoresize
-              class="h-48 w-full"
-            />
             <div
-              v-else-if="pulseLoading"
-              class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
+              class="relative h-48 w-full rounded-md border border-cyan-400/30 bg-black/40"
             >
-              Loading Internet Health...
+              <v-chart
+                v-if="!pulseLoading && internetHealthPoints.length"
+                :option="pulseChartOption"
+                autoresize
+                class="h-48 w-full"
+              />
+              <div
+                v-else-if="pulseLoading"
+                class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
+              >
+                Loading Internet Health...
+              </div>
+              <div
+                v-else
+                class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
+              >
+                No Internet Health data yet.
+              </div>
             </div>
+            <p v-if="pulseError" class="mt-2 text-[0.7rem] text-rose-300">
+              {{ pulseError }}
+            </p>
             <div
-              v-else
-              class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
+              v-if="aiAnswerPulse"
+              class="mt-2 max-h-24 overflow-auto rounded border border-cyan-400/20 bg-black/80 p-2 text-[0.7rem] text-cyan-100"
             >
-              No Internet Health data yet.
+              {{ aiAnswerPulse }}
             </div>
+            <p v-if="aiErrorPulse" class="mt-1 text-[0.7rem] text-rose-300">
+              {{ aiErrorPulse }}
+            </p>
           </div>
-          <p v-if="pulseError" class="mt-2 text-[0.7rem] text-rose-300">
-            {{ pulseError }}
-          </p>
-        </div>
 
         <div class="flex flex-col gap-3 text-xs">
           <div class="rounded-md border border-emerald-400/40 bg-black/50 p-3">

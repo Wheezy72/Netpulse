@@ -7,10 +7,11 @@ import Landing from "./views/Landing.vue";
 import Login from "./views/Login.vue";
 import Settings from "./views/Settings.vue";
 import Playbooks from "./views/Playbooks.vue";
+import Devices from "./views/Devices.vue";
 
 type Theme = "cyberdeck" | "sysadmin";
 type InfoMode = "full" | "compact";
-type View = "dashboard" | "playbooks" | "settings";
+type View = "dashboard" | "devices" | "playbooks" | "settings";
 
 type CurrentUser = {
   id: number;
@@ -245,7 +246,22 @@ function handleLogout(): void {
               Dashboard
             </button>
             <button
-              v-if="isAuthenticated"
+              type="button"
+              @click="currentView = 'devices'"
+              class="rounded border px-2 py-0.5"
+              :class="[
+                currentView === 'devices'
+                  ? theme === 'cyberdeck'
+                    ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-300'
+                    : 'border-blue-500 bg-blue-50 text-blue-700'
+                  : theme === 'cyberdeck'
+                    ? 'border-cyan-400/40 text-cyan-200 hover:bg-cyan-500/10'
+                    : 'border-slate-300 text-slate-700 hover:bg-slate-100'
+              ]"
+            >
+              Devices
+            </button>
+            <button
               type="button"
               @click="currentView = 'playbooks'"
               class="rounded border px-2 py-0.5"
@@ -324,6 +340,9 @@ function handleLogout(): void {
         v-else-if="currentView === 'dashboard'"
         :info-mode="infoMode"
         @update:infoMode="setInfoMode"
+      />
+      <Devices
+        v-else-if="currentView === 'devices'"
       />
       <Settings
         v-else

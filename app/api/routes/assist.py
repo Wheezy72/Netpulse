@@ -29,8 +29,8 @@ from app.api.deps import db_session, require_role
 from app.core.config import settings
 from app.models.device import Device
 from app.models.metric import Metric
+from app.models.packet_capture import PacketCapture
 from app.models.script_job import ScriptJob
-from app.models.vault import PacketCapture  # type: ignore[import-not-found]
 
 
 router = APIRouter()
