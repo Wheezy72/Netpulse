@@ -42,7 +42,6 @@ class PrebuiltScriptSettingsItem(BaseModel):
 
     name: str
     allowed: bool
-    lab_only: bool
 
 
 class PrebuiltScriptSettingsResponse(BaseModel):
@@ -109,7 +108,7 @@ async def get_prebuilt_script_settings() -> PrebuiltScriptSettingsResponse:
     """Return all prebuilt scripts and their allowlist flags.
 
     This inspects the prebuilt scripts directory and marks each file as
-    allowed / lab-only based on the current Settings values.
+    allowed based on the current Settings values.
     """
     scripts_dir = Path(settings.scripts_base_dir) / settings.scripts_prebuilt_subdir
     scripts_dir.mkdir(parents=True, exist_ok=True)
@@ -120,8 +119,10 @@ async def get_prebuilt_script_settings() -> PrebuiltScriptSettingsResponse:
         items.append(
             PrebuiltScriptSettingsItem(
                 name=name,
-                allowed=name in settings.allowed_prebuilt_scripts,
-                lab_only=name in settings.lab_only_prebuilt_scripts,
+                allowed=(
+                    not settings.allowed_prebuilt_scripts
+                    or name in settings.allowed_prebuilt_scripts
+                ),
             )
         )
 
@@ -143,11 +144,9 @@ async def update_prebuilt_script_settings(
     across process restarts; for persistent policy, also update environment
     variables or configuration.
     """
+    # If everything is allowed, admins can choose to leave the list empty.
     allowed = [item.name for item in payload.scripts if item.allowed]
-    lab_only = [item.name for item in payload.scripts if item.lab_only]
-
     settings.allowed_prebuilt_scripts = allowed
-    settings.lab_only_prebuilt_scripts = lab_only
 
 
 @router.post(
@@ -169,8 +168,9 @@ async def run_prebuilt_script(
     scripts_dir = Path(settings.scripts_base_dir) / settings.scripts_prebuilt_subdir
     script_path = scripts_dir / payload.script_name
 
-    # Enforce allowlist for business environments. You can tune this via env vars.
-    if payload.script_name not in settings.allowed_prebuilt_scripts:
+    # Enforce allowlist if it is explicitly configured.
+    # If the list is empty, allow any script present in the prebuilt directory.
+    if settings.allowed_prebuilt_scripts and payload.script_name not in settings.allowed_prebuilt_scripts:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This script is not allowed by current policy",

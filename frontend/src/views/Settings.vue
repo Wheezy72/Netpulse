@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from "axios";
-import { computed, onMounted, ref }";
+import { computed, onMounted, ref } from "vue";
 
 type Theme = "cyberdeck" | "sysadmin";
 type InfoMode = "full" | "compact";
@@ -15,7 +15,6 @@ interface Props {
 interface ScriptSettingsItem {
   name: string;
   allowed: boolean;
-  lab_only: boolean;
 }
 
 const props = defineProps<Props>();
@@ -269,7 +268,6 @@ onMounted(() => {
                   <tr>
                     <th class="px-2 py-1 text-left">Script</th>
                     <th class="px-2 py-1 text-center">Allowed</th>
-                    <th class="px-2 py-1 text-center">Lab only</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -285,13 +283,6 @@ onMounted(() => {
                       <input
                         type="checkbox"
                         v-model="s.allowed"
-                        :disabled="!canEditScripts"
-                      />
-                    </td>
-                    <td class="px-2 py-1 text-center">
-                      <input
-                        type="checkbox"
-                        v-model="s.lab_only"
                         :disabled="!canEditScripts"
                       />
                     </td>
@@ -347,7 +338,6 @@ onMounted(() => {
                   <tr>
                     <th class="px-2 py-1 text-left">Script</th>
                     <th class="px-2 py-1 text-center">Allowed</th>
-                    <th class="px-2 py-1 text-center">Lab only</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -363,13 +353,6 @@ onMounted(() => {
                       <input
                         type="checkbox"
                         v-model="s.allowed"
-                        :disabled="!canEditScripts"
-                      />
-                    </td>
-                    <td class="px-2 py-1 text-center">
-                      <input
-                        type="checkbox"
-                        v-model="s.lab_only"
                         :disabled="!canEditScripts"
                       />
                     </td>

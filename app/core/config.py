@@ -87,7 +87,11 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://localhost:8080"]
     )
 
-    # Script governance
+    # Script governance.
+    # This list lets you explicitly control which prebuilt scripts can run.
+    # You can override it via env vars such as:
+    #  ALLOWED_PREBUILT_SCRIPTS="backup_switch.py,malformed_syn_flood.py"
+    # If left empty, all scripts present in the prebuilt directory are allowed.
     allowed_prebuilt_scripts: List[str] = Field(
         default_factory=lambda: [
             "backup_switch.py",
@@ -100,27 +104,12 @@ class Settings(BaseSettings):
             "nmap_web_recon.py",
             "nmap_smb_audit.py",
             "custom_probe.py",
-        ]
-    )
-    lab_only_prebuilt_scripts: List[str] = Field(
-        default_factory=lambda: [
             "malformed_syn_flood.py",
             "malformed_xmas_scan.py",
             "malformed_overlap_fragments.py",
             "replay_pcap.py",
         ]
     )
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-
-    @property
-    def database_url(self) -> str:
-        return (
-            f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
-            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
-        )
 
     @property
     def celery_broker_url(self) -> str:
