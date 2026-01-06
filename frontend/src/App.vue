@@ -11,13 +11,12 @@ import Playbooks from "./views/Playbooks.vue";
 type Theme = "cyberdeck" | "sysadmin";
 type InfoMode = "full" | "compact";
 type View = "dashboard" | "playbooks" | "settings";
-type Role = "viewer" | "operator" | "admin";
 
 type CurrentUser = {
   id: number;
   email: string;
   full_name: string | null;
-  role: Role;
+  role: string;
 };
 
 /**
@@ -50,9 +49,9 @@ const isAuthenticated = computed(() => !!accessToken.value);
  */
 const currentUser = ref<CurrentUser | null>(null);
 
-const userRole = computed<Role>(() => currentUser.value?.role ?? "viewer");
-const canRunScripts = computed(() => userRole.value === "operator" || userRole.value === "admin");
-const isAdmin = computed(() => userRole.value === "admin");
+// For a personal deployment, any authenticated user is treated as full-power.
+// We keep the role string only for display in the header.
+const canRunScripts = computed(() => !!currentUser.value);
 
 function applyTheme(next: Theme): void {
   const body = document.body;
@@ -246,7 +245,7 @@ function handleLogout(): void {
               Dashboard
             </button>
             <button
-              v-if="canRunScripts"
+              v-if="isAuthenticated"
               type="button"
               @click="currentView = 'playbooks'"
               class="rounded border px-2 py-0.5"
@@ -290,6 +289,7 @@ function handleLogout(): void {
               {{ currentUser.email }}
             </span>
             <span
+              v-if="currentUser.role"
               class="text-[0.65rem] uppercase tracking-[0.16em]"
               :class="[
                 theme === 'cyberdeck' ? 'text-emerald-300' : 'text-slate-500'
@@ -323,14 +323,12 @@ function handleLogout(): void {
       <Dashboard
         v-else-if="currentView === 'dashboard'"
         :info-mode="infoMode"
-        :user-role="userRole"
         @update:infoMode="setInfoMode"
       />
       <Settings
         v-else
         :theme="theme"
         :info-mode="infoMode"
-        :role="userRole"
         @update:infoMode="setInfoMode"
       />
     </main>

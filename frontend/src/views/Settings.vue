@@ -4,12 +4,10 @@ import { computed, onMounted, ref } from "vue";
 
 type Theme = "cyberdeck" | "sysadmin";
 type InfoMode = "full" | "compact";
-type Role = "viewer" | "operator" | "admin";
 
 interface Props {
   theme: Theme;
   infoMode: InfoMode;
-  role: Role;
 }
 
 interface ScriptSettingsItem {
@@ -27,7 +25,8 @@ function setInfoMode(mode: InfoMode): void {
   emit("update:infoMode", mode);
 }
 
-const canEditScripts = computed(() => props.role === "admin");
+// Personal deployment: any authenticated user can edit script allowlist.
+const canEditScripts = computed(() => true);
 
 const scripts = ref<ScriptSettingsItem[]>([]);
 const scriptsLoading = ref(false);

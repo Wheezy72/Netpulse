@@ -15,15 +15,13 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 interface Props {
   infoMode: "full" | "compact";
-  userRole: "viewer" | "operator" | "admin";
 }
 
 const props = defineProps<Props>();
 const infoMode = computed(() => props.infoMode);
-const userRole = computed(() => props.userRole);
-const canRunScripts = computed(
-  () => userRole.value === "operator" || userRole.value === "admin"
-);
+// In a personal deployment, any authenticated user reaching the dashboard
+// is allowed to run scripts, recon and captures.
+const canRunScripts = computed(() => true);
 const canRunRecon = canRunScripts;
 const canStartCaptures = canRunScripts;
 const emit = defineEmits<{
@@ -879,7 +877,10 @@ onBeforeUnmount(() => {
             <p class="text-[0.65rem] uppercase tracking-[0.16em] text-cyan-200">
               Quick Actions
             </p>
-            <template v-if="canRunScripts">
+            <div class="mt-3 space-y-2">
+              <p class="text-[0.65rem] uppercase tracking-[0.16em] text-cyan-200">
+                Quick Actions
+              </p>
               <div class="flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -909,10 +910,7 @@ onBeforeUnmount(() => {
                   Overlap Fragments
                 </button>
               </div>
-            </template>
-            <p v-else class="text-[0.65rem] text-[var(--np-muted-text)]">
-              Script quick actions require operator or admin role.
-            </p>
+            </div>
             <p v-if="actionStatus" class="text-[0.65rem] text-cyan-100/80">
               {{ actionStatus }}
             </p>
@@ -1167,13 +1165,10 @@ onBeforeUnmount(() => {
             <h3 class="text-[0.7rem] uppercase tracking-[0.16em] text-cyan-200">
               Script Shortcuts
             </h3>
-            <p class="text-[0.7rem] text-cyan-100/80" v-if="canRunScripts">
+            <p class="text-[0.7rem] text-cyan-100/80">
               Run common automation playbooks and Nmap profiles. Output appears in the Brain console.
             </p>
-            <p class="text-[0.7rem] text-[var(--np-muted-text)]" v-else>
-              Script shortcuts are available to operator and admin roles.
-            </p>
-            <div class="flex flex-wrap gap-2" v-if="canRunScripts">
+            <div class="flex flex-wrap gap-2">
               <button
                 type="button"
                 @click="runWanHealthReport"
@@ -1273,17 +1268,11 @@ onBeforeUnmount(() => {
           class="mt-auto inline-flex items-center justify-center rounded-md border
                  border-cyan-400/40 bg-black/70 px-3 py-2 text-[0.75rem] font-medium
                  text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-          :disabled="isCapturingPcap || !canStartCaptures"
+          :disabled="isCapturingPcap"
         >
           <span v-if="!isCapturingPcap">Export Last 5 Minutes as PCAP</span>
           <span v-else>Capturing traffic...</span>
         </button>
-        <p
-          v-if="!canStartCaptures"
-          class="mt-1 text-[0.65rem] text-[var(--np-muted-text)]"
-        >
-          Packet capture requires operator or admin role.
-        </p>
 
         <div class="mt-2 text-[0.7rem]">
           <p v-if="pcapStatus === 'capturing'" class="text-cyan-100/80">

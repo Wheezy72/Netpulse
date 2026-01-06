@@ -2,11 +2,9 @@
 import axios from "axios";
 import { computed, onMounted, ref } from "vue";
 
-type Role = "viewer" | "operator" | "admin";
 type Theme = "cyberdeck" | "sysadmin";
 
 interface Props {
-  role: Role;
   theme: Theme;
 }
 
@@ -24,7 +22,8 @@ interface Playbook {
 
 const props = defineProps<Props>();
 
-const canRun = computed(() => props.role === "operator" || props.role === "admin");
+// Personal deployment: any authenticated user can run playbooks.
+const canRun = computed(() => true);
 const isCyberdeck = computed(() => props.theme === "cyberdeck");
 
 // Script policy from backend
@@ -345,11 +344,8 @@ onMounted(() => {
             <div
               :class="isCyberdeck ? 'text-cyan-100/80' : 'text-slate-600'"
             >
-              <p v-if="canRun">
+              <p>
                 Playbooks can generate aggressive or malformed traffic. Use only on networks you own or control.
-              </p>
-              <p v-else>
-                You have viewer access. Playbooks require operator or admin role.
               </p>
             </div>
             <button
@@ -357,13 +353,11 @@ onMounted(() => {
               @click="runPlaybookScenario"
               class="rounded border px-3 py-1.5 text-[0.75rem] font-medium"
               :class="[
-                canRun
-                  ? isCyberdeck
-                    ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30'
-                    : 'border-blue-500 bg-blue-50 text-blue-700 hover:bg-blue-100'
-                  : 'border-slate-300 text-slate-500 cursor-not-allowed'
+                isCyberdeck
+                  ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30'
+                  : 'border-blue-500 bg-blue-50 text-blue-700 hover:bg-blue-100'
               ]"
-              :disabled="running || !canRun"
+              :disabled="running"
             >
               {{ running ? "Running scenario..." : "Run playbook" }}
             </button>
