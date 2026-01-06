@@ -12,12 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import db_session, require_role
 from app.core.config import settings
 from app.models.script_job import ScriptJob, ScriptJobStatus
-from app.models.user import UserRole
 from app.tasks import execute_script_job_task
 
-# Scripts API: business-grade endpoints for managing Smart Scripts and
-# their execution lifecycle. Uploads are restricted to operators/admins
-# and prebuilt scripts are governed by an allowlist in settings.
+# Scripts API: endpoints for managing Smart Scripts and their execution
+# lifecycle. In this personal deployment, any authenticated user can
+# upload and run scripts; policy hardening is expected at the network
+# boundary (VPN, firewall) rather than via per-role RBAC.
 router = APIRouter()
 
 
@@ -162,8 +162,8 @@ async def run_prebuilt_script(
 ) -> dict[str, Any]:
     """Execute a script from the prebuilt scripts directory with optional parameters.
 
-    A business-grade allowlist is enforced via Settings.allowed_prebuilt_scripts.
-    Lab-only scripts can be separated using Settings.lab_only_prebuilt_scripts.
+    An allowlist can be enforced via Settings.allowed_prebuilt_scripts. If the list
+    is empty, any script present in the prebuilt directory is eligible to run.
     """
     scripts_dir = Path(settings.scripts_base_dir) / settings.scripts_prebuilt_subdir
     script_path = scripts_dir / payload.script_name

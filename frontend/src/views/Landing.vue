@@ -69,7 +69,7 @@ const emit = defineEmits<{
               </p>
               <p class="mt-1">
                 Visual topology plus Smart Scripts that can run Nmap profiles,
-                backups, reports, and lab-only packet tricks.
+                backups, reports, and packet manipulation experiments on networks you own.
               </p>
             </div>
             <div class="rounded border border-cyan-400/40 bg-black/60 p-3">

@@ -130,6 +130,9 @@ here and then dive into later sections as needed.
     - OS detection, service versioning, and vulnerability tagging.
   - **Packet manipulation & control** – Scapy / raw sockets:
     - Example `kill_switch.py` sending TCP RST.
+  - **SNMP ARP discovery** – ARP table pulls from routers/switches:
+    - `snmp_arp_discovery.py` prebuilt script uses SNMP to read ARP tables and populate `Device`
+      entries with IP/MAC and a logical `zone` label.
 
 ### 2.2 Data Flow Diagram
 
@@ -275,6 +278,7 @@ Represents any host or device that appears in the network:
 - `mac_address` (nullable)
 - `device_type` (router, switch, host, etc.)
 - `os` / `vendor` (optional metadata)
+- `zone` (nullable string; logical segment/zone label such as `home-router-1`, `lab-vlan-20`, etc.)
 - `is_gateway` (bool; indicates default gateway)
 - `last_seen` (timestamp, updated by recon jobs)
 - `created_at`, `updated_at` (timestamps)
@@ -285,6 +289,8 @@ Represents any host or device that appears in the network:
 Typical flows:
 
 - **Passive Eye**: ARP/mDNS packets cause new `Device` rows to be created or existing rows to be updated.
+- **SNMP discovery**: `snmp_arp_discovery.py` pulls ARP tables from routers/switches and upserts `Device`
+  rows for each IP/MAC, setting the `zone` field based on script parameters.
 - **Active Eye (Nmap)**: Enriches `Device` with OS, open ports, and vendor.
 
 ### 5.2 `Metric` (Timescale Hypertable)
@@ -347,6 +353,11 @@ In the frontend topology view (Cytoscape), nodes with unresolved high/critical v
 ---
 
 ## 6. Modules & Features
+
+> Note: NetPulse is designed as a **personal** SOC/NOC console. There is
+> authentication, but no internal RBAC tiers any more – once logged in, you are
+> a full‑power user. Hardening is expected to happen at the network/host level
+> (VPN, firewall, DB credentials), not via per‑feature roles.
 
 ### 6.1 Module A – The Pulse (Real‑Time Telemetry)
 
@@ -521,6 +532,8 @@ allowlist in `Settings.allowed_prebuilt_scripts` (see §11.4).
      printing or sharing with both technical and non‑technical stakeholders.
    - Includes a summary of Internet Health, per‑target metrics, a snapshot of
      high/critical vulnerabilities, and plain‑language recommendations.
+   - Triggers a `report` alert when the PDF is ready (subject to alert
+     configuration).
 
 4. **`new_device_report.py`**
    - Lists devices seen within a recent time window (default 60 minutes).
@@ -563,20 +576,21 @@ allowlist in `Settings.allowed_prebuilt_scripts` (see §11.4).
        `smb-vuln-ms17-010`, `smb-vuln-ms08-067`.
    - Suitable for auditing Samba/Windows hosts you control.
 
-**Lab‑only / packet manipulation**
+**Packet manipulation & replay**
 
 9. **`kill_switch.py`**
    - Sends TCP RST packets to tear down a specific TCP connection based on
      parameters from `ScriptJob.params`.
-   - Intended for controlled lab exercises.
+   - Intended for controlled exercises on networks you own or are authorised to test.
 
 10. **Malformed packet templates and replay**
     - `malformed_syn_flood.py`
     - `malformed_xmas_scan.py`
     - `malformed_overlap_fragments.py`
     - `replay_pcap.py`
-    - These are explicitly lab‑only. They demonstrate how to craft and replay
-      packets using Scapy in a safe, self‑contained environment.
+    - These demonstrate how to craft and replay packets using Scapy in a
+      self‑contained environment. Use them only on networks and systems you
+      control or have explicit permission to test.
 
 All prebuilt scripts are invoked via `POST /api/scripts/prebuilt/run` and
 executed by the same `ScriptContext` / `ScriptJob` pipeline as uploaded scripts.
@@ -1443,13 +1457,13 @@ NetPulse Enterprise is designed to be practical to extend:
 
 This section summarises the hardening that currently exists in the codebase and where you can tune it for business networks.
 
-### 11.1 Authentication and Roles
+### 11.1 Authentication (Personal Deployment)
 
 Users are stored in the `users` table (`app/models/user.py`) with:
 
 - `email`
-- `hashed_password` (bcrypt)
-- `role` (one of `viewer`, `operator`, `admin`)
+- `hashed_password` (hashed with PBKDF2 via `passlib`)
+- `role` (string; currently not enforced for access control)
 - `is_active`
 
 Authentication is handled via JWT bearer tokens:
@@ -1458,11 +1472,12 @@ Authentication is handled via JWT bearer tokens:
 - Tokens are signed with `Settings.secret_key` and `Settings.jwt_algorithm`.
 - Token lifetime is controlled with `Settings.access_token_expire_minutes`.
 
-Roles:
+In the current personal‑console configuration:
 
-- `viewer` – read‑only access to devices, metrics, and vault data.
-- `operator` – can start PCAP captures and run allowed prebuilt scripts.
-- `admin` – full access; can also be used for bootstrap tasks.
+- Any authenticated user is treated as a full‑power user by the API.
+- The `role` field is preserved for display and future extension, but the
+  backend no longer enforces per‑role RBAC – `require_role()` only checks that
+  the request is authenticated.
 
 ### 11.2 User Bootstrap
 
@@ -1475,58 +1490,45 @@ Bootstrap behaviour:
 - After the first user:
   - Subsequent users should only be created by an admin and this endpoint should be guarded at the edge (for example, behind an admin‑only API gateway route) or disabled entirely once you have SSO.
 
-In production, you should:
+In a personal deployment, you:
 
 - Set a strong `Settings.secret_key`.
 - Only expose the `/auth/users` endpoint on trusted admin channels, or remove it after initial provisioning.
 
 ### 11.3 Route Protection
 
-Sensitive endpoints are wrapped with `require_role(...)` in `app/api/deps.py`, which:
+Sensitive endpoints are wrapped with `require_role(...)` in `app/api/deps.py`.
+In the current configuration, `require_role()` only verifies that the caller is
+authenticated (valid JWT); the specific `role` string is ignored.
 
-- Extracts the current user from the bearer token.
-- Verifies the user is active.
-- Ensures the user’s `role` is one of the allowed roles.
+Practical implications:
 
-Current policy:
+- Any authenticated user can:
+  - Upload and run scripts.
+  - Start Nmap scans and PCAP captures.
+  - Access devices, metrics, and script job details.
+- Health checks (`/api/health`) remain open so they can be used by load
+  balancers and orchestrators.
 
-- `scripts` routes:
-  - `POST /api/scripts/upload` and `POST /api/scripts/prebuilt/run`:
-    - Require `operator` or `admin`.
-  - `GET /api/scripts/{job_id}`:
-    - Open to any authenticated role (you can tighten further if required).
-- `recon` routes:
-  - `POST /api/recon/nmap-recommendations`:
-    - Requires at least `viewer`.
-  - `POST /api/recon/scan` (runs Nmap):
-    - Requires `operator` or `admin`.
-- `devices` routes:
-  - `GET /api/devices`, `/api/devices/topology`, `/api/devices/{id}/detail`:
-    - Require at least `viewer`.
-- `vault` routes:
-  - `POST /api/vault/pcap/recent` (start capture):
-    - Requires `operator` or `admin`.
-  - `GET /api/vault/pcap/{id}` and `/api/vault/pcap/{id}/download`:
-    - Intended for authenticated users; you can wrap them with `require_role` if you want PCAP access restricted to specific roles.
-
-Health checks (`/api/health`) remain open so they can be used by load balancers and orchestrators.
+If you want to harden this for a multi‑user environment, you can reintroduce
+per‑route role checks in `require_role` and adjust route dependencies
+accordingly.
 
 ### 11.4 Script Allowlist
 
 Prebuilt scripts are governed by `Settings.allowed_prebuilt_scripts`:
 
-- Only scripts listed here can be invoked via `POST /api/scripts/prebuilt/run`.
-- Lab‑only templates such as:
-  - `malformed_syn_flood.py`
-  - `malformed_xmas_scan.py`
-  - `malformed_overlap_fragments.py`
-  - `replay_pcap.py`
-- Are listed in `Settings.lab_only_prebuilt_scripts` and are not enabled by default.
+- If `allowed_prebuilt_scripts` is **non‑empty**, only scripts whose names are
+  present in the list can be invoked via `POST /api/scripts/prebuilt/run`.
+- If the list is **empty**, any script present in the prebuilt directory is
+  eligible to run.
 
 To change policy:
 
-- In a production environment, set `ALLOWED_PREBUILT_SCRIPTS` (or override the setting via `.env`) with a comma‑separated list of script names you trust.
-- Keep malformed/replay scripts confined to a separate lab deployment.
+- Set `ALLOWED_PREBUILT_SCRIPTS` (or override the setting via `.env`) with a
+  comma‑separated list of script names you want to allow explicitly, or leave
+  it empty for a fully permissive personal lab where you control which scripts
+  reside on disk.
 
 ### 11.5 CORS and Network Exposure
 
