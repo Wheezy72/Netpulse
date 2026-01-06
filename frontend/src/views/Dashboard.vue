@@ -15,15 +15,13 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 interface Props {
   infoMode: "full" | "compact";
-  userRole: "viewer" | "operator" | "admin";
 }
 
 const props = defineProps<Props>();
 const infoMode = computed(() => props.infoMode);
-const userRole = computed(() => props.userRole);
-const canRunScripts = computed(
-  () => userRole.value === "operator" || userRole.value === "admin"
-);
+// In a personal deployment, any authenticated user reaching the dashboard
+// is allowed to run scripts, recon and captures.
+const canRunScripts = computed(() => true);
 const canRunRecon = canRunScripts;
 const canStartCaptures = canRunScripts;
 const emit = defineEmits<{
@@ -48,6 +46,7 @@ type TopologyNode = {
   hostname?: string | null;
   device_type?: string | null;
   is_gateway: boolean;
+  zone?: string | null;
   vulnerability_severity?: string | null;
   vulnerability_count: number;
   last_seen?: string | null;
@@ -95,6 +94,8 @@ const topologyLoading = ref(false);
 const topologyError = ref<string | null>(null);
 const hoveredNode = ref<TopologyNode | null>(null);
 const selectedNode = ref<TopologyNode | null>(null);
+const zones = ref<string[]>([]);
+const selectedZone = ref<string | null>(null);
 let cy: CytoscapeCore | null = null;
 
 // Pulse / Internet Health chart state
@@ -103,6 +104,11 @@ const pulseError = ref<string | null>(null);
 const internetHealthPoints = ref<InternetHealthPoint[]>([]);
 const pulseChartOption = ref<any>({});
 const pulseTargets = ref<PulseTargetSummary[]>([]);
+
+// AI copilot for Pulse and device analysis
+const aiAnswerPulse = ref<string | null>(null);
+const aiLoadingPulse = ref(false);
+const aiErrorPulse = ref<string | null>(null);
 
 // Vault / PCAP capture state
 const isCapturingPcap = ref(false);
@@ -115,6 +121,48 @@ const captureHeaders = ref<PacketHeaderView[]>([]);
 // Device quick action state
 const isRunningAction = ref(false);
 const actionStatus = ref<string | null>(null);
+
+// Device detail + AI copilot state
+type DeviceDetail = {
+  device: {
+    id: number;
+    hostname?: string | null;
+    ip_address: string;
+    mac_address?: string | null;
+    device_type?: string | null;
+    is_gateway: boolean;
+    zone?: string | null;
+    last_seen?: string | null;
+  };
+  type_guess?: string | null;
+  type_confidence?: number | null;
+  vulnerabilities: {
+    id: number;
+    title: string;
+    severity: string;
+    port?: number | null;
+    detected_at?: string | null;
+  }[];
+  scripts: {
+    id: number;
+    script_name: string;
+    status: string;
+    created_at: string;
+  }[];
+  metrics: {
+    metric_type: string;
+    timestamp: string;
+    value: number;
+  }[];
+};
+
+const deviceDetail = ref<DeviceDetail | null>(null);
+const deviceDetailLoading = ref(false);
+const deviceDetailError = ref<string | null>(null);
+
+const aiAnswer = ref<string | null>(null);
+const aiLoading = ref(false);
+const aiError = ref<string | null>(null);
 
 // Brain console log stream
 const brainLogs = ref<string[]>([]);
@@ -284,8 +332,13 @@ async function loadTopology(): Promise<void> {
   topologyLoading.value = true;
 
   try {
+    const params: Record<string, string> = {};
+    if (selectedZone.value) {
+      params.zone = selectedZone.value;
+    }
     const { data } = await axios.get<{ nodes: TopologyNode[]; edges: TopologyEdge[] }>(
-      "/api/devices/topology"
+      "/api/devices/topology",
+      { params }
     );
 
     const elements = [
@@ -297,6 +350,7 @@ async function loadTopology(): Promise<void> {
           hostname: n.hostname,
           deviceType: n.device_type,
           isGateway: n.is_gateway,
+          zone: n.zone,
           vulnerabilitySeverity: n.vulnerability_severity,
           vulnerabilityCount: n.vulnerability_count,
           lastSeen: n.last_seen,
@@ -382,6 +436,7 @@ async function loadTopology(): Promise<void> {
           hostname: data.hostname,
           device_type: data.deviceType,
           is_gateway: Boolean(data.isGateway),
+          zone: data.zone,
           vulnerability_severity: data.vulnerabilitySeverity,
           vulnerability_count: Number(data.vulnerabilityCount ?? 0),
           last_seen: data.lastSeen,
@@ -401,10 +456,13 @@ async function loadTopology(): Promise<void> {
           hostname: data.hostname,
           device_type: data.deviceType,
           is_gateway: Boolean(data.isGateway),
+          zone: data.zone,
           vulnerability_severity: data.vulnerabilitySeverity,
           vulnerability_count: Number(data.vulnerabilityCount ?? 0),
           last_seen: data.lastSeen,
         };
+        // Load detailed view for this device and reset AI answer state
+        loadDeviceDetail(selectedNode.value.id);
       });
     } else {
       cy.elements().remove();
@@ -654,12 +712,92 @@ async function runNmapSmbAudit(): Promise<void> {
 let pulseInterval: number | undefined;
 let topologyInterval: number | undefined;
 
+async function loadZones(): Promise<void> {
+  try {
+    const { data } = await axios.get<{ zones: string[] }>("/api/devices/zones");
+    zones.value = data.zones ?? [];
+    if (!selectedZone.value && zones.value.length) {
+      selectedZone.value = zones.value[0];
+    }
+  } catch {
+    // Non-fatal; zones will remain empty and topology will show all devices.
+  }
+}
+
+/**
+ * Load detailed information for the currently selected device.
+ */
+async function loadDeviceDetail(deviceId: number): Promise<void> {
+  deviceDetailLoading.value = true;
+  deviceDetailError.value = null;
+  aiAnswer.value = null;
+  aiError.value = null;
+
+  try {
+    const { data } = await axios.get<DeviceDetail>(`/api/devices/${deviceId}/detail`);
+    deviceDetail.value = data;
+  } catch {
+    deviceDetailError.value = "Failed to load device detail.";
+    deviceDetail.value = null;
+  } finally {
+    deviceDetailLoading.value = false;
+  }
+}
+
+/**
+ * Ask the AI copilot to analyse the selected device.
+ */
+async function askAiAboutSelectedDevice(): Promise<void> {
+  const node = selectedNode.value;
+  if (!node) {
+    return;
+  }
+  aiLoading.value = true;
+  aiError.value = null;
+  aiAnswer.value = null;
+  try {
+    const { data } = await axios.post<{ answer: string }>("/api/assist/analyze", {
+      mode: "device",
+      target_id: node.id,
+      question: null,
+    });
+    aiAnswer.value = data.answer;
+  } catch {
+    aiError.value = "AI analysis failed. Check AI provider configuration.";
+  } finally {
+    aiLoading.value = false;
+  }
+}
+
+/**
+ * Ask the AI copilot to analyse recent Pulse (Internet Health) metrics.
+ */
+async function askAiAboutPulse(): Promise<void> {
+  aiLoadingPulse.value = true;
+  aiErrorPulse.value = null;
+  aiAnswerPulse.value = null;
+  try {
+    const { data } = await axios.post<{ answer: string }>("/api/assist/analyze", {
+      mode: "pulse",
+      target_id: null,
+      question: null,
+    });
+    aiAnswerPulse.value = data.answer;
+  } catch {
+    aiErrorPulse.value = "AI analysis failed. Check AI provider configuration.";
+  } finally {
+    aiLoadingPulse.value = false;
+  }
+}
+
 onMounted(() => {
   // Initial load
   loadPulse();
-  loadTopology();
+  loadZones().then(() => {
+    loadTopology();
+  });
 
-  // Periodic refresh for a \"live\" dashboard view.
+  // Periodic refresh for a "live" dashboard view.
   // Pulse metrics are updated frequently; topology changes more slowly.
   pulseInterval = window.setInterval(() => {
     loadPulse();
@@ -704,37 +842,55 @@ onBeforeUnmount(() => {
         <div class="flex items-center gap-3 text-xs text-[var(--np-muted-text)]">
           <span>Gateway / ISP / Cloudflare</span>
           <span class="h-1 w-10 rounded-full bg-emerald-400/60"></span>
+          <button
+            type="button"
+            @click="askAiAboutPulse"
+            class="rounded border border-cyan-400/40 bg-black/70 px-2 py-0.5 text-[0.65rem]
+                   text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+            :disabled="aiLoadingPulse"
+          >
+            {{ aiLoadingPulse ? "Asking AI..." : "Ask AI" }}
+          </button>
         </div>
       </header>
 
       <div class="grid gap-4 md:grid-cols-4">
         <div class="md:col-span-3">
-          <div
-            class="relative h-48 w-full rounded-md border border-cyan-400/30 bg-black/40"
-          >
-            <v-chart
-              v-if="!pulseLoading && internetHealthPoints.length"
-              :option="pulseChartOption"
-              autoresize
-              class="h-48 w-full"
-            />
             <div
-              v-else-if="pulseLoading"
-              class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
+              class="relative h-48 w-full rounded-md border border-cyan-400/30 bg-black/40"
             >
-              Loading Internet Health...
+              <v-chart
+                v-if="!pulseLoading && internetHealthPoints.length"
+                :option="pulseChartOption"
+                autoresize
+                class="h-48 w-full"
+              />
+              <div
+                v-else-if="pulseLoading"
+                class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
+              >
+                Loading Internet Health...
+              </div>
+              <div
+                v-else
+                class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
+              >
+                No Internet Health data yet.
+              </div>
             </div>
+            <p v-if="pulseError" class="mt-2 text-[0.7rem] text-rose-300">
+              {{ pulseError }}
+            </p>
             <div
-              v-else
-              class="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70"
+              v-if="aiAnswerPulse"
+              class="mt-2 max-h-24 overflow-auto rounded border border-cyan-400/20 bg-black/80 p-2 text-[0.7rem] text-cyan-100"
             >
-              No Internet Health data yet.
+              {{ aiAnswerPulse }}
             </div>
+            <p v-if="aiErrorPulse" class="mt-1 text-[0.7rem] text-rose-300">
+              {{ aiErrorPulse }}
+            </p>
           </div>
-          <p v-if="pulseError" class="mt-2 text-[0.7rem] text-rose-300">
-            {{ pulseError }}
-          </p>
-        </div>
 
         <div class="flex flex-col gap-3 text-xs">
           <div class="rounded-md border border-emerald-400/40 bg-black/50 p-3">
@@ -812,9 +968,23 @@ onBeforeUnmount(() => {
             Passive discovery + Nmap insights.
           </span>
         </div>
-        <span class="text-[0.65rem] uppercase tracking-[0.16em] text-[var(--np-muted-text)]">
-          Cytoscape.js Graph
-        </span>
+        <div class="flex items-center gap-3 text-[0.7rem] text-[var(--np-muted-text)]">
+          <span class="hidden sm:inline">Zone</span>
+          <select
+            v-model="selectedZone"
+            @change="loadTopology"
+            class="rounded border bg-black/40 px-2 py-0.5 text-[0.7rem] focus:outline-none focus:ring-1 focus:ring-cyan-400"
+          >
+            <option :value="null">All zones</option>
+            <option
+              v-for="z in zones"
+              :key="z"
+              :value="z"
+            >
+              {{ z }}
+            </option>
+          </select>
+        </div>
       </header>
 
       <div class="grid gap-3 lg:grid-rows-[minmax(0,2fr)_minmax(0,1.4fr)]">
@@ -848,6 +1018,9 @@ onBeforeUnmount(() => {
               <p class="mt-1 font-mono text-cyan-100">
                 {{ hoveredNode.hostname || hoveredNode.ip_address }}
               </p>
+              <p v-if="hoveredNode.zone" class="text-[0.65rem] text-[var(--np-muted-text)]">
+                Zone: {{ hoveredNode.zone }}
+              </p>
             </div>
             <span
               v-if="hoveredNode.vulnerability_severity"
@@ -863,7 +1036,17 @@ onBeforeUnmount(() => {
             </div>
             <div>
               <dt class="text-[var(--np-muted-text)]">Type</dt>
-              <dd>{{ hoveredNode.device_type || "unknown" }}</dd>
+              <dd>
+                <span v-if="deviceDetail && deviceDetail.type_guess">
+                  {{ deviceDetail.type_guess }}
+                  <span v-if="deviceDetail.type_confidence != null">
+                    ({{ (deviceDetail.type_confidence * 100).toFixed(0) }}%)
+                  </span>
+                </span>
+                <span v-else>
+                  {{ hoveredNode.device_type || "unknown" }}
+                </span>
+              </dd>
             </div>
             <div>
               <dt class="text-[var(--np-muted-text)]">Gateway</dt>
@@ -875,44 +1058,104 @@ onBeforeUnmount(() => {
             </div>
           </dl>
 
-          <div v-if="selectedNode && selectedNode.id === hoveredNode.id" class="mt-3 space-y-2">
+          <div
+            v-if="selectedNode && selectedNode.id === hoveredNode.id"
+            class="mt-3 space-y-2"
+          >
             <p class="text-[0.65rem] uppercase tracking-[0.16em] text-cyan-200">
               Quick Actions
             </p>
-            <template v-if="canRunScripts">
-              <div class="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  @click="runPrebuiltScriptForDevice('malformed_syn_flood.py', { count: 30 })"
-                  class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
-                         text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-                  :disabled="isRunningAction"
-                >
-                  SYN Storm (template)
-                </button>
-                <button
-                  type="button"
-                  @click="runPrebuiltScriptForDevice('malformed_xmas_scan.py')"
-                  class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
-                         text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-                  :disabled="isRunningAction"
-                >
-                  Xmas Scan (template)
-                </button>
-                <button
-                  type="button"
-                  @click="runPrebuiltScriptForDevice('malformed_overlap_fragments.py')"
-                  class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
-                         text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-                  :disabled="isRunningAction"
-                >
-                  Overlap Fragments
-                </button>
+            <div class="flex flex-wrap gap-2">
+              <button
+                type="button"
+                @click="runPrebuiltScriptForDevice('malformed_syn_flood.py', { count: 30 })"
+                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                :disabled="isRunningAction"
+              >
+                SYN Storm (template)
+              </button>
+              <button
+                type="button"
+                @click="runPrebuiltScriptForDevice('malformed_xmas_scan.py')"
+                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                :disabled="isRunningAction"
+              >
+                Xmas Scan (template)
+              </button>
+              <button
+                type="button"
+                @click="runPrebuiltScriptForDevice('malformed_overlap_fragments.py')"
+                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                :disabled="isRunningAction"
+              >
+                Overlap Fragments
+              </button>
+            </div>
+
+            <div class="mt-3 border-t border-cyan-400/30 pt-2 space-y-2">
+              <p class="text-[0.65rem] uppercase tracking-[0.16em] text-cyan-200">
+                Device Summary
+              </p>
+              <p v-if="deviceDetailLoading" class="text-[0.7rem] text-cyan-100/80">
+                Loading device detail...
+              </p>
+              <p v-else-if="deviceDetailError" class="text-[0.7rem] text-rose-300">
+                {{ deviceDetailError }}
+              </p>
+              <div v-else-if="deviceDetail" class="space-y-1 text-[0.7rem]">
+                <p v-if="deviceDetail.vulnerabilities.length">
+                  Recent vulns:
+                  <span
+                    v-for="v in deviceDetail.vulnerabilities"
+                    :key="v.id"
+                    class="mr-2"
+                  >
+                    [{{ v.severity }}] {{ v.title }}
+                  </span>
+                </p>
+                <p v-if="deviceDetail.scripts.length">
+                  Recent scripts:
+                  <span
+                    v-for="s in deviceDetail.scripts"
+                    :key="s.id"
+                    class="mr-2"
+                  >
+                    {{ s.script_name }} ({{ s.status }})
+                  </span>
+                </p>
               </div>
-            </template>
-            <p v-else class="text-[0.65rem] text-[var(--np-muted-text)]">
-              Script quick actions require operator or admin role.
-            </p>
+
+              <div class="mt-2 space-y-1">
+                <div class="flex items-center justify-between">
+                  <p class="text-[0.65rem] uppercase tracking-[0.16em] text-cyan-200">
+                    AI Copilot
+                  </p>
+                  <button
+                    type="button"
+                    @click="askAiAboutSelectedDevice"
+                    class="rounded border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                           text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                    :disabled="aiLoading"
+                  >
+                    {{ aiLoading ? "Asking..." : "Ask about this device" }}
+                  </button>
+                </div>
+                <p v-if="aiError" class="text-[0.7rem] text-rose-300">
+                  {{ aiError }}
+                </p>
+                <div
+                  v-if="aiAnswer"
+                  class="mt-1 max-h-32 overflow-auto rounded border border-cyan-400/20 bg-black/80 p-2 text-[0.7rem] text-cyan-100"
+                >
+                  {{ aiAnswer }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
             <p v-if="actionStatus" class="text-[0.65rem] text-cyan-100/80">
               {{ actionStatus }}
             </p>
@@ -1167,13 +1410,10 @@ onBeforeUnmount(() => {
             <h3 class="text-[0.7rem] uppercase tracking-[0.16em] text-cyan-200">
               Script Shortcuts
             </h3>
-            <p class="text-[0.7rem] text-cyan-100/80" v-if="canRunScripts">
+            <p class="text-[0.7rem] text-cyan-100/80">
               Run common automation playbooks and Nmap profiles. Output appears in the Brain console.
             </p>
-            <p class="text-[0.7rem] text-[var(--np-muted-text)]" v-else>
-              Script shortcuts are available to operator and admin roles.
-            </p>
-            <div class="flex flex-wrap gap-2" v-if="canRunScripts">
+            <div class="flex flex-wrap gap-2">
               <button
                 type="button"
                 @click="runWanHealthReport"
@@ -1273,17 +1513,11 @@ onBeforeUnmount(() => {
           class="mt-auto inline-flex items-center justify-center rounded-md border
                  border-cyan-400/40 bg-black/70 px-3 py-2 text-[0.75rem] font-medium
                  text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-          :disabled="isCapturingPcap || !canStartCaptures"
+          :disabled="isCapturingPcap"
         >
           <span v-if="!isCapturingPcap">Export Last 5 Minutes as PCAP</span>
           <span v-else>Capturing traffic...</span>
         </button>
-        <p
-          v-if="!canStartCaptures"
-          class="mt-1 text-[0.65rem] text-[var(--np-muted-text)]"
-        >
-          Packet capture requires operator or admin role.
-        </p>
 
         <div class="mt-2 text-[0.7rem]">
           <p v-if="pcapStatus === 'capturing'" class="text-cyan-100/80">

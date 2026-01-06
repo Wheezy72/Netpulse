@@ -2,18 +2,15 @@
 import axios from "axios";
 import { computed, onMounted, ref } from "vue";
 
-type Role = "viewer" | "operator" | "admin";
 type Theme = "cyberdeck" | "sysadmin";
 
 interface Props {
-  role: Role;
   theme: Theme;
 }
 
 interface ScriptSettingsItem {
   name: string;
   allowed: boolean;
-  lab_only: boolean;
 }
 
 interface Playbook {
@@ -25,7 +22,8 @@ interface Playbook {
 
 const props = defineProps<Props>();
 
-const canRun = computed(() => props.role === "operator" || props.role === "admin");
+// Personal deployment: any authenticated user can run playbooks.
+const canRun = computed(() => true);
 const isCyberdeck = computed(() => props.theme === "cyberdeck");
 
 // Script policy from backend
@@ -37,21 +35,21 @@ const scriptsError = ref<string | null>(null);
 const allPlaybooks: Playbook[] = [
   {
     id: "syn-storm",
-    label: "SYN storm (lab-only)",
+    label: "SYN storm",
     scriptName: "malformed_syn_flood.py",
     description:
       "Short SYN storm against a target to test IDS signatures and Internet Health alerts.",
   },
   {
     id: "xmas-scan",
-    label: "Xmas scan (lab-only)",
+    label: "Xmas scan",
     scriptName: "malformed_xmas_scan.py",
     description:
       "TCP Xmas scan-style packets across selected ports to exercise firewall / IDS behavior.",
   },
   {
     id: "overlap-fragments",
-    label: "Overlapping fragments (lab-only)",
+    label: "Overlapping fragments",
     scriptName: "malformed_overlap_fragments.py",
     description:
       "Tiny overlapping IP fragment pair to observe reassembly behavior and anomaly detection.",
@@ -92,22 +90,22 @@ async function loadScriptSettings(): Promise<void> {
   }
 }
 
-const labPlaybooks = computed(() => {
+const availablePlaybooks = computed(() => {
   if (!scripts.value.length) {
     return allPlaybooks;
   }
-  const allowedLabNames = new Set(
+  const allowedNames = new Set(
     scripts.value
-      .filter((s) => s.allowed && s.lab_only)
+      .filter((s) => s.allowed)
       .map((s) => s.name)
   );
-  return allPlaybooks.filter((pb) => allowedLabNames.has(pb.scriptName));
+  return allPlaybooks.filter((pb) => allowedNames.has(pb.scriptName));
 });
 
 const selectedPlaybook = computed<Playbook | null>(() => {
   const id = selectedPlaybookId.value;
   if (!id) return null;
-  const list = labPlaybooks.value.length ? labPlaybooks.value : allPlaybooks;
+  const list = availablePlaybooks.value.length ? availablePlaybooks.value : allPlaybooks;
   return list.find((pb) => pb.id === id) ?? null;
 });
 
@@ -227,16 +225,16 @@ onMounted(() => {
     <section class="np-panel p-4 space-y-4">
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
-          <span class="np-panel-title">Incident Playbooks (Lab)</span>
+          <span class="np-panel-title">Incident Playbooks</span>
           <span class="text-[0.7rem] text-[var(--np-muted-text)]">
-            Chain a lab-only script, capture window, and optional report to rehearse an incident.
+            Chain a script, capture window, and optional report to rehearse an incident or test detection.
           </span>
         </div>
         <span
           class="text-[0.65rem] uppercase tracking-[0.16em]"
           :class="isCyberdeck ? 'text-cyan-300' : 'text-slate-500'"
         >
-          Lab-only · Use on networks you own
+          Use on networks you own or control
         </span>
       </header>
 
@@ -255,12 +253,12 @@ onMounted(() => {
             class="mt-1 text-[0.75rem]"
             :class="isCyberdeck ? 'text-cyan-100/80' : 'text-slate-600'"
           >
-            Choose a lab-only scenario. Scripts must be allowed and marked lab-only in Settings.
+            Choose a scenario. Scripts must be present in the prebuilt scripts directory and allowed in Settings.
           </p>
 
           <div class="mt-2 grid gap-2 md:grid-cols-3">
             <button
-              v-for="pb in labPlaybooks"
+              v-for="pb in availablePlaybooks"
               :key="pb.id"
               type="button"
               @click="selectedPlaybookId = pb.id"
@@ -286,11 +284,11 @@ onMounted(() => {
           </div>
 
           <p
-            v-if="!labPlaybooks.length && !scriptsLoading"
+            v-if="!availablePlaybooks.length && !scriptsLoading"
             class="mt-2 text-[0.7rem]"
             :class="isCyberdeck ? 'text-amber-200' : 'text-amber-700'"
           >
-            No lab-only scripts are currently allowed. Enable them in Settings &gt; Script allowlist.
+            No playbook scripts are currently allowed. Enable them in Settings &gt; Script allowlist.
           </p>
         </div>
 
@@ -346,11 +344,8 @@ onMounted(() => {
             <div
               :class="isCyberdeck ? 'text-cyan-100/80' : 'text-slate-600'"
             >
-              <p v-if="canRun">
-                Playbooks run lab-only traffic. Use only on networks you own or control.
-              </p>
-              <p v-else>
-                You have viewer access. Playbooks require operator or admin role.
+              <p>
+                Playbooks can generate aggressive or malformed traffic. Use only on networks you own or control.
               </p>
             </div>
             <button
@@ -358,13 +353,11 @@ onMounted(() => {
               @click="runPlaybookScenario"
               class="rounded border px-3 py-1.5 text-[0.75rem] font-medium"
               :class="[
-                canRun
-                  ? isCyberdeck
-                    ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30'
-                    : 'border-blue-500 bg-blue-50 text-blue-700 hover:bg-blue-100'
-                  : 'border-slate-300 text-slate-500 cursor-not-allowed'
+                isCyberdeck
+                  ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30'
+                  : 'border-blue-500 bg-blue-50 text-blue-700 hover:bg-blue-100'
               ]"
-              :disabled="running || !canRun"
+              :disabled="running"
             >
               {{ running ? "Running scenario..." : "Run playbook" }}
             </button>
@@ -472,9 +465,8 @@ onMounted(() => {
             Safety note
           </p>
           <p class="mt-1 text-[0.7rem]" :class="isCyberdeck ? 'text-cyan-100/80' : 'text-slate-600'">
-            These playbooks are designed for lab-only use. They generate malformed or aggressive
-            packets and should only be run on networks and systems you own or are explicitly
-            authorised to test.
+            These playbooks can generate malformed or aggressive packets. Use them responsibly on
+            networks and systems you own or are explicitly authorised to test.
           </p>
         </div>
       </div>

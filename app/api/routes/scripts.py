@@ -12,12 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import db_session, require_role
 from app.core.config import settings
 from app.models.script_job import ScriptJob, ScriptJobStatus
-from app.models.user import UserRole
 from app.tasks import execute_script_job_task
 
-# Scripts API: business-grade endpoints for managing Smart Scripts and
-# their execution lifecycle. Uploads are restricted to operators/admins
-# and prebuilt scripts are governed by an allowlist in settings.
+# Scripts API: endpoints for managing Smart Scripts and their execution
+# lifecycle. In this personal deployment, any authenticated user can
+# upload and run scripts; policy hardening is expected at the network
+# boundary (VPN, firewall) rather than via per-role RBAC.
 router = APIRouter()
 
 
@@ -42,7 +42,6 @@ class PrebuiltScriptSettingsItem(BaseModel):
 
     name: str
     allowed: bool
-    lab_only: bool
 
 
 class PrebuiltScriptSettingsResponse(BaseModel):
@@ -109,7 +108,7 @@ async def get_prebuilt_script_settings() -> PrebuiltScriptSettingsResponse:
     """Return all prebuilt scripts and their allowlist flags.
 
     This inspects the prebuilt scripts directory and marks each file as
-    allowed / lab-only based on the current Settings values.
+    allowed based on the current Settings values.
     """
     scripts_dir = Path(settings.scripts_base_dir) / settings.scripts_prebuilt_subdir
     scripts_dir.mkdir(parents=True, exist_ok=True)
@@ -120,8 +119,10 @@ async def get_prebuilt_script_settings() -> PrebuiltScriptSettingsResponse:
         items.append(
             PrebuiltScriptSettingsItem(
                 name=name,
-                allowed=name in settings.allowed_prebuilt_scripts,
-                lab_only=name in settings.lab_only_prebuilt_scripts,
+                allowed=(
+                    not settings.allowed_prebuilt_scripts
+                    or name in settings.allowed_prebuilt_scripts
+                ),
             )
         )
 
@@ -143,11 +144,9 @@ async def update_prebuilt_script_settings(
     across process restarts; for persistent policy, also update environment
     variables or configuration.
     """
+    # If everything is allowed, admins can choose to leave the list empty.
     allowed = [item.name for item in payload.scripts if item.allowed]
-    lab_only = [item.name for item in payload.scripts if item.lab_only]
-
     settings.allowed_prebuilt_scripts = allowed
-    settings.lab_only_prebuilt_scripts = lab_only
 
 
 @router.post(
@@ -163,14 +162,15 @@ async def run_prebuilt_script(
 ) -> dict[str, Any]:
     """Execute a script from the prebuilt scripts directory with optional parameters.
 
-    A business-grade allowlist is enforced via Settings.allowed_prebuilt_scripts.
-    Lab-only scripts can be separated using Settings.lab_only_prebuilt_scripts.
+    An allowlist can be enforced via Settings.allowed_prebuilt_scripts. If the list
+    is empty, any script present in the prebuilt directory is eligible to run.
     """
     scripts_dir = Path(settings.scripts_base_dir) / settings.scripts_prebuilt_subdir
     script_path = scripts_dir / payload.script_name
 
-    # Enforce allowlist for business environments. You can tune this via env vars.
-    if payload.script_name not in settings.allowed_prebuilt_scripts:
+    # Enforce allowlist if it is explicitly configured.
+    # If the list is empty, allow any script present in the prebuilt directory.
+    if settings.allowed_prebuilt_scripts and payload.script_name not in settings.allowed_prebuilt_scripts:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This script is not allowed by current policy",

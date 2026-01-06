@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import DateTime, String, Boolean
+from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -19,6 +19,8 @@ class Device(Base):
     device_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     os: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     vendor: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # Optional logical zone / segment label, e.g. "home-router-1", "lab-vlan-20".
+    zone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     is_gateway: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     last_seen: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
