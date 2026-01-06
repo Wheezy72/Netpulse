@@ -117,6 +117,48 @@ const captureHeaders = ref<PacketHeaderView[]>([]);
 const isRunningAction = ref(false);
 const actionStatus = ref<string | null>(null);
 
+// Device detail + AI copilot state
+type DeviceDetail = {
+  device: {
+    id: number;
+    hostname?: string | null;
+    ip_address: string;
+    mac_address?: string | null;
+    device_type?: string | null;
+    is_gateway: boolean;
+    zone?: string | null;
+    last_seen?: string | null;
+  };
+  type_guess?: string | null;
+  type_confidence?: number | null;
+  vulnerabilities: {
+    id: number;
+    title: string;
+    severity: string;
+    port?: number | null;
+    detected_at?: string | null;
+  }[];
+  scripts: {
+    id: number;
+    script_name: string;
+    status: string;
+    created_at: string;
+  }[];
+  metrics: {
+    metric_type: string;
+    timestamp: string;
+    value: number;
+  }[];
+};
+
+const deviceDetail = ref<DeviceDetail | null>(null);
+const deviceDetailLoading = ref(false);
+const deviceDetailError = ref<string | null>(null);
+
+const aiAnswer = ref<string | null>(null);
+const aiLoading = ref(false);
+const aiError = ref<string | null>(null);
+
 // Brain console log stream
 const brainLogs = ref<string[]>([]);
 let logSocket: WebSocket | null = null;
@@ -414,6 +456,8 @@ async function loadTopology(): Promise<void> {
           vulnerability_count: Number(data.vulnerabilityCount ?? 0),
           last_seen: data.lastSeen,
         };
+        // Load detailed view for this device and reset AI answer state
+        loadDeviceDetail(selectedNode.value.id);
       });
     } else {
       cy.elements().remove();
@@ -675,6 +719,51 @@ async function loadZones(): Promise<void> {
   }
 }
 
+/**
+ * Load detailed information for the currently selected device.
+ */
+async function loadDeviceDetail(deviceId: number): Promise<void> {
+  deviceDetailLoading.value = true;
+  deviceDetailError.value = null;
+  aiAnswer.value = null;
+  aiError.value = null;
+
+  try {
+    const { data } = await axios.get<DeviceDetail>(`/api/devices/${deviceId}/detail`);
+    deviceDetail.value = data;
+  } catch {
+    deviceDetailError.value = "Failed to load device detail.";
+    deviceDetail.value = null;
+  } finally {
+    deviceDetailLoading.value = false;
+  }
+}
+
+/**
+ * Ask the AI copilot to analyse the selected device.
+ */
+async function askAiAboutSelectedDevice(): Promise<void> {
+  const node = selectedNode.value;
+  if (!node) {
+    return;
+  }
+  aiLoading.value = true;
+  aiError.value = null;
+  aiAnswer.value = null;
+  try {
+    const { data } = await axios.post<{ answer: string }>("/api/assist/analyze", {
+      mode: "device",
+      target_id: node.id,
+      question: null,
+    });
+    aiAnswer.value = data.answer;
+  } catch {
+    aiError.value = "AI analysis failed. Check AI provider configuration.";
+  } finally {
+    aiLoading.value = false;
+  }
+}
+
 onMounted(() => {
   // Initial load
   loadPulse();
@@ -885,6 +974,9 @@ onBeforeUnmount(() => {
               <p class="mt-1 font-mono text-cyan-100">
                 {{ hoveredNode.hostname || hoveredNode.ip_address }}
               </p>
+              <p v-if="hoveredNode.zone" class="text-[0.65rem] text-[var(--np-muted-text)]">
+                Zone: {{ hoveredNode.zone }}
+              </p>
             </div>
             <span
               v-if="hoveredNode.vulnerability_severity"
@@ -900,7 +992,17 @@ onBeforeUnmount(() => {
             </div>
             <div>
               <dt class="text-[var(--np-muted-text)]">Type</dt>
-              <dd>{{ hoveredNode.device_type || "unknown" }}</dd>
+              <dd>
+                <span v-if="deviceDetail && deviceDetail.type_guess">
+                  {{ deviceDetail.type_guess }}
+                  <span v-if="deviceDetail.type_confidence != null">
+                    ({{ (deviceDetail.type_confidence * 100).toFixed(0) }}%)
+                  </span>
+                </span>
+                <span v-else>
+                  {{ hoveredNode.device_type || "unknown" }}
+                </span>
+              </dd>
             </div>
             <div>
               <dt class="text-[var(--np-muted-text)]">Gateway</dt>
@@ -912,44 +1014,104 @@ onBeforeUnmount(() => {
             </div>
           </dl>
 
-          <div v-if="selectedNode && selectedNode.id === hoveredNode.id" class="mt-3 space-y-2">
+          <div
+            v-if="selectedNode && selectedNode.id === hoveredNode.id"
+            class="mt-3 space-y-2"
+          >
             <p class="text-[0.65rem] uppercase tracking-[0.16em] text-cyan-200">
               Quick Actions
             </p>
-            <div class="mt-3 space-y-2">
+            <div class="flex flex-wrap gap-2">
+              <button
+                type="button"
+                @click="runPrebuiltScriptForDevice('malformed_syn_flood.py', { count: 30 })"
+                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                :disabled="isRunningAction"
+              >
+                SYN Storm (template)
+              </button>
+              <button
+                type="button"
+                @click="runPrebuiltScriptForDevice('malformed_xmas_scan.py')"
+                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                :disabled="isRunningAction"
+              >
+                Xmas Scan (template)
+              </button>
+              <button
+                type="button"
+                @click="runPrebuiltScriptForDevice('malformed_overlap_fragments.py')"
+                class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                       text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                :disabled="isRunningAction"
+              >
+                Overlap Fragments
+              </button>
+            </div>
+
+            <div class="mt-3 border-t border-cyan-400/30 pt-2 space-y-2">
               <p class="text-[0.65rem] uppercase tracking-[0.16em] text-cyan-200">
-                Quick Actions
+                Device Summary
               </p>
-              <div class="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  @click="runPrebuiltScriptForDevice('malformed_syn_flood.py', { count: 30 })"
-                  class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
-                         text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-                  :disabled="isRunningAction"
+              <p v-if="deviceDetailLoading" class="text-[0.7rem] text-cyan-100/80">
+                Loading device detail...
+              </p>
+              <p v-else-if="deviceDetailError" class="text-[0.7rem] text-rose-300">
+                {{ deviceDetailError }}
+              </p>
+              <div v-else-if="deviceDetail" class="space-y-1 text-[0.7rem]">
+                <p v-if="deviceDetail.vulnerabilities.length">
+                  Recent vulns:
+                  <span
+                    v-for="v in deviceDetail.vulnerabilities"
+                    :key="v.id"
+                    class="mr-2"
+                  >
+                    [{{ v.severity }}] {{ v.title }}
+                  </span>
+                </p>
+                <p v-if="deviceDetail.scripts.length">
+                  Recent scripts:
+                  <span
+                    v-for="s in deviceDetail.scripts"
+                    :key="s.id"
+                    class="mr-2"
+                  >
+                    {{ s.script_name }} ({{ s.status }})
+                  </span>
+                </p>
+              </div>
+
+              <div class="mt-2 space-y-1">
+                <div class="flex items-center justify-between">
+                  <p class="text-[0.65rem] uppercase tracking-[0.16em] text-cyan-200">
+                    AI Copilot
+                  </p>
+                  <button
+                    type="button"
+                    @click="askAiAboutSelectedDevice"
+                    class="rounded border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
+                           text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                    :disabled="aiLoading"
+                  >
+                    {{ aiLoading ? "Asking..." : "Ask about this device" }}
+                  </button>
+                </div>
+                <p v-if="aiError" class="text-[0.7rem] text-rose-300">
+                  {{ aiError }}
+                </p>
+                <div
+                  v-if="aiAnswer"
+                  class="mt-1 max-h-32 overflow-auto rounded border border-cyan-400/20 bg-black/80 p-2 text-[0.7rem] text-cyan-100"
                 >
-                  SYN Storm (template)
-                </button>
-                <button
-                  type="button"
-                  @click="runPrebuiltScriptForDevice('malformed_xmas_scan.py')"
-                  class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
-                         text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-                  :disabled="isRunningAction"
-                >
-                  Xmas Scan (template)
-                </button>
-                <button
-                  type="button"
-                  @click="runPrebuiltScriptForDevice('malformed_overlap_fragments.py')"
-                  class="rounded-md border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
-                         text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
-                  :disabled="isRunningAction"
-                >
-                  Overlap Fragments
-                </button>
+                  {{ aiAnswer }}
+                </div>
               </div>
             </div>
+          </div>
+        </div>
             <p v-if="actionStatus" class="text-[0.65rem] text-cyan-100/80">
               {{ actionStatus }}
             </p>
