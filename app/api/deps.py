@@ -7,7 +7,8 @@ Provides:
 - db_session: async SQLAlchemy session dependency.
 - Password hashing helpers.
 - JWT creation and validation.
-- Role-based access control via require_role().
+- A simple authentication dependency (require_role) that ensures the
+  caller is authenticated; all authenticated users are treated the same.
 """
 
 from datetime import datetime, timedelta
@@ -22,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import async_session_factory
-from app.models.user import User, UserRole
+from app.models.user import User
 
 # Use a password hashing scheme that doesn't rely on the external bcrypt module
 # to avoid compatibility issues with newer bcrypt releases.
@@ -48,7 +49,12 @@ def create_access_token(
     role: str,
     expires_delta: Optional[timedelta] = None,
 ) -> str:
-    """Create a signed JWT for the given subject and role."""
+    """Create a signed JWT for the given subject.
+
+    The `role` field is preserved in the token for backward compatibility
+    and potential display purposes, but it is not enforced by the backend.
+    All authenticated users are treated equally by the API.
+    """
     to_encode = {"sub": subject, "role": role}
     expire = datetime.utcnow() + (
         expires_delta
@@ -100,15 +106,16 @@ async def get_current_user(
     return user
 
 
-def require_role(*allowed_roles: UserRole):
-    """Return a dependency that ensures the current user has one of the given roles."""
+def require_role(*_allowed_roles: object):
+    """Return a dependency that ensures the caller is authenticated.
+
+    RBAC has been simplified for this personal deployment: all authenticated
+    users are treated the same. This helper is kept so existing route
+    dependencies continue to work, but it only enforces authentication,
+    not per-role permissions.
+    """
 
     async def _require(user: User = Depends(get_current_user)) -> User:
-        if user.role not in allowed_roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient permissions",
-            )
         return user
 
     return _require
