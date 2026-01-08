@@ -201,7 +201,7 @@ onMounted(() => {
           <p class="mt-1 text-[0.7rem] text-cyan-100/80">
             Active mode:
             <span class="font-semibold">
-              {{ theme === "cyberdeck" ? "CyberDeck" : "SysAdmin Pro" }}
+              CyberDeck
             </span>.
             Use the toggle in the header to switch between them.
           </p>
@@ -217,7 +217,7 @@ onMounted(() => {
           <p class="mt-1 text-[0.75rem] text-slate-600">
             Active mode:
             <span class="font-semibold">
-              {{ theme === "cyberdeck" ? "CyberDeck" : "SysAdmin Pro" }}
+              SysAdmin Pro
             </span>.
             Use the toggle in the header to switch between them.
           </p>
