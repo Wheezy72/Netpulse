@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     pulse_isp_ip: str = "8.8.8.8"
     pulse_cloudflare_ip: str = "1.1.1.1"
 
+    # AI Copilot configuration
+    ai_provider: str | None = None
+    ai_api_key: str | None = None
+    ai_model_name: str | None = None
+
     # Paths
     scripts_base_dir: str = "/scripts"
     scripts_uploads_subdir: str = "uploads"
