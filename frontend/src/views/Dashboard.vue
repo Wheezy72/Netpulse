@@ -405,9 +405,6 @@ async function loadTopology(): Promise<void> {
             style: {
               "background-color": "#ef4444",
               "border-color": "#fecaca",
-              "shadow-blur": 20,
-              "shadow-color": "#ef4444",
-              "shadow-opacity": 0.9,
             },
           },
           {
@@ -958,7 +955,7 @@ onBeforeUnmount(() => {
     </section>
 
     <!-- Eye: Topology & Recon -->
-    <section
+   <<section
       class="np-panel relative col-span-3 grid gap-4 p-4 xl:col-span-1 xl:row-span-3"
     >
       <header class="np-panel-header">
