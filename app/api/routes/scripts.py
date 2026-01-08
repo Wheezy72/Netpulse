@@ -56,7 +56,7 @@ class PrebuiltScriptSettingsUpdateRequest(BaseModel):
     "/upload",
     status_code=status.HTTP_201_CREATED,
     summary="Upload and execute a Python script",
-    dependencies=[Depends(require_role(UserRole.OPERATOR, UserRole.ADMIN))],
+    dependencies=[Depends(require_role())],
 )
 async def upload_script(
     file: UploadFile,
@@ -102,7 +102,7 @@ async def upload_script(
     "/settings",
     response_model=PrebuiltScriptSettingsResponse,
     summary="Get prebuilt script allowlist configuration",
-    dependencies=[Depends(require_role(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN))],
+    dependencies=[Depends(require_role())],
 )
 async def get_prebuilt_script_settings() -> PrebuiltScriptSettingsResponse:
     """Return all prebuilt scripts and their allowlist flags.
@@ -133,7 +133,7 @@ async def get_prebuilt_script_settings() -> PrebuiltScriptSettingsResponse:
     "/settings",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Update prebuilt script allowlist configuration",
-    dependencies=[Depends(require_role(UserRole.ADMIN))],
+    dependencies=[Depends(require_role())],
 )
 async def update_prebuilt_script_settings(
     payload: PrebuiltScriptSettingsUpdateRequest,
@@ -153,7 +153,7 @@ async def update_prebuilt_script_settings(
     "/prebuilt/run",
     status_code=status.HTTP_201_CREATED,
     summary="Run a prebuilt script by name",
-    dependencies=[Depends(require_role(UserRole.OPERATOR, UserRole.ADMIN))],
+    dependencies=[Depends(require_role())],
 )
 async def run_prebuilt_script(
     payload: RunPrebuiltScriptRequest,
