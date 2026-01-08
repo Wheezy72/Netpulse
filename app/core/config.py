@@ -123,6 +123,14 @@ class Settings(BaseSettings):
         )
 
     @property
+    def celery_broker_url(self) -> str:
+        return self.redis_url
+
+    @property
+    def celery_result_backend(self) -> str:
+        return self.redis_url
+
+    @property
     def pulse_targets(self) -> List[str]:
         return [
             self.pulse_gateway_ip,
