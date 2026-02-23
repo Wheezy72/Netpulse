@@ -333,11 +333,12 @@ def _generate_script_fallback(description: str, target: str | None) -> tuple[str
 )
 async def ai_generate_script(
     payload: AIScriptRequest,
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> AIScriptResponse:
-    from app.api.routes.settings import _ai_settings, ai_provider_env_var, get_ai_api_key
+    from app.api.routes.settings import ai_provider_env_var, get_ai_api_key, load_ai_settings
 
-    ai_config = _ai_settings.get(current_user.id)
+    ai_config = await load_ai_settings(db, current_user.id)
 
     if ai_config and ai_config.enabled:
         provider = ai_config.provider

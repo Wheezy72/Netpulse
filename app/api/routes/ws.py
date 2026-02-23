@@ -1,25 +1,27 @@
 from __future__ import annotations
 
-"""
-WebSocket endpoints for live streams.
+"""WebSocket endpoints for live streams.
 
-Currently provides:
-- /api/ws/scripts/{job_id}: stream ScriptJob logs to the Brain console.
-- /api/ws/metrics: stream real-time dashboard metrics.
+Provides:
+- /api/ws/scripts/{job_id}: stream ScriptJob logs as JSON events.
+- /api/ws/scans/{scan_id}: stream Nmap scan output as plain text frames (xterm).
+- /api/ws/metrics: stream real-time dashboard metrics as JSON.
 """
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Set
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from jose import JWTError, jwt
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import async_session_factory
 from app.models.metric import Metric
+from app.models.scan_job import ScanJob, ScanJobStatus
 from app.models.script_job import ScriptJob, ScriptJobStatus
 from app.models.user import User
 
@@ -49,17 +51,8 @@ async def _get_user_from_token(token: str, db: AsyncSession) -> User | None:
 
 @router.websocket("/scripts/{job_id}")
 async def websocket_script_logs(websocket: WebSocket, job_id: int) -> None:
-    """
-    Stream ScriptJob logs and status over WebSocket.
+    """Stream ScriptJob logs and status over WebSocket (JSON events)."""
 
-    The client must supply a JWT access token as a `token` query parameter:
-      wss://host/api/ws/scripts/{job_id}?token=...
-
-    Messages are JSON objects with the shape:
-      { "event": "log", "message": "...", "status": "running" }
-      { "event": "complete", "status": "success" }
-      { "event": "error", "message": "..." }
-    """
     await websocket.accept()
 
     token = websocket.query_params.get("token")
@@ -78,7 +71,8 @@ async def websocket_script_logs(websocket: WebSocket, job_id: int) -> None:
         try:
             last_len = 0
             while True:
-                job = await db.get(ScriptJob, job_id)
+                result = await db.execute(select(ScriptJob).where(ScriptJob.id == job_id))
+                job = result.scalar_one_or_none()
                 if job is None:
                     await websocket.send_json(
                         {"event": "error", "message": "Script job not found"}
@@ -107,9 +101,10 @@ async def websocket_script_logs(websocket: WebSocket, job_id: int) -> None:
                     await websocket.close(code=1000)
                     return
 
+                # End the read-only transaction so we see updates on the next poll.
+                await db.rollback()
                 await asyncio.sleep(1)
         except WebSocketDisconnect:
-            # Client disconnected; nothing else to do
             return
         except Exception as exc:  # noqa: BLE001
             await websocket.send_json(
@@ -118,33 +113,99 @@ async def websocket_script_logs(websocket: WebSocket, job_id: int) -> None:
             await websocket.close(code=1011)
 
 
+@router.websocket("/scans/{scan_id}")
+async def websocket_scan_output(websocket: WebSocket, scan_id: str) -> None:
+    """Stream scan output as raw text frames suitable for xterm.js."""
+
+    await websocket.accept()
+
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.send_text("[error] Missing token\n")
+        await websocket.close(code=4401)
+        return
+
+    async with async_session_factory() as db:
+        user = await _get_user_from_token(token, db)
+        if user is None or not user.is_active:
+            await websocket.send_text("[error] Unauthorized\n")
+            await websocket.close(code=4401)
+            return
+
+        result = await db.execute(select(ScanJob).where(ScanJob.id == scan_id))
+        job = result.scalar_one_or_none()
+        if job is None:
+            await websocket.send_text("[error] Scan job not found\n")
+            await websocket.close(code=4404)
+            return
+
+        artifact_path = Path(job.artifact_path or f"data/scans/scan_{scan_id}.txt")
+        last_pos = 0
+
+        try:
+            while True:
+                result = await db.execute(select(ScanJob).where(ScanJob.id == scan_id))
+                job = result.scalar_one_or_none()
+                if job is None:
+                    await websocket.send_text("[error] Scan job not found\n")
+                    await websocket.close(code=4404)
+                    return
+
+                if job.artifact_path:
+                    artifact_path = Path(job.artifact_path)
+
+                if artifact_path.exists() and artifact_path.is_file():
+                    with artifact_path.open("rb") as f:
+                        f.seek(last_pos)
+                        data = f.read()
+                        last_pos = f.tell()
+                    if data:
+                        await websocket.send_text(data.decode(errors="replace"))
+
+                if job.status in {ScanJobStatus.COMPLETED, ScanJobStatus.FAILED}:
+                    # Flush once more and then close.
+                    if artifact_path.exists() and artifact_path.is_file():
+                        with artifact_path.open("rb") as f:
+                            f.seek(last_pos)
+                            data = f.read()
+                            last_pos = f.tell()
+                        if data:
+                            await websocket.send_text(data.decode(errors="replace"))
+
+                    await websocket.close(code=1000)
+                    return
+
+                # End the read-only transaction so we see updates on the next poll.
+                await db.rollback()
+                await asyncio.sleep(0.35)
+        except WebSocketDisconnect:
+            return
+        except Exception as exc:  # noqa: BLE001
+            try:
+                await websocket.send_text(f"\n[ws-error] {exc!r}\n")
+            finally:
+                await websocket.close(code=1011)
+
+
 @router.websocket("/metrics")
 async def websocket_metrics(websocket: WebSocket) -> None:
-    """
-    Stream real-time dashboard metrics over WebSocket.
-    
-    Sends JSON updates every 3 seconds with:
-    - internet_health: 0-100 score
-    - latency_ms: network latency
-    - jitter_ms: latency variation
-    - packet_loss_pct: packet loss percentage
-    - timestamp: ISO timestamp
-    """
+    """Stream real-time dashboard metrics over WebSocket."""
+
     await websocket.accept()
-    
+
     token = websocket.query_params.get("token")
     if not token:
         await websocket.send_json({"event": "error", "message": "Missing token"})
         await websocket.close(code=4401)
         return
-    
+
     async with async_session_factory() as db:
         user = await _get_user_from_token(token, db)
         if user is None or not user.is_active:
             await websocket.send_json({"event": "error", "message": "Unauthorized"})
             await websocket.close(code=4401)
             return
-    
+
     metrics_clients.add(websocket)
 
     def _isoformat_utc_z(ts: datetime) -> str:

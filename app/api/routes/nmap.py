@@ -5,70 +5,139 @@ import json
 import os
 import re
 import shutil
-import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import db_session, get_current_user
+from app.db.session import async_session_factory
+from app.models.scan_job import ScanJob, ScanJobStatus
 from app.models.user import User
+from app.services.nmap_runner import run_scan_job
 
 router = APIRouter()
 
 SCANS_DIR = Path("data/scans")
 SCANS_DIR.mkdir(parents=True, exist_ok=True)
 
-scan_results_store: Dict[str, Dict[str, Any]] = {}
+TARGET_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9.\-/]+$")
+PORT_PATTERN = re.compile(r"^[\d,\-]+$")
 
-ALLOWED_NMAP_FLAGS = {
-    '-sS', '-sT', '-sU', '-sV', '-sC', '-sn', '-sP', '-sA', '-sW', '-sM', '-sN', '-sF', '-sX',
-    '-O', '-A', '-F', '-T0', '-T1', '-T2', '-T3', '-T4', '-T5',
-    '-Pn', '-n', '-R', '-v', '-vv', '-d', '-dd', '-p-',
-    '--open', '--reason', '--osscan-guess',
+# Flags without a value.
+ALLOWED_NMAP_FLAGS: set[str] = {
+    "-sS",
+    "-sT",
+    "-sU",
+    "-sV",
+    "-sC",
+    "-sn",
+    "-sP",
+    "-sA",
+    "-sW",
+    "-sM",
+    "-sN",
+    "-sF",
+    "-sX",
+    "-O",
+    "-A",
+    "-F",
+    "-Pn",
+    "-n",
+    "-R",
+    "-v",
+    "-vv",
+    "-d",
+    "-dd",
+    "-p-",
+    "--open",
+    "--reason",
+    "--osscan-guess",
+    "--osscan-limit",
 }
 
-TARGET_PATTERN = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9.\-/]+$')
-PORT_PATTERN = re.compile(r'^[\d,\-]+$')
+# Flags that accept a value (either as `--flag value` or `--flag=value`).
+ALLOWED_VALUE_FLAGS: set[str] = {
+    "--min-rate",
+    "--max-rate",
+    "--host-timeout",
+    "--script-timeout",
+    "--script-args",
+    "--max-retries",
+    "--version-intensity",
+    "--top-ports",
+}
 
+# Timing templates -T0..-T5
+ALLOWED_TIMING: set[str] = {f"-T{i}" for i in range(0, 6)}
+ALLOWED_NMAP_FLAGS |= ALLOWED_TIMING
 
-def _load_history_from_disk():
-    """Load scan history from disk on startup."""
-    for file in SCANS_DIR.glob("*.txt"):
-        try:
-            parts = file.stem.split("_")
-            if file.name.startswith("nmap_scan_output_"):
-                scan_id = parts[-1] if len(parts) >= 4 else file.stem
-            elif file.name.startswith("scan_"):
-                scan_id = parts[1] if len(parts) >= 2 else file.stem
-            else:
-                continue
-            
-            if scan_id not in scan_results_store:
-                with open(file, 'r') as f:
-                    lines = f.readlines()
-                    command = lines[0].replace("Command: ", "").strip() if len(lines) > 0 else ""
-                    target = lines[1].replace("Target: ", "").strip() if len(lines) > 1 else ""
-                    scan_type = lines[2].replace("Type: ", "").strip() if len(lines) > 2 else ""
-                    output = "".join(lines[5:]) if len(lines) > 5 else ""
-                    
-                scan_results_store[scan_id] = {
-                    "id": scan_id,
-                    "command": command,
-                    "target": target,
-                    "scan_type": scan_type,
-                    "started_at": datetime.fromtimestamp(file.stat().st_mtime).isoformat(),
-                    "completed_at": datetime.fromtimestamp(file.stat().st_mtime).isoformat(),
-                    "status": "completed",
-                    "output": output,
-                    "file_path": str(file),
-                }
-        except Exception:
-            continue
-
-_load_history_from_disk()
+# A practical allowlist of common NSE scripts used by this codebase's playbooks.
+SAFE_NSE_SCRIPTS: set[str] = {
+    "vuln",
+    "safe",
+    "default",
+    "banner",
+    "traceroute",
+    # HTTP
+    "http-title",
+    "http-headers",
+    "http-methods",
+    "http-enum",
+    "http-security-headers",
+    "http-sql-injection",
+    # SMB/Windows
+    "smb-os-discovery",
+    "smb-enum-shares",
+    "smb-enum-users",
+    "smb-vuln-ms17-010",
+    # LDAP / AD
+    "ldap-rootdse",
+    # TLS
+    "ssl-cert",
+    "ssl-enum-ciphers",
+    "ssl-heartbleed",
+    "ssl-known-key",
+    "tls-ticketbleed",
+    "ssh-hostkey",
+    "ssh-auth-methods",
+    "ssh-brute",
+    # DNS
+    "dns-brute",
+    "dns-zone-transfer",
+    "dns-cache-snoop",
+    "dns-recursion",
+    # SNMP
+    "snmp-info",
+    "snmp-sysdescr",
+    # NAS / storage
+    "nfs-showmount",
+    "afp-showmount",
+    # IoT
+    "upnp-info",
+    # Databases
+    "mysql-info",
+    "mysql-empty-password",
+    "ms-sql-info",
+    "oracle-sid-brute",
+    "mongodb-info",
+    "redis-info",
+    # Email
+    "smtp-commands",
+    "smtp-enum-users",
+    "smtp-open-relay",
+    "pop3-capabilities",
+    "imap-capabilities",
+    # Other
+    "firewalk",
+    "ftp-anon",
+    "ftp-brute",
+    "http-brute",
+}
 
 
 def _validate_target(target: str) -> bool:
@@ -80,72 +149,99 @@ def _validate_target(target: str) -> bool:
     return True
 
 
+def _looks_like_safe_script_name(name: str) -> bool:
+    return bool(re.match(r"^[a-zA-Z0-9][a-zA-Z0-9\-\*_]+$", name))
+
+
 def _parse_safe_nmap_args(command: str, target: str) -> List[str]:
-    """Parse nmap command and return safe argument list for subprocess_exec."""
-    args = ['nmap']
+    """Parse an nmap command and return a safe argument list.
+
+    This intentionally only passes through a known allowlist of flags.
+    """
+
+    args = ["nmap"]
     parts = command.strip().split()
-    
-    if parts and parts[0] == 'nmap':
+
+    if parts and parts[0] == "nmap":
         parts = parts[1:]
-    
+
     i = 0
     while i < len(parts):
         part = parts[i]
-        
+
         if part == target or part.startswith(target):
             i += 1
             continue
-        
+
+        # Allow --flag=value as well.
+        if part.startswith("--") and "=" in part:
+            flag, value = part.split("=", 1)
+            if flag in ALLOWED_VALUE_FLAGS and value:
+                args.append(f"{flag}={value}")
+                i += 1
+                continue
+
         if part in ALLOWED_NMAP_FLAGS:
             args.append(part)
             i += 1
             continue
-        
-        if part == '-p' and i + 1 < len(parts):
+
+        if part in ALLOWED_VALUE_FLAGS and i + 1 < len(parts):
+            args.append(part)
+            args.append(parts[i + 1])
+            i += 2
+            continue
+
+        if part == "-p" and i + 1 < len(parts):
             port_spec = parts[i + 1]
             if PORT_PATTERN.match(port_spec):
-                args.append('-p')
+                args.append("-p")
                 args.append(port_spec)
                 i += 2
                 continue
-        elif part.startswith('-p') and PORT_PATTERN.match(part[2:]):
+        elif part.startswith("-p") and PORT_PATTERN.match(part[2:]):
             args.append(part)
             i += 1
             continue
-        
-        if part == '--top-ports' and i + 1 < len(parts):
-            try:
-                count = int(parts[i + 1])
-                if 1 <= count <= 65535:
-                    args.append('--top-ports')
-                    args.append(str(count))
-                    i += 2
-                    continue
-            except ValueError:
-                pass
-        
-        if part.startswith('--script='):
-            script_value = part[9:]
-            safe_scripts = {
-                'vuln', 'safe', 'default', 'http-headers', 'http-title', 'http-methods',
-                'smb-enum-shares', 'smb-vuln-ms17-010', 'smb-os-discovery',
-                'ssl-cert', 'ssl-enum-ciphers', 'ssh-hostkey',
-                'dns-brute', 'ftp-anon', 'mysql-info', 'banner',
-                'snmp-info', 'http-sql-injection', 'ssl-heartbleed',
-                'mysql-empty-password', 'ssh-auth-methods',
-                'http-brute', 'ssh-brute', 'ftp-brute',
-                'tls-ticketbleed', 'traceroute',
-            }
-            script_parts = script_value.split(',')
-            if all(s.strip() in safe_scripts for s in script_parts):
+
+        if part.startswith("--script="):
+            script_value = part[len("--script=") :]
+            script_parts = [s.strip() for s in script_value.split(",") if s.strip()]
+
+            # Accept scripts that are either in our explicit list, or match a safe
+            # pattern (hyphens/underscores/wildcards) and are not obviously trying
+            # to escape (no slashes/quotes/etc).
+            if all(
+                (s in SAFE_NSE_SCRIPTS) or _looks_like_safe_script_name(s)
+                for s in script_parts
+            ):
                 args.append(part)
                 i += 1
                 continue
-        
+
+        # Ignore unknown flags/args.
         i += 1
-    
+
     args.append(target)
     return args
+
+
+def _read_artifact_tail(path: str | None, max_bytes: int = 200_000) -> str | None:
+    if not path:
+        return None
+    file_path = Path(path)
+    if not file_path.exists() or not file_path.is_file():
+        return None
+
+    try:
+        size = file_path.stat().st_size
+        with file_path.open("rb") as f:
+            if size > max_bytes:
+                f.seek(size - max_bytes)
+            data = f.read()
+        return data.decode(errors="replace")
+    except Exception:
+        return None
 
 
 class NmapCommandRequest(BaseModel):
@@ -171,118 +267,128 @@ class ScanResult(BaseModel):
     file_path: Optional[str] = None
 
 
+def _job_to_scan_result(job: ScanJob, include_output: bool = True) -> ScanResult:
+    output = _read_artifact_tail(job.artifact_path) if include_output else None
+
+    command = (job.arguments or {}).get("command") or ""
+    return ScanResult(
+        id=job.id,
+        command=command,
+        target=job.target,
+        scan_type=job.profile,
+        started_at=(job.started_at or job.created_at).isoformat(),
+        completed_at=job.completed_at.isoformat() if job.completed_at else None,
+        status=job.status.value,
+        output=output,
+        file_path=job.artifact_path,
+    )
+
+
 def get_scan_type_from_command(command: str) -> str:
     """Determine scan type from nmap command flags."""
-    if '-sV' in command:
-        return 'Version Detection'
-    elif '-sS' in command:
-        return 'SYN Stealth Scan'
-    elif '-sU' in command:
-        return 'UDP Scan'
-    elif '-sT' in command:
-        return 'TCP Connect Scan'
-    elif '-sn' in command:
-        return 'Ping Sweep'
-    elif '-O' in command:
-        return 'OS Detection'
-    elif '--script' in command or '-sC' in command:
-        return 'Script Scan'
-    elif '-A' in command:
-        return 'Aggressive Scan'
-    elif '-p-' in command:
-        return 'Full Port Scan'
+    if "-sV" in command:
+        return "Version Detection"
+    elif "-sS" in command:
+        return "SYN Stealth Scan"
+    elif "-sU" in command:
+        return "UDP Scan"
+    elif "-sT" in command:
+        return "TCP Connect Scan"
+    elif "-sn" in command:
+        return "Ping Sweep"
+    elif "-O" in command:
+        return "OS Detection"
+    elif "--script" in command or "-sC" in command:
+        return "Script Scan"
+    elif "-A" in command:
+        return "Aggressive Scan"
+    elif "-p-" in command:
+        return "Full Port Scan"
     else:
-        return 'Basic Scan'
+        return "Basic Scan"
 
 
 @router.post("/execute", response_model=ScanResult)
 async def execute_nmap(
     request: NmapCommandRequest,
     background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> ScanResult:
     """Execute an nmap command and return results."""
-    if not shutil.which('nmap'):
+    if not shutil.which("nmap"):
         raise HTTPException(status_code=503, detail="nmap is not installed on this system")
-    
+
     if not _validate_target(request.target):
-        raise HTTPException(status_code=400, detail="Invalid target format. Use IP address, hostname, or CIDR notation.")
-    
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid target format. Use IP address, hostname, or CIDR notation.",
+        )
+
     safe_args = _parse_safe_nmap_args(request.command, request.target)
     command_str = " ".join(safe_args)
-    
-    scan_id = str(uuid.uuid4())[:8]
+
     scan_type = get_scan_type_from_command(command_str)
-    
-    result = ScanResult(
-        id=scan_id,
-        command=command_str,
+
+    job = ScanJob(
         target=request.target,
-        scan_type=scan_type,
-        started_at=datetime.now().isoformat(),
-        status="running",
-        output=None,
-        file_path=None,
+        profile=scan_type,
+        arguments={
+            "command": request.command,
+            "safe_args": safe_args,
+            "rendered_command": command_str,
+        },
+        status=ScanJobStatus.PENDING,
+        requested_by_user_id=current_user.id,
     )
-    
-    scan_results_store[scan_id] = result.dict()
-    
-    async def run_scan():
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *safe_args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    scan_id = job.id
+
+    async def _run() -> None:
+        async with async_session_factory() as session:
+            scan_job = await session.get(ScanJob, scan_id)
+            if scan_job is None:
+                return
+
+            await run_scan_job(
+                session,
+                scan_job,
+                safe_args=safe_args,
+                save_results=request.save_results,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
-            output = stdout.decode() + (stderr.decode() if stderr else "")
-            
-            scan_results_store[scan_id]["output"] = output
-            scan_results_store[scan_id]["completed_at"] = datetime.now().isoformat()
-            scan_results_store[scan_id]["status"] = "completed"
-            
-            if request.save_results:
-                safe_target = request.target.replace('/', '_').replace('.', '-').replace(':', '-')[:30]
-                file_path = SCANS_DIR / f"nmap_scan_output_{safe_target}_{scan_id}.txt"
-                with open(file_path, 'w') as f:
-                    f.write(f"Command: {command_str}\n")
-                    f.write(f"Target: {request.target}\n")
-                    f.write(f"Type: {scan_type}\n")
-                    f.write(f"Time: {datetime.now().isoformat()}\n")
-                    f.write("=" * 60 + "\n\n")
-                    f.write(output)
-                scan_results_store[scan_id]["file_path"] = str(file_path)
-        except asyncio.TimeoutError:
-            scan_results_store[scan_id]["status"] = "timeout"
-            scan_results_store[scan_id]["output"] = "Scan timed out after 5 minutes"
-        except Exception as e:
-            scan_results_store[scan_id]["status"] = "error"
-            scan_results_store[scan_id]["output"] = str(e)
-    
-    background_tasks.add_task(run_scan)
-    
-    return result
+
+    background_tasks.add_task(_run)
+
+    return _job_to_scan_result(job, include_output=False)
 
 
 @router.get("/result/{scan_id}", response_model=ScanResult)
 async def get_scan_result(
     scan_id: str,
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> ScanResult:
     """Get the result of a scan by ID."""
-    if scan_id not in scan_results_store:
+    job = await db.get(ScanJob, scan_id)
+    if job is None:
         raise HTTPException(status_code=404, detail="Scan not found")
-    return ScanResult(**scan_results_store[scan_id])
+    return _job_to_scan_result(job)
 
 
 @router.get("/history", response_model=List[ScanResult])
 async def get_scan_history(
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> List[ScanResult]:
     """Get recent scan history."""
-    results = list(scan_results_store.values())
-    results.sort(key=lambda x: x.get("started_at", ""), reverse=True)
-    return [ScanResult(**r) for r in results[:50]]
+    result = await db.execute(
+        select(ScanJob).order_by(ScanJob.created_at.desc()).limit(50)
+    )
+    jobs = list(result.scalars().all())
+    return [_job_to_scan_result(job, include_output=False) for job in jobs]
 
 
 @router.post("/ai-command")
@@ -293,10 +399,10 @@ async def generate_ai_command(
     """Use AI to generate an nmap command from natural language description."""
     description = request.description.lower()
     target = request.target
-    
+
     flags = ["nmap"]
     explanation_parts = []
-    
+
     if "quiet" in description or "stealth" in description or "no noise" in description or "don't cause noise" in description:
         flags.append("-T2")
         explanation_parts.append("Slower timing to avoid detection")
@@ -306,7 +412,7 @@ async def generate_ai_command(
     else:
         flags.append("-T3")
         explanation_parts.append("Normal timing")
-    
+
     if "udp" in description:
         flags.append("-sU")
         explanation_parts.append("UDP port scan")
@@ -316,29 +422,29 @@ async def generate_ai_command(
     else:
         flags.append("-sT")
         explanation_parts.append("TCP connect scan")
-    
+
     if "version" in description or "service" in description:
         flags.append("-sV")
         explanation_parts.append("Service version detection")
-    
+
     if "os" in description or "operating system" in description:
         flags.append("-O")
         explanation_parts.append("OS detection")
-    
+
     if "vuln" in description or "vulnerab" in description:
         flags.append("--script=vuln")
         explanation_parts.append("Vulnerability scripts")
-    
+
     if "eternalblue" in description or "ms17" in description:
         flags.append("-p 445")
         flags.append("--script=smb-vuln-ms17-010")
         explanation_parts.append("EternalBlue/MS17-010 check on SMB port")
-    
+
     if "heartbleed" in description:
         flags.append("-p 443")
         flags.append("--script=ssl-heartbleed")
         explanation_parts.append("Heartbleed vulnerability check")
-    
+
     if "ssl" in description or "tls" in description or "certificate" in description:
         if "cipher" in description:
             flags.append("--script=ssl-enum-ciphers")
@@ -349,44 +455,44 @@ async def generate_ai_command(
         else:
             flags.append("--script=ssl-cert,ssl-enum-ciphers")
             explanation_parts.append("SSL/TLS certificate and cipher analysis")
-    
+
     if "banner" in description or "grab" in description:
         flags.append("--script=banner")
         explanation_parts.append("Banner grabbing")
-    
+
     if "smb" in description or "windows share" in description:
         flags.append("-p 139,445")
         flags.append("--script=smb-enum-shares,smb-os-discovery")
         explanation_parts.append("SMB share enumeration and OS discovery")
-    
+
     if "dns" in description and "brute" in description:
         flags.append("--script=dns-brute")
         explanation_parts.append("DNS subdomain brute force")
-    
+
     if "ftp" in description and ("anon" in description or "anonymous" in description):
         flags.append("-p 21")
         flags.append("--script=ftp-anon")
         explanation_parts.append("Anonymous FTP access check")
-    
+
     if "snmp" in description:
         flags.append("-sU -p 161")
         flags.append("--script=snmp-info")
         explanation_parts.append("SNMP device information")
-    
+
     if "ssh" in description and "auth" in description:
         flags.append("-p 22")
         flags.append("--script=ssh-auth-methods")
         explanation_parts.append("SSH authentication methods")
-    
+
     if "mysql" in description:
         flags.append("-p 3306")
         flags.append("--script=mysql-info")
         explanation_parts.append("MySQL server information")
-    
+
     if "http" in description and "title" in description:
         flags.append("--script=http-title")
         explanation_parts.append("HTTP page title detection")
-    
+
     if "brute" in description and "force" in description:
         if "ssh" in description:
             flags.append("-p 22 --script=ssh-brute")
@@ -397,7 +503,7 @@ async def generate_ai_command(
         elif "http" in description:
             flags.append("-p 80,443 --script=http-brute")
             explanation_parts.append("HTTP brute force")
-    
+
     if "all port" in description or "full port" in description:
         flags.append("-p-")
         explanation_parts.append("All 65535 ports")
@@ -407,24 +513,24 @@ async def generate_ai_command(
     elif "web" in description or "http" in description:
         flags.append("-p 80,443,8080,8443")
         explanation_parts.append("Web ports")
-    
+
     if "no ping" in description or "skip ping" in description:
         flags.append("-Pn")
         explanation_parts.append("Skip host discovery")
-    
+
     if "no dns" in description or "skip dns" in description:
         flags.append("-n")
         explanation_parts.append("No DNS resolution")
-    
+
     if "aggressive" in description:
         flags.append("-A")
         explanation_parts.append("Aggressive scan (OS, version, scripts, traceroute)")
-    
+
     flags.append(target)
-    
+
     command = " ".join(flags)
     explanation = "Command breakdown:\n- " + "\n- ".join(explanation_parts)
-    
+
     return {
         "command": command,
         "explanation": explanation,
@@ -454,10 +560,12 @@ async def get_nmap_presets(
 
 @router.delete("/history")
 async def clear_scan_history(
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, str]:
-    """Clear scan history from memory."""
-    scan_results_store.clear()
+    """Clear scan history from the database."""
+    await db.execute(delete(ScanJob))
+    await db.commit()
     return {"message": "Scan history cleared"}
 
 
@@ -466,14 +574,24 @@ async def list_stored_scans(
     current_user: User = Depends(get_current_user),
 ) -> List[Dict[str, Any]]:
     """List all stored scan files."""
-    files = []
-    for file in sorted(SCANS_DIR.glob("scan_*.txt"), key=lambda f: f.stat().st_mtime, reverse=True):
-        files.append({
-            "filename": file.name,
-            "scan_id": file.name.split("_")[1] if "_" in file.name else "",
-            "size": file.stat().st_size,
-            "modified": datetime.fromtimestamp(file.stat().st_mtime).isoformat(),
-        })
+    candidates = list(SCANS_DIR.glob("scan_*.txt"))
+
+    files: list[dict[str, Any]] = []
+    for file in sorted(candidates, key=lambda f: f.stat().st_mtime, reverse=True):
+        scan_id = ""
+        if file.name.startswith("scan_"):
+            stem = file.stem  # scan_<id>
+            scan_id = stem.split("_", 1)[1] if "_" in stem else ""
+
+        files.append(
+            {
+                "filename": file.name,
+                "scan_id": scan_id,
+                "size": file.stat().st_size,
+                "modified": datetime.fromtimestamp(file.stat().st_mtime).isoformat(),
+            }
+        )
+
     return files[:100]
 
 
@@ -484,17 +602,17 @@ async def download_scan_file(
 ):
     """Download a stored scan file."""
     from fastapi.responses import FileResponse
-    
-    if not filename.startswith("scan_") or not filename.endswith(".txt"):
+
+    if not (filename.startswith("scan_") and filename.endswith(".txt")):
         raise HTTPException(status_code=400, detail="Invalid filename")
-    
+
     if ".." in filename or "/" in filename or "\\" in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
-    
+
     file_path = SCANS_DIR / filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
-    
+
     return FileResponse(
         path=str(file_path),
         filename=filename,
@@ -521,12 +639,18 @@ async def run_traceroute(
     if not _validate_target(request.target):
         raise HTTPException(status_code=400, detail="Invalid target format. Use IP address or hostname.")
 
-    if not shutil.which('traceroute'):
+    if not shutil.which("traceroute"):
         raise HTTPException(status_code=503, detail="traceroute is not installed on this system")
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            'traceroute', '-n', '-m', '30', '-w', '2', request.target,
+            "traceroute",
+            "-n",
+            "-m",
+            "30",
+            "-w",
+            "2",
+            request.target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -538,31 +662,33 @@ async def run_traceroute(
         raise HTTPException(status_code=500, detail=f"Traceroute failed: {str(e)}")
 
     hops: List[Dict[str, Any]] = []
-    for line in raw_output.strip().split('\n'):
+    for line in raw_output.strip().split("\n"):
         line = line.strip()
-        if not line or line.startswith('traceroute'):
+        if not line or line.startswith("traceroute"):
             continue
-        match = re.match(r'^\s*(\d+)\s+(.+)$', line)
+        match = re.match(r"^\s*(\d+)\s+(.+)$", line)
         if not match:
             continue
         hop_num = int(match.group(1))
         rest = match.group(2).strip()
 
-        if rest == '* * *' or all(c in '* ' for c in rest):
+        if rest == "* * *" or all(c in "* " for c in rest):
             hops.append({"hop": hop_num, "ip": None, "rtt_ms": None, "is_timeout": True})
             continue
 
-        ip_match = re.search(r'(\d+\.\d+\.\d+\.\d+)', rest)
+        ip_match = re.search(r"(\d+\.\d+\.\d+\.\d+)", rest)
         ip_addr = ip_match.group(1) if ip_match else None
 
-        rtts = [float(v) for v in re.findall(r'([\d.]+)\s*ms', rest)]
+        rtts = [float(v) for v in re.findall(r"([\d.]+)\s*ms", rest)]
 
-        hops.append({
-            "hop": hop_num,
-            "ip": ip_addr,
-            "rtt_ms": rtts if rtts else None,
-            "is_timeout": False,
-        })
+        hops.append(
+            {
+                "hop": hop_num,
+                "ip": ip_addr,
+                "rtt_ms": rtts if rtts else None,
+                "is_timeout": False,
+            }
+        )
 
     return {
         "target": request.target,
@@ -581,14 +707,20 @@ async def ping_sweep(
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     if not _validate_target(request.target):
-        raise HTTPException(status_code=400, detail="Invalid target format. Use IP address or CIDR notation (e.g. 192.168.1.0/24).")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid target format. Use IP address or CIDR notation (e.g. 192.168.1.0/24).",
+        )
 
-    if not shutil.which('nmap'):
+    if not shutil.which("nmap"):
         raise HTTPException(status_code=503, detail="nmap is not installed on this system")
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            'nmap', '-sn', '-T4', request.target,
+            "nmap",
+            "-sn",
+            "-T4",
+            request.target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -600,16 +732,16 @@ async def ping_sweep(
         raise HTTPException(status_code=500, detail=f"Ping sweep failed: {str(e)}")
 
     hosts: List[Dict[str, Any]] = []
-    lines = raw_output.split('\n')
+    lines = raw_output.split("\n")
     i = 0
     while i < len(lines):
         line = lines[i].strip()
-        report_match = re.match(r'Nmap scan report for\s+(.+)', line)
+        report_match = re.match(r"Nmap scan report for\s+(.+)", line)
         if report_match:
             host_info = report_match.group(1).strip()
-            ip_match = re.search(r'(\d+\.\d+\.\d+\.\d+)', host_info)
+            ip_match = re.search(r"(\d+\.\d+\.\d+\.\d+)", host_info)
             ip = ip_match.group(1) if ip_match else host_info
-            hostname = host_info.split('(')[0].strip() if '(' in host_info else None
+            hostname = host_info.split("(")[0].strip() if "(" in host_info else None
 
             status = "unknown"
             latency = None
@@ -617,7 +749,7 @@ async def ping_sweep(
                 next_line = lines[i + 1].strip()
                 if "Host is up" in next_line:
                     status = "up"
-                    lat_match = re.search(r'\(([\d.]+)s?\s*latency\)', next_line)
+                    lat_match = re.search(r"\(([\d.]+)s?\s*latency\)", next_line)
                     if lat_match:
                         try:
                             latency = f"{float(lat_match.group(1)) * 1000:.1f}ms"
@@ -654,28 +786,36 @@ async def dns_lookup(
     target = request.target.strip()
     if not target or len(target) > 256:
         raise HTTPException(status_code=400, detail="Invalid target")
-    if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9.\-]+$', target):
+    if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9.\-]+$", target):
         raise HTTPException(status_code=400, detail="Invalid hostname format")
 
     records: Dict[str, List[str]] = {}
 
-    for record_type in ['A', 'AAAA', 'MX', 'NS', 'CNAME', 'TXT', 'SOA']:
+    for record_type in ["A", "AAAA", "MX", "NS", "CNAME", "TXT", "SOA"]:
         try:
-            if shutil.which('dig'):
+            if shutil.which("dig"):
                 proc = await asyncio.create_subprocess_exec(
-                    'dig', '+short', record_type, target,
+                    "dig",
+                    "+short",
+                    record_type,
+                    target,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-            elif shutil.which('nslookup'):
+            elif shutil.which("nslookup"):
                 proc = await asyncio.create_subprocess_exec(
-                    'nslookup', f'-type={record_type}', target,
+                    "nslookup",
+                    f"-type={record_type}",
+                    target,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
             else:
                 proc = await asyncio.create_subprocess_exec(
-                    'host', '-t', record_type, target,
+                    "host",
+                    "-t",
+                    record_type,
+                    target,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
@@ -683,7 +823,11 @@ async def dns_lookup(
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
             output = stdout.decode().strip()
             if output:
-                entries = [line.strip() for line in output.split('\n') if line.strip() and not line.startswith(';')]
+                entries = [
+                    line.strip()
+                    for line in output.split("\n")
+                    if line.strip() and not line.startswith(";")
+                ]
                 if entries:
                     records[record_type] = entries
         except (asyncio.TimeoutError, Exception):
@@ -707,15 +851,16 @@ async def whois_lookup(
     target = request.target.strip()
     if not target or len(target) > 256:
         raise HTTPException(status_code=400, detail="Invalid target")
-    if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9.\-:]+$', target):
+    if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9.\-:]+$", target):
         raise HTTPException(status_code=400, detail="Invalid target format")
 
-    if not shutil.which('whois'):
+    if not shutil.which("whois"):
         raise HTTPException(status_code=503, detail="Whois tool not available. Install with: apt install whois")
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            'whois', target,
+            "whois",
+            target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -759,7 +904,7 @@ async def whois_lookup(
                 status_code=502,
                 detail="Whois lookup failed: Unable to reach whois server. This may be due to network restrictions in this environment.",
             )
-        raise HTTPException(status_code=500, detail=f"Whois lookup failed: An unexpected error occurred. Please try again.")
+        raise HTTPException(status_code=500, detail="Whois lookup failed: An unexpected error occurred. Please try again.")
 
     return {
         "target": target,
@@ -779,7 +924,7 @@ async def packet_capture(
     request: CaptureRequest,
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    if not shutil.which('tcpdump'):
+    if not shutil.which("tcpdump"):
         raise HTTPException(status_code=503, detail="tcpdump is not installed on this system")
 
     if request.duration < 1 or request.duration > 60:
@@ -788,14 +933,14 @@ async def packet_capture(
         raise HTTPException(status_code=400, detail="Packet count must be between 1 and 1000")
 
     iface = request.interface.strip()
-    if not re.match(r'^[a-zA-Z0-9]+$', iface):
+    if not re.match(r"^[a-zA-Z0-9]+$", iface):
         raise HTTPException(status_code=400, detail="Invalid interface name")
 
     bpf_filter = request.filter.strip()
-    if bpf_filter and not re.match(r'^[a-zA-Z0-9\s\.\:\-\/\!\(\)]+$', bpf_filter):
+    if bpf_filter and not re.match(r"^[a-zA-Z0-9\s\.\:\-\/\!\(\)]+$", bpf_filter):
         raise HTTPException(status_code=400, detail="Invalid BPF filter")
 
-    cmd = ['tcpdump', '-i', iface, '-c', str(request.count), '-nn', '-tttt', '-l']
+    cmd = ["tcpdump", "-i", iface, "-c", str(request.count), "-nn", "-tttt", "-l"]
     if bpf_filter:
         cmd.extend(bpf_filter.split())
 
@@ -824,11 +969,14 @@ async def packet_capture(
         raise HTTPException(status_code=500, detail=f"Capture failed: {str(e)}")
 
     packets: List[Dict[str, str]] = []
-    for line in raw_output.strip().split('\n'):
+    for line in raw_output.strip().split("\n"):
         line = line.strip()
         if not line:
             continue
-        ts_match = re.match(r'^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)\s+(.+)', line)
+        ts_match = re.match(
+            r"^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)\s+(.+)",
+            line,
+        )
         if ts_match:
             timestamp = ts_match.group(1)
             rest = ts_match.group(2)
@@ -848,10 +996,10 @@ async def packet_capture(
                 ip_idx = parts.index("IP") if "IP" in parts else parts.index("IP6")
                 protocol = parts[ip_idx]
                 if ip_idx + 1 < len(parts):
-                    source = parts[ip_idx + 1].rstrip(':')
-                if ip_idx + 3 < len(parts) and parts[ip_idx + 2] == '>':
-                    destination = parts[ip_idx + 3].rstrip(':')
-                len_match = re.search(r'length\s+(\d+)', rest)
+                    source = parts[ip_idx + 1].rstrip(":")
+                if ip_idx + 3 < len(parts) and parts[ip_idx + 2] == ">":
+                    destination = parts[ip_idx + 3].rstrip(":")
+                len_match = re.search(r"length\s+(\d+)", rest)
                 if len_match:
                     length = len_match.group(1)
             except (ValueError, IndexError):
@@ -859,17 +1007,19 @@ async def packet_capture(
         elif "ARP" in parts:
             protocol = "ARP"
 
-        packets.append({
-            "timestamp": timestamp,
-            "source": source,
-            "destination": destination,
-            "protocol": protocol,
-            "length": length,
-            "info": info[:200],
-        })
+        packets.append(
+            {
+                "timestamp": timestamp,
+                "source": source,
+                "destination": destination,
+                "protocol": protocol,
+                "length": length,
+                "info": info[:200],
+            }
+        )
 
     capture_summary = ""
-    summary_match = re.search(r'(\d+)\s+packets?\s+captured', stderr_output)
+    summary_match = re.search(r"(\d+)\s+packets?\s+captured", stderr_output)
     if summary_match:
         capture_summary = f"{summary_match.group(1)} packets captured"
 

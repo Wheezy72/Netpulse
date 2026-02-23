@@ -64,7 +64,8 @@ cleanup() {
 trap cleanup INT TERM
 
 echo "==> NetPulse stack is running."
-echo "   Backend:  ht</old_code><new_code>echo "   Frontend: http://localhost:5000 (dev server) or http://localhost:8000 if using Docker"
+echo "   Backend:  http://localhost:8000"
+echo "   Frontend: http://localhost:5000 (dev server) or http://localhost:8000 if using Docker"
 echo "Press Ctrl+C to stop all services."
 
 # Wait for child processes

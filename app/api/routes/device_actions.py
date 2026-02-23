@@ -8,13 +8,14 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import db_session, get_current_user
+from app.models.enforcement_action import EnforcementAction
 from app.models.user import User
 
 router = APIRouter()
-
-blocked_devices: Dict[str, Dict[str, Any]] = {}
 
 IP_PATTERN = re.compile(
     r'^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$'
@@ -24,6 +25,23 @@ MAC_PATTERN = re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$")
 
 def _validate_ip(ip: str) -> bool:
     return bool(IP_PATTERN.match(ip))
+
+
+async def _get_latest_action(db: AsyncSession, ip: str) -> EnforcementAction | None:
+    stmt = (
+        select(EnforcementAction)
+        .where(EnforcementAction.ip == ip)
+        .order_by(EnforcementAction.created_at.desc())
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalars().first()
+
+
+async def _get_current_state(db: AsyncSession, ip: str) -> str | None:
+    latest = await _get_latest_action(db, ip)
+    if latest is None:
+        return None
+    return latest.action_type
 
 
 class BlockRequest(BaseModel):
@@ -53,71 +71,73 @@ class KillConnectionRequest(BaseModel):
 @router.post("/block")
 async def block_device(
     request: BlockRequest,
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     if not _validate_ip(request.ip):
         raise HTTPException(status_code=400, detail="Invalid IP address format")
 
-    if request.ip in blocked_devices:
+    current_state = await _get_current_state(db, request.ip)
+    if current_state in {"block", "quarantine"}:
         raise HTTPException(status_code=409, detail=f"Device {request.ip} is already blocked")
 
     iptables_path = shutil.which("iptables")
+    note: str | None = None
+
     if not iptables_path:
-        blocked_devices[request.ip] = {
-            "ip": request.ip,
-            "reason": request.reason,
-            "timestamp": datetime.utcnow().isoformat(),
-            "note": "iptables not available - recorded in memory only",
-        }
-        return {
-            "status": "blocked",
-            "ip": request.ip,
-            "reason": request.reason,
-            "timestamp": blocked_devices[request.ip]["timestamp"],
-            "note": "iptables not available - recorded in memory only",
-        }
+        note = "iptables not available - recorded in database only"
+    else:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                iptables_path, "-I", "FORWARD", "-s", request.ip, "-j", "DROP",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await asyncio.wait_for(proc.communicate(), timeout=5)
 
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            iptables_path, "-I", "FORWARD", "-s", request.ip, "-j", "DROP",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await asyncio.wait_for(proc.communicate(), timeout=5)
+            proc2 = await asyncio.create_subprocess_exec(
+                iptables_path, "-I", "FORWARD", "-d", request.ip, "-j", "DROP",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await asyncio.wait_for(proc2.communicate(), timeout=5)
+        except Exception:
+            pass
 
-        proc2 = await asyncio.create_subprocess_exec(
-            iptables_path, "-I", "FORWARD", "-d", request.ip, "-j", "DROP",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await asyncio.wait_for(proc2.communicate(), timeout=5)
-    except Exception:
-        pass
+    action = EnforcementAction(
+        ip=request.ip,
+        mac=None,
+        action_type="block",
+        reason=request.reason,
+        created_at=datetime.utcnow(),
+    )
+    db.add(action)
+    await db.commit()
+    await db.refresh(action)
 
-    now = datetime.utcnow().isoformat()
-    blocked_devices[request.ip] = {
-        "ip": request.ip,
-        "reason": request.reason,
-        "timestamp": now,
-    }
-
-    return {
+    payload: Dict[str, Any] = {
         "status": "blocked",
         "ip": request.ip,
         "reason": request.reason,
-        "timestamp": now,
+        "timestamp": action.created_at.isoformat(),
     }
+    if note:
+        payload["note"] = note
+
+    return payload
 
 
 @router.post("/unblock")
 async def unblock_device(
     request: UnblockRequest,
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     if not _validate_ip(request.ip):
         raise HTTPException(status_code=400, detail="Invalid IP address format")
 
-    if request.ip not in blocked_devices:
+    current_state = await _get_current_state(db, request.ip)
+    if current_state not in {"block", "quarantine"}:
         raise HTTPException(status_code=404, detail=f"Device {request.ip} is not blocked")
 
     iptables_path = shutil.which("iptables")
@@ -139,20 +159,58 @@ async def unblock_device(
         except Exception:
             pass
 
-    del blocked_devices[request.ip]
+    db.add(
+        EnforcementAction(
+            ip=request.ip,
+            mac=None,
+            action_type="unblock",
+            reason=None,
+            created_at=datetime.utcnow(),
+        )
+    )
+    await db.commit()
+
     return {"status": "unblocked", "ip": request.ip}
 
 
 @router.get("/blocked")
 async def get_blocked_devices(
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> List[Dict[str, Any]]:
-    return list(blocked_devices.values())
+    stmt = select(EnforcementAction).order_by(EnforcementAction.created_at.desc())
+    actions = (await db.execute(stmt)).scalars().all()
+
+    latest_by_ip: Dict[str, EnforcementAction] = {}
+    for action in actions:
+        if action.ip not in latest_by_ip:
+            latest_by_ip[action.ip] = action
+
+    devices: List[Dict[str, Any]] = []
+    for ip, action in latest_by_ip.items():
+        if action.action_type not in {"block", "quarantine"}:
+            continue
+
+        item: Dict[str, Any] = {
+            "ip": action.ip,
+            "reason": action.reason,
+            "timestamp": action.created_at.isoformat(),
+        }
+        if action.mac:
+            item["mac"] = action.mac
+        if action.action_type == "quarantine":
+            item["type"] = "quarantine"
+
+        devices.append(item)
+
+    devices.sort(key=lambda d: d.get("timestamp", ""), reverse=True)
+    return devices
 
 
 @router.post("/quarantine")
 async def quarantine_device(
     request: QuarantineRequest,
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     if not _validate_ip(request.ip):
@@ -180,21 +238,23 @@ async def quarantine_device(
         except Exception:
             pass
 
-    now = datetime.utcnow().isoformat()
-    blocked_devices[request.ip] = {
-        "ip": request.ip,
-        "mac": request.mac,
-        "reason": request.reason,
-        "timestamp": now,
-        "type": "quarantine",
-    }
+    action = EnforcementAction(
+        ip=request.ip,
+        mac=request.mac,
+        action_type="quarantine",
+        reason=request.reason,
+        created_at=datetime.utcnow(),
+    )
+    db.add(action)
+    await db.commit()
+    await db.refresh(action)
 
     return {
         "status": "quarantined",
         "ip": request.ip,
         "mac": request.mac,
         "reason": request.reason,
-        "timestamp": now,
+        "timestamp": action.created_at.isoformat(),
     }
 
 

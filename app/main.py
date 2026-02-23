@@ -31,6 +31,9 @@ from app.db.base import Base
 from app.db.session import engine
 from app.services.logging_service import setup_logging
 
+# Ensure all model modules are imported so Base.metadata has the full schema.
+import app.models  # noqa: F401
+
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 

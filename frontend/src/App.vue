@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from "axios";
-import { computed, onMounted, ref, watch, nextTick } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
 import Dashboard from "./views/Dashboard.vue";
 import Login from "./views/Login.vue";
@@ -38,6 +38,8 @@ const currentUser = ref<CurrentUser | null>(null);
 const sidebarExpanded = ref(true);
 const mobileMenuOpen = ref(false);
 const logoError = ref(false);
+
+const aiDrawerOpen = ref(false);
 
 const infoMode = ref<'full' | 'compact'>((localStorage.getItem('np-info-mode') as 'full' | 'compact') || 'full');
 
@@ -390,7 +392,40 @@ function handleLogout(): void {
         </div>
       </main>
 
-      <ChatBot :theme="theme" />
+      <button
+        type="button"
+        @click="aiDrawerOpen = !aiDrawerOpen"
+        class="fixed bottom-6 right-6 z-[70] w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-110"
+        :class="[
+          isNightshade
+            ? 'bg-teal-500/20 border-2 border-teal-400 text-teal-400 hover:bg-teal-500/30'
+            : 'bg-amber-500/20 border-2 border-amber-400 text-amber-400 hover:bg-amber-500/30'
+        ]"
+        :style="isNightshade ? { boxShadow: '0 0 20px rgba(20, 184, 166, 0.4)' } : { boxShadow: '0 0 20px rgba(245, 158, 11, 0.4)' }"
+        :title="aiDrawerOpen ? 'Close AI Analyst' : 'Open AI Analyst'"
+      >
+        <svg v-if="!aiDrawerOpen" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+        </svg>
+        <svg v-else class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+
+      <div
+        class="fixed inset-0 z-[55] bg-black/60 transition-opacity duration-300"
+        :class="aiDrawerOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'"
+        @click="aiDrawerOpen = false"
+      ></div>
+
+      <div
+        class="fixed inset-y-0 right-0 z-[60] w-full max-w-md transform transition-transform duration-300"
+        :class="aiDrawerOpen ? 'translate-x-0' : 'translate-x-full'"
+      >
+        <div class="h-full p-4">
+          <ChatBot class="h-full" :theme="theme" @close="aiDrawerOpen = false" />
+        </div>
+      </div>
     </template>
 
     <Toast ref="toastRef" :theme="theme" />

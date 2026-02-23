@@ -6,9 +6,10 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
-from app.api.routes.settings import AISettings, _ai_settings, ai_provider_env_var, get_ai_api_key
+from app.api.deps import db_session, get_current_user
+from app.api.routes.settings import AISettings, ai_provider_env_var, get_ai_api_key, load_ai_settings
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -680,9 +681,11 @@ EXTENDED_TOPICS: dict[str, tuple[str, list[str]]] = {
 }
 
 
-def get_ai_response(message: str, user_id: int, context: Optional[str] = None) -> tuple[str, List[str]]:
-    ai_config = _ai_settings.get(user_id)
-
+def get_ai_response(
+    message: str,
+    ai_config: AISettings | None,
+    context: Optional[str] = None,
+) -> tuple[str, List[str]]:
     if not ai_config or not ai_config.enabled:
         return _fallback_response(message)
 
@@ -945,11 +948,13 @@ def _call_external_ai(
 )
 async def chat(
     request: ChatRequest,
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> ChatResponse:
+    ai_config = await load_ai_settings(db, current_user.id)
     response, suggestions = get_ai_response(
         request.message,
-        current_user.id,
+        ai_config,
         request.context,
     )
     return ChatResponse(response=response, suggestions=suggestions)
