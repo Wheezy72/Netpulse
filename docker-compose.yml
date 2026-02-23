@@ -42,6 +42,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    user: "0"
     environment:
       DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@db:5432/netpulse
       REDIS_URL: redis://redis:6379/0
@@ -51,7 +52,10 @@ services:
       PULSE_ISP_IP: ${PULSE_ISP_IP:-8.8.8.8}
       PULSE_CLOUDFLARE_IP: ${PULSE_CLOUDFLARE_IP:-1.1.1.1}
       SCRIPTS_BASE_DIR: /app/scripts
+      PCAP_STORAGE_DIR: /app/data/pcaps
       CORS_ALLOW_ORIGINS: '["http://localhost:8000"]'
+    volumes:
+      - app_data:/app/data
     ports:
       - "8000:8000"
     cap_add:
@@ -70,12 +74,16 @@ services:
       redis:
         condition: service_healthy
     command: ["celery", "-A", "app.core.celery_app.celery_app", "worker", "--loglevel=info"]
+    user: "0"
     environment:
       DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@db:5432/netpulse
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
       ENVIRONMENT: production
       SCRIPTS_BASE_DIR: /app/scripts
+      PCAP_STORAGE_DIR: /app/data/pcaps
+    volumes:
+      - app_data:/app/data
     cap_add:
       - NET_RAW
       - NET_ADMIN
@@ -92,12 +100,17 @@ services:
       redis:
         condition: service_healthy
     command: ["celery", "-A", "app.core.celery_app.celery_app", "beat", "--loglevel=info"]
+    user: "0"
     environment:
       DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@db:5432/netpulse
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
       ENVIRONMENT: production
       SCRIPTS_BASE_DIR: /app/scripts
+      PCAP_STORAGE_DIR: /app/data/pcaps
+    volumes:
+      - app_data:/app/data
 
 volumes:
   db_data:
+  app_data:

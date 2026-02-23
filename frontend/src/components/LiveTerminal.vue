@@ -216,15 +216,15 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="np-panel h-full flex flex-col">
-    <div class="flex items-center justify-between px-4 py-3 border-b" :style="{ borderColor: 'var(--np-border)' }">
-      <h3 class="np-panel-title">{{ title }}</h3>
-      <div class="text-[0.7rem] text-[var(--np-muted-text)]">Live Stream</div>
+    <div class="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
+      <h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{{ title }}</h3>
+      <div class="text-[0.7rem] text-zinc-500 dark:text-zinc-400">Live Stream</div>
     </div>
+
     <div class="flex-1 p-3">
       <div
         ref="container"
-        class="h-full w-full rounded-lg overflow-hidden border"
-        :style="{ backgroundColor: 'var(--np-surface)', color: 'var(--np-text)', borderColor: 'var(--np-border)' }"
+        class="h-full w-full rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100"
       ></div>
     </div>
   </div>

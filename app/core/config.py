@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     scripts_uploads_subdir: str = "uploads"
     scripts_prebuilt_subdir: str = "prebuilt"
 
+    # Packet capture storage
+    pcap_storage_dir: str = "/tmp/pcaps"
+
     # Security / auth
     secret_key: str = "CHANGE_ME_IN_PRODUCTION"
     jwt_algorithm: str = "HS256"

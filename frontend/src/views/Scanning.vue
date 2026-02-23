@@ -70,6 +70,28 @@ const downloadUrl = computed(() => {
   return `/api/nmap/files/${filename}`;
 });
 
+async function downloadLatest(): Promise<void> {
+  if (!downloadUrl.value) return;
+  if (!currentScanId.value) return;
+
+  const filename = `scan_${currentScanId.value}.txt`;
+
+  try {
+    const response = await axios.get(downloadUrl.value, {
+      responseType: "blob",
+    });
+
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    window.URL.revokeObjectURL(url);
+  } catch (e: any) {
+    emit("toast", "error", e?.response?.data?.detail || "Failed to download scan output");
+  }
+}
+
 const aiBriefing = computed(() => scanMeta.value?.ai_briefing || null);
 const aiError = computed(() => (scanMeta.value?.result_summary as any)?.ai_error || null);
 
@@ -137,7 +159,7 @@ async function startScan(command: string): Promise<void> {
   }
 
   if (!target.value.trim()) {
-    emit("toast", "warning", "Please enter a target (IP, hostname, or CIDR)." );
+    emit("toast", "warning", "Please enter a target (IP, hostname, or CIDR).");
     return;
   }
 
@@ -220,52 +242,49 @@ onBeforeUnmount(() => {
   <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
     <div class="space-y-6">
       <div class="np-panel">
-        <div class="flex items-center justify-between px-4 py-3 border-b" :style="{ borderColor: 'var(--np-border)' }">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
           <div>
-            <h2 class="np-panel-title">Scanning Console</h2>
-            <p class="text-xs text-[var(--np-muted-text)] mt-1">Run targeted scans or automated playbooks. Output streams live.</p>
+            <h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Scanning Console</h2>
+            <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              Run targeted scans or automated playbooks. Output streams live.
+            </p>
           </div>
         </div>
 
         <div class="p-4 space-y-4">
           <div
             v-if="!props.isAdmin"
-            class="rounded-lg border px-3 py-2 text-xs"
-            :style="{ borderColor: 'var(--np-border)', background: 'var(--np-surface)' }"
+            class="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 px-3 py-2 text-xs text-zinc-600 dark:text-zinc-300"
           >
-            <p class="text-[var(--np-muted-text)]">
-              Scanning is <span class="font-semibold text-[var(--np-text)]">admin-only</span>.
-              You can view scan output and history, but cannot start new scans.
-            </p>
+            Scanning is <span class="font-semibold text-zinc-900 dark:text-zinc-100">admin-only</span>. You can view scan output and history, but cannot start new scans.
           </div>
-         < div
-            v-if="!props.isAdmin"
-            class="rounded-lg border px-3 py-2 text-xs"
-            :">
+
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div class="md:col-span-2">
-              <label class="block text-[0.7rem] uppercase tracking-widest text-[var(--np-muted-text)]">Target</label>
+              <label class="block text-[0.7rem] uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Target</label>
               <input
                 v-model="target"
                 type="text"
                 placeholder="192.168.1.1 or 192.168.1.0/24 or example.com"
-                class="mt-1 w-full px-3 py-2 rounded-lg text-sm bg-transparent border outline-none border-[var(--np-border)] text-[var(--np-text)] placeholder:text-[var(--np-muted-text)] focus:border-[var(--np-accent-primary)]"
+                class="mt-1 w-full px-3 py-2 rounded-lg text-sm bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 outline-none focus:ring-2 focus:ring-blue-500/25 focus:border-blue-500"
               />
             </div>
 
             <div>
-              <label class="block text-[0.7rem] uppercase tracking-widest text-[var(--np-muted-text)]">Artifacts</label>
+              <label class="block text-[0.7rem] uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Artifacts</label>
               <div class="mt-1 flex items-center gap-2">
                 <input id="save" v-model="saveResults" type="checkbox" class="rounded" />
-                <label for="save" class="text-xs text-[var(--np-muted-text)]">Save output</label>
+                <label for="save" class="text-xs text-zinc-500 dark:text-zinc-400">Save output</label>
               </div>
-              <a
+
+              <button
                 v-if="downloadUrl"
-                :href="downloadUrl"
-                class="mt-2 inline-block text-xs underline text-[var(--np-accent-primary)] hover:opacity-90"
+                type="button"
+                @click="downloadLatest"
+                class="mt-2 inline-flex text-xs underline text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
               >
                 Download latest
-              </a>
+              </button>
             </div>
           </div>
 
@@ -275,8 +294,8 @@ onBeforeUnmount(() => {
               class="px-3 py-2 rounded-lg text-xs border transition-colors"
               :class="[
                 activeTab === 'targeted'
-                  ? 'border-[var(--np-accent-primary)] text-[var(--np-text)] bg-[var(--np-bg)]'
-                  : 'border-transparent text-[var(--np-muted-text)] hover:text-[var(--np-text)] hover:border-[var(--np-border)]'
+                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-zinc-900 dark:text-zinc-100'
+                  : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:border-zinc-200 dark:hover:border-zinc-800'
               ]"
               @click="activeTab = 'targeted'"
             >
@@ -287,8 +306,8 @@ onBeforeUnmount(() => {
               class="px-3 py-2 rounded-lg text-xs border transition-colors"
               :class="[
                 activeTab === 'playbooks'
-                  ? 'border-[var(--np-accent-primary)] text-[var(--np-text)] bg-[var(--np-bg)]'
-                  : 'border-transparent text-[var(--np-muted-text)] hover:text-[var(--np-text)] hover:border-[var(--np-border)]'
+                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-zinc-900 dark:text-zinc-100'
+                  : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:border-zinc-200 dark:hover:border-zinc-800'
               ]"
               @click="activeTab = 'playbooks'"
             >
@@ -298,10 +317,10 @@ onBeforeUnmount(() => {
 
           <div v-if="activeTab === 'targeted'" class="space-y-4">
             <div>
-              <label class="block text-[0.7rem] uppercase tracking-widest text-[var(--np-muted-text)]">Preset</label>
+              <label class="block text-[0.7rem] uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Preset</label>
               <select
                 v-model="preset"
-                class="mt-1 w-full px-3 py-2 rounded-lg text-sm bg-transparent border outline-none border-[var(--np-border)] text-[var(--np-text)] focus:border-[var(--np-accent-primary)]"
+                class="mt-1 w-full px-3 py-2 rounded-lg text-sm bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-blue-500/25 focus:border-blue-500"
               >
                 <option value="ping">Ping Sweep (-sn)</option>
                 <option value="quick">Quick Ports (-F)</option>
@@ -313,14 +332,14 @@ onBeforeUnmount(() => {
             </div>
 
             <div v-if="preset === 'custom'">
-              <label class="block text-[0.7rem] uppercase tracking-widest text-[var(--np-muted-text)]">Command</label>
+              <label class="block text-[0.7rem] uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Command</label>
               <input
                 v-model="customCommand"
                 type="text"
-                class="mt-1 w-full px-3 py-2 rounded-lg text-sm bg-transparent border outline-none border-[var(--np-border)] text-[var(--np-text)] placeholder:text-[var(--np-muted-text)] focus:border-[var(--np-accent-primary)]"
+                class="mt-1 w-full px-3 py-2 rounded-lg text-sm bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 outline-none focus:ring-2 focus:ring-blue-500/25 focus:border-blue-500"
                 placeholder="nmap -sV -sC -T4"
               />
-              <p class="mt-1 text-[0.7rem] text-[var(--np-muted-text)]">Only an allowlist of flags/scripts is permitted.</p>
+              <p class="mt-1 text-[0.7rem] text-zinc-500 dark:text-zinc-400">Only an allowlist of flags/scripts is permitted.</p>
             </div>
 
             <div class="flex justify-end">
@@ -328,7 +347,7 @@ onBeforeUnmount(() => {
                 type="button"
                 @click="runTargeted"
                 :disabled="!props.isAdmin"
-                class="px-4 py-2 rounded-lg text-xs font-semibold transition-colors border border-[var(--np-accent-primary)] text-[var(--np-text)] hover:bg-[var(--np-bg)] disabled:opacity-50 disabled:cursor-not-allowed"
+                class="px-4 py-2 rounded-lg text-xs font-semibold transition-colors border border-blue-600 text-blue-700 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed dark:border-blue-500 dark:text-blue-300 dark:hover:bg-blue-500/10"
               >
                 Run Scan
               </button>
@@ -338,10 +357,10 @@ onBeforeUnmount(() => {
           <div v-else class="space-y-4">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label class="block text-[0.7rem] uppercase tracking-widest text-[var(--np-muted-text)]">Playbook</label>
+                <label class="block text-[0.7rem] uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Playbook</label>
                 <select
                   v-model="selectedPlaybookId"
-                  class="mt-1 w-full px-3 py-2 rounded-lg text-sm bg-transparent border outline-none border-[var(--np-border)] text-[var(--np-text)] focus:border-[var(--np-accent-primary)] disabled:opacity-50"
+                  class="mt-1 w-full px-3 py-2 rounded-lg text-sm bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-blue-500/25 focus:border-blue-500 disabled:opacity-50"
                   :disabled="playbooksLoading"
                 >
                   <option v-for="pb in playbooks" :key="pb.id" :value="pb.id">
@@ -354,7 +373,7 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   @click="runPlaybook"
-                  class="px-4 py-2 rounded-lg text-xs font-semibold transition-colors border border-[var(--np-accent-primary)] text-[var(--np-text)] hover:bg-[var(--np-bg)] disabled:opacity-50 disabled:cursor-not-allowed"
+                  class="px-4 py-2 rounded-lg text-xs font-semibold transition-colors border border-blue-600 text-blue-700 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed dark:border-blue-500 dark:text-blue-300 dark:hover:bg-blue-500/10"
                   :disabled="!props.isAdmin || !selectedPlaybook || playbooksLoading"
                 >
                   Run Playbook
@@ -362,29 +381,32 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div v-if="selectedPlaybook" class="rounded-lg border p-3 border-[var(--np-border)] bg-[var(--np-bg)]">
-              <div class="flex items-center justify-between">
-                <div>
-                  <p class="text-sm font-semibold text-[var(--np-text)]">{{ selectedPlaybook.name }}</p>
-                  <p class="text-xs text-[var(--np-muted-text)]">{{ selectedPlaybook.description }}</p>
+            <div v-if="selectedPlaybook" class="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 p-3">
+              <div class="flex items-center justify-between gap-4">
+                <div class="min-w-0">
+                  <p class="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">{{ selectedPlaybook.name }}</p>
+                  <p class="text-xs text-zinc-500 dark:text-zinc-400">{{ selectedPlaybook.description }}</p>
                 </div>
-                <div class="text-right">
-                  <p class="text-[0.7rem] uppercase tracking-widest text-[var(--np-accent-primary)]">{{ selectedPlaybook.risk_level }}</p>
-                  <p class="text-[0.7rem] text-[var(--np-muted-text)]">{{ selectedPlaybook.estimated_time }}</p>
+                <div class="text-right shrink-0">
+                  <p class="text-[0.7rem] uppercase tracking-widest text-blue-600 dark:text-blue-400">{{ selectedPlaybook.risk_level }}</p>
+                  <p class="text-[0.7rem] text-zinc-500 dark:text-zinc-400">{{ selectedPlaybook.estimated_time }}</p>
                 </div>
               </div>
 
-              <p class="mt-3 text-[0.7rem] text-[var(--np-muted-text)]">Command template: <span class="font-mono">{{ selectedPlaybook.nmap_args }}</span></p>
+              <p class="mt-3 text-[0.7rem] text-zinc-500 dark:text-zinc-400">
+                Command template:
+                <span class="font-mono text-zinc-700 dark:text-zinc-200">{{ selectedPlaybook.nmap_args }}</span>
+              </p>
             </div>
           </div>
         </div>
       </div>
 
       <div class="np-panel">
-        <div class="px-4 py-3 border-b" :style="{ borderColor: 'var(--np-border)' }">
-          <h3 class="np-panel-title">Tips</h3>
+        <div class="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
+          <h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Tips</h3>
         </div>
-        <div class="p-4 text-xs text-[var(--np-muted-text)] space-y-2">
+        <div class="p-4 text-xs text-zinc-500 dark:text-zinc-400 space-y-2">
           <p>• Use <span class="font-mono">Ping Sweep</span> or <span class="font-mono">Quick Ports</span> first to avoid noisy scans.</p>
           <p>• Full scans and vuln scripts may trigger IDS/IPS. Only scan networks you own or control.</p>
           <p>• Output files are stored as <span class="font-mono">data/scans/scan_&lt;id&gt;.txt</span>.</p>
@@ -394,19 +416,19 @@ onBeforeUnmount(() => {
 
     <div class="h-[70vh] xl:h-[calc(100vh-9rem)] flex flex-col gap-4">
       <div class="np-panel">
-        <div class="flex items-center justify-between px-4 py-3 border-b" :style="{ borderColor: 'var(--np-border)' }">
-          <h3 class="np-panel-title">AI Analyst Briefing</h3>
-          <div class="text-[0.7rem] text-[var(--np-muted-text)]">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
+          <h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">AI Analyst Briefing</h3>
+          <div class="text-[0.7rem] text-zinc-500 dark:text-zinc-400">
             <span v-if="!currentScanId">Idle</span>
             <span v-else-if="scanMetaLoading">Analyzing…</span>
             <span v-else>Auto</span>
           </div>
         </div>
         <div class="p-4">
-          <p v-if="!currentScanId" class="text-xs text-[var(--np-muted-text)]">Run a scan to generate an automatic analyst summary.</p>
-          <p v-else-if="aiBriefing" class="text-sm leading-relaxed whitespace-pre-wrap text-[var(--np-text)]">{{ aiBriefing }}</p>
-          <p v-else-if="aiError" class="text-xs text-[var(--np-danger)]">AI analysis failed: {{ aiError }}</p>
-          <p v-else class="text-xs text-[var(--np-muted-text)]">Waiting for scan completion and AI analysis…</p>
+          <p v-if="!currentScanId" class="text-xs text-zinc-500 dark:text-zinc-400">Run a scan to generate an automatic analyst summary.</p>
+          <p v-else-if="aiBriefing" class="text-sm leading-relaxed whitespace-pre-wrap text-zinc-900 dark:text-zinc-100">{{ aiBriefing }}</p>
+          <p v-else-if="aiError" class="text-xs text-red-600 dark:text-red-400">AI analysis failed: {{ aiError }}</p>
+          <p v-else class="text-xs text-zinc-500 dark:text-zinc-400">Waiting for scan completion and AI analysis…</p>
         </div>
       </div>
 

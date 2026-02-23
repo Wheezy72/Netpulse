@@ -390,6 +390,7 @@ def index_pcap_file(pcap_file_id: int, chunk_size: int = 5000) -> int:
                         "ran": False,
                         "error": None,
                         "command": ["zeek", "-r", str(pcap)],
+                        "timeout_seconds": None,
                         "returncode": None,
                         "stdout_tail": None,
                         "stderr_tail": None,
@@ -399,6 +400,16 @@ def index_pcap_file(pcap_file_id: int, chunk_size: int = 5000) -> int:
 
                     with tempfile.TemporaryDirectory(prefix="zeek_") as tmp:
                         cmd = ["zeek", "-r", str(pcap)]
+                        timeout_seconds = 60
+                        try:
+                            # Basic scaling: Zeek runtime depends heavily on the PCAP size.
+                            size_mb = max(0.0, pcap.stat().st_size / (1024 * 1024))
+                            timeout_seconds = int(max(60, min(1800, 60 + (size_mb * 2))))
+                        except Exception:
+                            timeout_seconds = 600
+
+                        summary["timeout_seconds"] = timeout_seconds
+
                         try:
                             proc = await asyncio.to_thread(
                                 subprocess.run,
@@ -407,6 +418,7 @@ def index_pcap_file(pcap_file_id: int, chunk_size: int = 5000) -> int:
                                 capture_output=True,
                                 text=True,
                                 check=False,
+                                timeout=timeout_seconds,
                             )
                             summary["ran"] = True
                             summary["returncode"] = proc.returncode
@@ -421,10 +433,34 @@ def index_pcap_file(pcap_file_id: int, chunk_size: int = 5000) -> int:
                             summary["stdout_tail"] = _tail(stdout) if stdout else None
                             summary["stderr_tail"] = _tail(stderr) if stderr else None
 
+                            if proc.returncode != 0:
+                                summary["error"] = f"zeek exited with {proc.returncode}"
+
                         except FileNotFoundError as exc:
                             summary["error"] = "zeek not installed"
                             logger.warning(
                                 "Zeek binary not found; continuing with Scapy indexing: %s", exc
+                            )
+                            return summary
+                        except subprocess.TimeoutExpired as exc:
+                            summary["ran"] = True
+                            summary["error"] = "zeek timed out"
+
+                            def _to_text(value: object) -> str:
+                                if value is None:
+                                    return ""
+                                if isinstance(value, bytes):
+                                    return value.decode(errors="replace")
+                                return str(value)
+
+                            stdout = _to_text(getattr(exc, "stdout", None))
+                            stderr = _to_text(getattr(exc, "stderr", None))
+                            summary["stdout_tail"] = _tail(stdout) if stdout else None
+                            summary["stderr_tail"] = _tail(stderr) if stderr else None
+
+                            logger.warning(
+                                "Zeek timed out; continuing with Scapy indexing. stderr (tail): %s",
+                                _tail(stderr),
                             )
                             return summary
                         except Exception as exc:

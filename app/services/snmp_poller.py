@@ -19,7 +19,12 @@ IFDESCR_OID = "1.3.6.1.2.1.2.2.1.2"
 IFINOCTETS_OID = "1.3.6.1.2.1.2.2.1.10"
 IFOUTOCTETS_OID = "1.3.6.1.2.1.2.2.1.16"
 
+# Prefer 64-bit interface octet counters when available (IF-MIB).
+IFHCINOCTETS_OID = "1.3.6.1.2.1.31.1.1.1.6"
+IFHCOUTOCTETS_OID = "1.3.6.1.2.1.31.1.1.1.10"
+
 COUNTER32_MOD = 2**32
+COUNTER64_MOD = 2**64
 
 
 @dataclass
@@ -28,12 +33,23 @@ class InterfaceSnapshot:
     if_descr: Optional[str]
     in_octets: int
     out_octets: int
+    counter_mod: int
 
 
-def _counter32_delta(prev: int, cur: int) -> int:
+def _counter_delta(prev: int, cur: int, counter_mod: int) -> Optional[int]:
     if cur >= prev:
         return cur - prev
-    return (COUNTER32_MOD - prev) + cur
+
+    # For 64-bit counters, decreases are far more likely to indicate a reset than a wrap.
+    if counter_mod == COUNTER64_MOD:
+        return None
+
+    # If we fall back to 32-bit counters but previously stored a 64-bit value, we
+    # cannot compute a meaningful delta.
+    if prev >= counter_mod:
+        return None
+
+    return (counter_mod - prev) + cur
 
 
 def _snmp_auth(snmp_version: str, community: Optional[str]):
@@ -71,11 +87,13 @@ def _snmp_get_sync(
 
     auth = _snmp_auth(snmp_version, community)
 
+    oids_list = list(oids)
+
     engine = SnmpEngine()
     transport = UdpTransportTarget((host, port), timeout=timeout_seconds, retries=0)
     ctx = ContextData()
 
-    var_binds = [ObjectType(ObjectIdentity(oid)) for oid in oids]
+    var_binds = [ObjectType(ObjectIdentity(oid)) for oid in oids_list]
 
     for (error_indication, error_status, error_index, binds) in getCmd(
         engine,
@@ -88,7 +106,7 @@ def _snmp_get_sync(
             raise TimeoutError(str(error_indication))
         if error_status:
             idx = int(error_index) - 1 if error_index else None
-            which = oids[idx] if idx is not None and idx < len(list(oids)) else "(unknown)"
+            which = oids_list[idx] if idx is not None and 0 <= idx < len(oids_list) else "(unknown)"
             raise RuntimeError(f"SNMP error for {which}: {error_status.prettyPrint()}")
 
         out: Dict[str, str] = {}
@@ -136,7 +154,6 @@ def _snmp_walk_ifdescr_sync(
             raise RuntimeError(error_status.prettyPrint())
 
         for name, val in var_binds:
-            # name ends with .<ifIndex>
             parts = str(name).split(".")
             if not parts:
                 continue
@@ -170,10 +187,20 @@ async def _fetch_router_snapshots(router: Router) -> Tuple[List[InterfaceSnapsho
     snapshots: List[InterfaceSnapshot] = []
 
     for if_index in if_indexes:
-        oids = [
-            f"{IFINOCTETS_OID}.{if_index}",
-            f"{IFOUTOCTETS_OID}.{if_index}",
-        ]
+        if (router.snmp_version or "").lower().strip() in {"1", "v1"}:
+            oids = [
+                f"{IFINOCTETS_OID}.{if_index}",
+                f"{IFOUTOCTETS_OID}.{if_index}",
+            ]
+        else:
+            # For SNMP v2c, request both HC and legacy counters in one go.
+            oids = [
+                f"{IFHCINOCTETS_OID}.{if_index}",
+                f"{IFHCOUTOCTETS_OID}.{if_index}",
+                f"{IFINOCTETS_OID}.{if_index}",
+                f"{IFOUTOCTETS_OID}.{if_index}",
+            ]
+
         if if_index not in if_descrs:
             oids.append(f"{IFDESCR_OID}.{if_index}")
 
@@ -200,11 +227,20 @@ async def _fetch_router_snapshots(router: Router) -> Tuple[List[InterfaceSnapsho
             except ValueError:
                 return None
 
-        in_octets = _get_int(IFINOCTETS_OID)
-        out_octets = _get_int(IFOUTOCTETS_OID)
-
-        if in_octets is None or out_octets is None:
-            continue
+        in_64 = _get_int(IFHCINOCTETS_OID)
+        out_64 = _get_int(IFHCOUTOCTETS_OID)
+        if in_64 is not None and out_64 is not None:
+            in_octets = in_64
+            out_octets = out_64
+            counter_mod = COUNTER64_MOD
+        else:
+            in_32 = _get_int(IFINOCTETS_OID)
+            out_32 = _get_int(IFOUTOCTETS_OID)
+            if in_32 is None or out_32 is None:
+                continue
+            in_octets = in_32
+            out_octets = out_32
+            counter_mod = COUNTER32_MOD
 
         if_descr = if_descrs.get(if_index) or values.get(f"{IFDESCR_OID}.{if_index}")
 
@@ -214,6 +250,7 @@ async def _fetch_router_snapshots(router: Router) -> Tuple[List[InterfaceSnapsho
                 if_descr=if_descr,
                 in_octets=in_octets,
                 out_octets=out_octets,
+                counter_mod=counter_mod,
             )
         )
 
@@ -263,37 +300,46 @@ async def poll_network_metrics(db: AsyncSession) -> None:
             if prev is not None:
                 dt = (now - prev.last_polled_at).total_seconds()
                 if dt > 0.5:
-                    in_delta = _counter32_delta(int(prev.in_octets), int(snap.in_octets))
-                    out_delta = _counter32_delta(int(prev.out_octets), int(snap.out_octets))
-
-                    in_bps = (in_delta * 8.0) / dt
-                    out_bps = (out_delta * 8.0) / dt
-
-                    tags = {
-                        "router_id": router.id,
-                        "ifIndex": snap.if_index,
-                    }
-                    if snap.if_descr:
-                        tags["ifDescr"] = snap.if_descr
-
-                    metrics.append(
-                        Metric(
-                            device_id=router.device_id,
-                            timestamp=now,
-                            metric_type="if_in_bps",
-                            value=float(in_bps),
-                            tags=tags,
-                        )
+                    in_delta = _counter_delta(
+                        int(prev.in_octets),
+                        int(snap.in_octets),
+                        snap.counter_mod,
                     )
-                    metrics.append(
-                        Metric(
-                            device_id=router.device_id,
-                            timestamp=now,
-                            metric_type="if_out_bps",
-                            value=float(out_bps),
-                            tags=tags,
-                        )
+                    out_delta = _counter_delta(
+                        int(prev.out_octets),
+                        int(snap.out_octets),
+                        snap.counter_mod,
                     )
+
+                    if in_delta is not None and out_delta is not None:
+                        in_bps = (in_delta * 8.0) / dt
+                        out_bps = (out_delta * 8.0) / dt
+
+                        tags = {
+                            "router_id": router.id,
+                            "ifIndex": snap.if_index,
+                        }
+                        if snap.if_descr:
+                            tags["ifDescr"] = snap.if_descr
+
+                        metrics.append(
+                            Metric(
+                                device_id=router.device_id,
+                                timestamp=now,
+                                metric_type="if_in_bps",
+                                value=float(in_bps),
+                                tags=tags,
+                            )
+                        )
+                        metrics.append(
+                            Metric(
+                                device_id=router.device_id,
+                                timestamp=now,
+                                metric_type="if_out_bps",
+                                value=float(out_bps),
+                                tags=tags,
+                            )
+                        )
 
                 prev.in_octets = int(snap.in_octets)
                 prev.out_octets = int(snap.out_octets)

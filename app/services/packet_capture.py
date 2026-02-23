@@ -62,7 +62,7 @@ async def capture_to_pcap(
     """
     from sqlalchemy import select
 
-    captures_dir = Path(getattr(settings, "pcap_storage_dir", "/tmp/pcaps"))
+    captures_dir = Path(settings.pcap_storage_dir)
     captures_dir.mkdir(parents=True, exist_ok=True)
 
     interface = iface or _get_default_interface()

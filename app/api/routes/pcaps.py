@@ -108,6 +108,7 @@ async def list_pcap_files(
     "/{pcap_file_id}/packets",
     response_model=PacketQueryResponse,
     summary="Query packets for a PCAP file (cursor pagination)",
+    dependencies=[Depends(require_role())],
 )
 async def query_pcap_packets(
     pcap_file_id: int,
