@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, onMounted, ref } from "vue";
+import Uptime from "./Uptime.vue";
+
+const props = defineProps<{
+  theme: "nightshade" | "sysadmin";
+}>();
+
+const isNightshade = computed(() => props.theme === "nightshade");
+
+const activeTab = ref<string>("inventory");
 
 type DeviceRow = {
   id: number;
@@ -46,6 +55,13 @@ type DeviceDetail = {
   }[];
 };
 
+type SnmpResultRow = {
+  oid: string;
+  label: string;
+  value: string;
+  type: string;
+};
+
 const devices = ref<DeviceRow[]>([]);
 const zones = ref<string[]>([]);
 const selectedZone = ref<string | null>(null);
@@ -61,6 +77,18 @@ const deviceDetailError = ref<string | null>(null);
 const aiAnswer = ref<string | null>(null);
 const aiLoading = ref(false);
 const aiError = ref<string | null>(null);
+
+const blockedDevices = ref<Set<string>>(new Set());
+
+const snmpTarget = ref("");
+const snmpCommunity = ref("public");
+const snmpVersion = ref("2c");
+const snmpLoading = ref(false);
+const snmpError = ref<string | null>(null);
+const snmpResults = ref<SnmpResultRow[]>([]);
+const snmpWalkOid = ref("1.3.6.1.2.1.1");
+const snmpWalkLoading = ref(false);
+const snmpWalkResults = ref<SnmpResultRow[]>([]);
 
 const filteredDevices = computed(() => {
   let list = devices.value;
@@ -139,54 +167,270 @@ async function askAiAboutDevice(): Promise<void> {
     });
     aiAnswer.value = data.answer;
   } catch {
-    aiError.value = "AI analysis failed. Check AI provider configuration.";
+    aiError.value = "Analysis unavailable. Check provider configuration in Settings.";
   } finally {
     aiLoading.value = false;
   }
 }
 
+function downloadDeviceReport(): void {
+  const list = filteredDevices.value;
+  if (!list.length) {
+    error.value = "No devices to export.";
+    return;
+  }
+  const headers = ["IP Address", "MAC Address", "Hostname", "Vendor", "Status", "First Seen", "Last Seen"];
+  const rows = list.map((d) => [
+    d.ip_address,
+    d.mac_address || "",
+    d.hostname || "",
+    d.device_type || "",
+    d.last_seen ? "Online" : "Unknown",
+    "",
+    d.last_seen || "",
+  ]);
+  const csv = [headers.join(","), ...rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `netpulse_devices_${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadDevicesPDF(): Promise<void> {
+  try {
+    const response = await axios.get("/api/reports/devices/pdf", {
+      responseType: "blob",
+    });
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `Devices_${new Date().toISOString().slice(0, 10)}.pdf`;
+    link.click();
+    window.URL.revokeObjectURL(url);
+  } catch {
+    error.value = "Failed to download PDF report";
+  }
+}
+
+async function loadBlockedDevices(): Promise<void> {
+  try {
+    const { data } = await axios.get<{ ip: string }[]>("/api/device-actions/blocked");
+    blockedDevices.value = new Set(data.map((d) => d.ip));
+  } catch {
+    // non-fatal
+  }
+}
+
+async function blockDevice(ip: string): Promise<void> {
+  try {
+    await axios.post("/api/device-actions/block", {
+      ip,
+      reason: "Manual block from console",
+    });
+    blockedDevices.value.add(ip);
+    blockedDevices.value = new Set(blockedDevices.value);
+  } catch (e: any) {
+    error.value = e.response?.data?.detail || "Failed to block device";
+  }
+}
+
+async function unblockDevice(ip: string): Promise<void> {
+  try {
+    await axios.post("/api/device-actions/unblock", { ip });
+    blockedDevices.value.delete(ip);
+    blockedDevices.value = new Set(blockedDevices.value);
+  } catch (e: any) {
+    error.value = e.response?.data?.detail || "Failed to unblock device";
+  }
+}
+
+async function snmpPoll(): Promise<void> {
+  if (!snmpTarget.value.trim()) return;
+  snmpLoading.value = true;
+  snmpError.value = null;
+  snmpResults.value = [];
+  try {
+    const { data } = await axios.post<{ results: SnmpResultRow[] }>("/api/snmp/poll", {
+      target: snmpTarget.value.trim(),
+      community: snmpCommunity.value,
+      version: snmpVersion.value,
+    });
+    snmpResults.value = data.results;
+  } catch (e: any) {
+    snmpError.value = e.response?.data?.detail || "SNMP poll failed";
+  } finally {
+    snmpLoading.value = false;
+  }
+}
+
+async function snmpWalk(): Promise<void> {
+  if (!snmpTarget.value.trim() || !snmpWalkOid.value.trim()) return;
+  snmpWalkLoading.value = true;
+  snmpError.value = null;
+  snmpWalkResults.value = [];
+  try {
+    const { data } = await axios.post<{ results: SnmpResultRow[] }>("/api/snmp/walk", {
+      target: snmpTarget.value.trim(),
+      community: snmpCommunity.value,
+      oid: snmpWalkOid.value.trim(),
+    });
+    snmpWalkResults.value = data.results;
+  } catch (e: any) {
+    snmpError.value = e.response?.data?.detail || "SNMP walk failed";
+  } finally {
+    snmpWalkLoading.value = false;
+  }
+}
+
 onMounted(async () => {
-  await Promise.all([loadZones(), loadDevices()]);
+  await Promise.all([loadZones(), loadDevices(), loadBlockedDevices()]);
 });
 </script>
 
 <template>
-  <div class="np-panel p-4 space-y-4">
-    <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
-      <div class="flex flex-col">
-        <span class="np-panel-title">Devices</span>
-        <span class="text-[0.7rem] text-[var(--np-muted-text)]">
-          Inventory of discovered hosts across your zones.
-        </span>
-      </div>
-      <div class="flex items-center gap-3">
-        <select
-          v-model="selectedZone"
-          @change="loadDevices"
-          class="rounded border bg-black/40 px-2 py-0.5 text-[0.7rem] focus:outline-none focus:ring-1 focus:ring-cyan-400"
-        >
-          <option :value="null">All zones</option>
-          <option v-for="z in zones" :key="z" :value="z">
-            {{ z }}
-          </option>
-        </select>
-        <input
-          v-model="search"
-          type="text"
-          placeholder="Search by IP, hostname, type..."
-          class="rounded border border-cyan-400/40 bg-black/60 px-2 py-0.5 text-[0.7rem] text-cyan-100
-                 focus:outline-none focus:ring-1 focus:ring-cyan-400"
-        />
-      </div>
-    </header>
+  <div class="space-y-4">
+    <div
+      class="flex items-center gap-1 border-b"
+      :class="isNightshade ? 'border-teal-500/20' : 'border-amber-500/20'"
+    >
+      <button
+        type="button"
+        @click="activeTab = 'inventory'"
+        class="px-4 py-2.5 text-xs uppercase tracking-wider font-semibold transition-all duration-200 rounded-t-lg"
+        :class="[
+          activeTab === 'inventory'
+            ? isNightshade
+              ? 'bg-teal-500/20 text-teal-400 border border-b-0 border-teal-500/30'
+              : 'bg-amber-500/20 text-amber-400 border border-b-0 border-amber-500/30'
+            : 'text-[var(--np-muted-text)] hover:text-[var(--np-text)] hover:bg-white/5'
+        ]"
+        :style="{ fontFamily: isNightshade ? '\'Orbitron\', sans-serif' : '\'Inter\', sans-serif' }"
+      >
+        Inventory
+      </button>
+      <button
+        type="button"
+        @click="activeTab = 'uptime'"
+        class="px-4 py-2.5 text-xs uppercase tracking-wider font-semibold transition-all duration-200 rounded-t-lg"
+        :class="[
+          activeTab === 'uptime'
+            ? isNightshade
+              ? 'bg-teal-500/20 text-teal-400 border border-b-0 border-teal-500/30'
+              : 'bg-amber-500/20 text-amber-400 border border-b-0 border-amber-500/30'
+            : 'text-[var(--np-muted-text)] hover:text-[var(--np-text)] hover:bg-white/5'
+        ]"
+        :style="{ fontFamily: isNightshade ? '\'Orbitron\', sans-serif' : '\'Inter\', sans-serif' }"
+      >
+        Uptime Monitor
+      </button>
+      <button
+        type="button"
+        @click="activeTab = 'snmp'"
+        class="px-4 py-2.5 text-xs uppercase tracking-wider font-semibold transition-all duration-200 rounded-t-lg"
+        :class="[
+          activeTab === 'snmp'
+            ? isNightshade
+              ? 'bg-teal-500/20 text-teal-400 border border-b-0 border-teal-500/30'
+              : 'bg-amber-500/20 text-amber-400 border border-b-0 border-amber-500/30'
+            : 'text-[var(--np-muted-text)] hover:text-[var(--np-text)] hover:bg-white/5'
+        ]"
+        :style="{ fontFamily: isNightshade ? '\'Orbitron\', sans-serif' : '\'Inter\', sans-serif' }"
+      >
+        SNMP Monitor
+      </button>
+    </div>
 
-    <div class="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] text-xs">
+    <div v-if="activeTab === 'inventory'" class="np-panel p-4 space-y-4">
+      <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
+        <div class="flex flex-col">
+          <span class="np-panel-title">Devices</span>
+          <span class="text-[0.7rem] text-[var(--np-muted-text)]">
+            Inventory of discovered hosts across your zones.
+          </span>
+        </div>
+        <div class="flex items-center gap-3">
+          <button
+            @click="downloadDeviceReport"
+            class="rounded bg-black/40 px-2 py-0.5 text-[0.7rem] transition-colors flex items-center gap-1"
+            :class="isNightshade ? 'border border-teal-400/30 text-teal-200 hover:bg-teal-500/20' : 'border border-amber-500/20 text-amber-300 hover:bg-amber-500/20'"
+            title="Download Device Inventory CSV"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+            CSV
+          </button>
+          <button
+            @click="downloadDevicesPDF"
+            class="rounded bg-black/40 px-2 py-0.5 text-[0.7rem] transition-colors flex items-center gap-1"
+            :class="isNightshade ? 'border border-teal-400/30 text-teal-200 hover:bg-teal-500/20' : 'border border-amber-500/20 text-amber-300 hover:bg-amber-500/20'"
+            title="Download Device Inventory PDF"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+            PDF
+          </button>
+          <select
+            v-model="selectedZone"
+            @change="loadDevices"
+            class="rounded border bg-black/40 px-2 py-0.5 text-[0.7rem] focus:outline-none focus:ring-1 focus:ring-[var(--np-accent-primary)]"
+          >
+            <option :value="null">All zones</option>
+            <option v-for="z in zones" :key="z" :value="z">
+              {{ z }}
+            </option>
+          </select>
+          <input
+            v-model="search"
+            type="text"
+            placeholder="Search by IP, hostname, type..."
+            class="rounded border bg-black/60 px-2 py-0.5 text-[0.7rem] text-[var(--np-text)]
+                   focus:outline-none focus:ring-1 focus:ring-[var(--np-accent-primary)]"
+            :class="isNightshade ? 'border-teal-400/40' : 'border-amber-500/30'"
+          />
+        </div>
+      </header>
+
+      <div
+        v-if="blockedDevices.size > 0"
+        class="rounded-md border p-3 space-y-2"
+        :class="isNightshade ? 'border-rose-400/30 bg-rose-500/5' : 'border-rose-500/20 bg-rose-500/5'"
+      >
+        <p class="text-[0.7rem] uppercase tracking-[0.16em] font-semibold text-rose-300">
+          Blocked Devices
+        </p>
+        <div class="flex flex-wrap gap-2">
+          <div
+            v-for="ip in Array.from(blockedDevices)"
+            :key="ip"
+            class="flex items-center gap-2 rounded border px-2 py-1 text-[0.7rem]"
+            :class="isNightshade ? 'border-rose-400/30 bg-black/40 text-rose-200' : 'border-rose-500/20 bg-black/40 text-rose-300'"
+          >
+            <span class="font-mono">{{ ip }}</span>
+            <button
+              type="button"
+              @click="unblockDevice(ip)"
+              class="rounded px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase transition-colors"
+              :class="isNightshade ? 'bg-teal-500/20 text-teal-300 hover:bg-teal-500/30' : 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'"
+            >
+              Unblock
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] text-xs">
       <section class="space-y-2">
         <div
-          class="rounded-md border border-cyan-400/30 bg-black/60 max-h-80 overflow-auto"
+          class="rounded-md border bg-black/60 max-h-80 overflow-auto"
+          :class="isNightshade ? 'border-teal-400/30' : 'border-amber-500/20'"
         >
           <table class="min-w-full text-[0.7rem]">
-            <thead class="bg-black/70 text-cyan-200">
+            <thead class="bg-black/70" :class="isNightshade ? 'text-teal-200' : 'text-amber-300'">
               <tr>
                 <th class="px-2 py-1 text-left">IP / Hostname</th>
                 <th class="px-2 py-1 text-left">Type</th>
@@ -194,22 +438,23 @@ onMounted(async () => {
                 <th class="px-2 py-1 text-left">MAC</th>
                 <th class="px-2 py-1 text-left">Last seen</th>
                 <th class="px-2 py-1 text-center">GW</th>
+                <th class="px-2 py-1 text-center">Actions</th>
               </tr>
             </thead>
             <tbody>
               <tr
                 v-if="loading"
-                class="text-cyan-100"
+                class="text-[var(--np-text)]"
               >
-                <td colspan="6" class="px-2 py-2 text-center">
+                <td colspan="7" class="px-2 py-2 text-center">
                   Loading devices...
                 </td>
               </tr>
               <tr
                 v-else-if="!filteredDevices.length"
-                class="text-cyan-100"
+                class="text-[var(--np-text)]"
               >
-                <td colspan="6" class="px-2 py-2 text-center">
+                <td colspan="7" class="px-2 py-2 text-center">
                   No devices found for current filters.
                 </td>
               </tr>
@@ -217,8 +462,11 @@ onMounted(async () => {
                 v-for="d in filteredDevices"
                 :key="d.id"
                 @click="selectDevice(d)"
-                class="cursor-pointer border-t border-cyan-400/20 text-cyan-100 hover:bg-cyan-500/10"
-                :class="selectedDevice && selectedDevice.id === d.id ? 'bg-cyan-500/20' : ''"
+                class="cursor-pointer border-t text-[var(--np-text)]"
+                :class="[
+                  isNightshade ? 'border-teal-400/20 hover:bg-teal-500/10' : 'border-amber-500/15 hover:bg-amber-500/10',
+                  selectedDevice && selectedDevice.id === d.id ? (isNightshade ? 'bg-teal-500/20' : 'bg-amber-500/20') : ''
+                ]"
               >
                 <td class="px-2 py-1">
                   <div class="flex flex-col">
@@ -248,6 +496,25 @@ onMounted(async () => {
                 <td class="px-2 py-1 text-center">
                   {{ d.is_gateway ? "●" : "" }}
                 </td>
+                <td class="px-2 py-1 text-center" @click.stop>
+                  <button
+                    v-if="blockedDevices.has(d.ip_address)"
+                    type="button"
+                    @click="unblockDevice(d.ip_address)"
+                    class="rounded px-2 py-0.5 text-[0.6rem] font-semibold uppercase transition-colors"
+                    :class="isNightshade ? 'bg-teal-500/20 text-teal-300 hover:bg-teal-500/30 border border-teal-400/30' : 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30'"
+                  >
+                    Unblock
+                  </button>
+                  <button
+                    v-else
+                    type="button"
+                    @click="blockDevice(d.ip_address)"
+                    class="rounded px-2 py-0.5 text-[0.6rem] font-semibold uppercase transition-colors border border-rose-400/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20"
+                  >
+                    Block
+                  </button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -258,17 +525,17 @@ onMounted(async () => {
       </section>
 
       <section class="space-y-2">
-        <div class="rounded-md border border-cyan-400/30 bg-black/70 p-3">
-          <p class="text-[0.7rem] uppercase tracking-[0.16em] text-cyan-200">
+        <div class="rounded-md border bg-black/70 p-3" :class="isNightshade ? 'border-teal-400/30' : 'border-amber-500/20'">
+          <p class="text-[0.7rem] uppercase tracking-[0.16em]" :class="isNightshade ? 'text-teal-200' : 'text-amber-300'">
             Device Overview
           </p>
           <div v-if="!selectedDevice" class="mt-2 text-[0.7rem] text-[var(--np-muted-text)]">
-            Select a device from the table to see its profile, recent activity, and AI analysis.
+            Select a device from the table to see its profile and recent activity.
           </div>
           <div v-else class="mt-2 space-y-2 text-[0.7rem]">
             <div class="flex items-center justify-between">
               <div>
-                <p class="font-mono text-cyan-100">
+                <p class="font-mono text-[var(--np-text)]">
                   {{ selectedDevice.hostname || selectedDevice.ip_address }}
                 </p>
                 <p class="text-[0.65rem] text-[var(--np-muted-text)]">
@@ -277,14 +544,15 @@ onMounted(async () => {
               </div>
               <span
                 v-if="selectedDevice.is_gateway"
-                class="rounded border border-emerald-400/60 bg-emerald-500/20 px-2 py-0.5 text-[0.65rem] text-emerald-200"
+                class="rounded border px-2 py-0.5 text-[0.65rem]"
+                :class="isNightshade ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-200' : 'border-green-500/60 bg-green-500/20 text-green-200'"
               >
                 Gateway
               </span>
             </div>
 
             <div class="mt-1">
-              <p v-if="deviceDetailLoading" class="text-cyan-100/80">
+              <p v-if="deviceDetailLoading" class="text-[var(--np-muted-text)]">
                 Loading device detail...
               </p>
               <p v-else-if="deviceDetailError" class="text-rose-300">
@@ -328,17 +596,17 @@ onMounted(async () => {
 
             <div class="mt-2 space-y-1">
               <div class="flex items-center justify-between">
-                <p class="text-[0.65rem] uppercase tracking-[0.16em] text-cyan-200">
-                  AI Copilot
+                <p class="text-[0.65rem] uppercase tracking-[0.16em]" :class="isNightshade ? 'text-teal-200' : 'text-amber-300'">
+                  Device Analysis
                 </p>
                 <button
                   type="button"
                   @click="askAiAboutDevice"
-                  class="rounded border border-cyan-400/40 bg-black/80 px-2 py-0.5 text-[0.65rem]
-                         text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+                  class="rounded border bg-black/80 px-2 py-0.5 text-[0.65rem] disabled:opacity-50"
+                  :class="isNightshade ? 'border-teal-400/40 text-teal-200 hover:bg-teal-500/10' : 'border-amber-500/30 text-amber-300 hover:bg-amber-500/10'"
                   :disabled="aiLoading"
                 >
-                  {{ aiLoading ? "Asking..." : "Ask about this device" }}
+                  {{ aiLoading ? "Analyzing..." : "Analyze Device" }}
                 </button>
               </div>
               <p v-if="aiError" class="text-[0.7rem] text-rose-300">
@@ -346,7 +614,8 @@ onMounted(async () => {
               </p>
               <div
                 v-if="aiAnswer"
-                class="mt-1 max-h-32 overflow-auto rounded border border-cyan-400/20 bg-black/80 p-2 text-[0.7rem] text-cyan-100"
+                class="mt-1 max-h-32 overflow-auto rounded border bg-black/80 p-2 text-[0.7rem] text-[var(--np-text)]"
+                :class="isNightshade ? 'border-teal-400/20' : 'border-amber-500/15'"
               >
                 {{ aiAnswer }}
               </div>
@@ -354,6 +623,167 @@ onMounted(async () => {
           </div>
         </div>
       </section>
+      </div>
+    </div>
+
+    <Uptime v-else-if="activeTab === 'uptime'" :theme="theme" />
+
+    <div v-else-if="activeTab === 'snmp'" class="np-panel p-4 space-y-6">
+      <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
+        <div class="flex flex-col">
+          <span class="np-panel-title">SNMP Monitor</span>
+          <span class="text-[0.7rem] text-[var(--np-muted-text)]">
+            Poll devices via SNMP and walk OID trees.
+          </span>
+        </div>
+      </header>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div>
+          <label class="block text-[0.7rem] uppercase tracking-wider font-semibold" :class="isNightshade ? 'text-teal-200' : 'text-amber-300'">
+            Target IP
+          </label>
+          <input
+            v-model="snmpTarget"
+            type="text"
+            placeholder="192.168.1.1"
+            class="mt-1 w-full rounded-md border px-3 py-2 text-sm bg-black/40"
+            style="border-color: var(--np-border); color: var(--np-text)"
+          />
+        </div>
+        <div>
+          <label class="block text-[0.7rem] uppercase tracking-wider font-semibold" :class="isNightshade ? 'text-teal-200' : 'text-amber-300'">
+            Community String
+          </label>
+          <input
+            v-model="snmpCommunity"
+            type="text"
+            placeholder="public"
+            class="mt-1 w-full rounded-md border px-3 py-2 text-sm bg-black/40"
+            style="border-color: var(--np-border); color: var(--np-text)"
+          />
+        </div>
+        <div>
+          <label class="block text-[0.7rem] uppercase tracking-wider font-semibold" :class="isNightshade ? 'text-teal-200' : 'text-amber-300'">
+            SNMP Version
+          </label>
+          <select
+            v-model="snmpVersion"
+            class="mt-1 w-full rounded-md border px-3 py-2 text-sm bg-black/40"
+            style="border-color: var(--np-border); color: var(--np-text)"
+          >
+            <option value="1">v1</option>
+            <option value="2c">v2c</option>
+            <option value="3">v3</option>
+          </select>
+        </div>
+        <div class="flex items-end">
+          <button
+            type="button"
+            @click="snmpPoll"
+            :disabled="snmpLoading || !snmpTarget.trim()"
+            class="w-full rounded-md px-4 py-2 text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-40"
+            :class="isNightshade
+              ? 'bg-teal-500/20 text-teal-400 border border-teal-500/30 hover:bg-teal-500/30'
+              : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30'"
+          >
+            {{ snmpLoading ? "Polling..." : "Poll Device" }}
+          </button>
+        </div>
+      </div>
+
+      <p v-if="snmpError" class="rounded-md border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-[0.7rem] text-rose-300">
+        {{ snmpError }}
+      </p>
+
+      <div v-if="snmpResults.length > 0" class="space-y-2">
+        <p class="text-[0.7rem] uppercase tracking-[0.16em] font-semibold" :class="isNightshade ? 'text-teal-200' : 'text-amber-300'">
+          Poll Results
+        </p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div
+            v-for="(r, idx) in snmpResults"
+            :key="idx"
+            class="rounded-md border p-3 space-y-1"
+            :class="isNightshade ? 'border-teal-400/20 bg-black/30' : 'border-slate-700 bg-slate-800/50'"
+          >
+            <p class="text-[0.65rem] uppercase tracking-wider" :class="isNightshade ? 'text-teal-300' : 'text-amber-300'">
+              {{ r.label }}
+            </p>
+            <p class="text-sm font-mono text-[var(--np-text)] break-all">
+              {{ r.value }}
+            </p>
+            <p class="text-[0.6rem] text-[var(--np-muted-text)]">
+              {{ r.type }} &middot; {{ r.oid }}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="border-t pt-4" :class="isNightshade ? 'border-teal-500/20' : 'border-amber-500/20'">
+        <p class="text-[0.7rem] uppercase tracking-[0.16em] font-semibold mb-3" :class="isNightshade ? 'text-teal-200' : 'text-amber-300'">
+          Walk OID
+        </p>
+        <div class="flex gap-3 items-end">
+          <div class="flex-1">
+            <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-muted-text)]">
+              OID
+            </label>
+            <input
+              v-model="snmpWalkOid"
+              type="text"
+              placeholder="1.3.6.1.2.1.1"
+              class="mt-1 w-full rounded-md border px-3 py-2 text-sm bg-black/40"
+              style="border-color: var(--np-border); color: var(--np-text)"
+            />
+          </div>
+          <button
+            type="button"
+            @click="snmpWalk"
+            :disabled="snmpWalkLoading || !snmpTarget.trim() || !snmpWalkOid.trim()"
+            class="rounded-md px-4 py-2 text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-40"
+            :class="isNightshade
+              ? 'bg-teal-500/20 text-teal-400 border border-teal-500/30 hover:bg-teal-500/30'
+              : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30'"
+          >
+            {{ snmpWalkLoading ? "Walking..." : "Walk" }}
+          </button>
+        </div>
+      </div>
+
+      <div v-if="snmpWalkResults.length > 0" class="space-y-2">
+        <p class="text-[0.7rem] uppercase tracking-[0.16em] font-semibold" :class="isNightshade ? 'text-teal-200' : 'text-amber-300'">
+          Walk Results ({{ snmpWalkResults.length }} entries)
+        </p>
+        <div
+          class="rounded-md border bg-black/60 max-h-80 overflow-auto"
+          :class="isNightshade ? 'border-teal-400/30' : 'border-amber-500/20'"
+        >
+          <table class="min-w-full text-[0.7rem]">
+            <thead class="bg-black/70 sticky top-0" :class="isNightshade ? 'text-teal-200' : 'text-amber-300'">
+              <tr>
+                <th class="px-3 py-1.5 text-left">OID</th>
+                <th class="px-3 py-1.5 text-left">Label</th>
+                <th class="px-3 py-1.5 text-left">Value</th>
+                <th class="px-3 py-1.5 text-left">Type</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(w, idx) in snmpWalkResults"
+                :key="idx"
+                class="border-t text-[var(--np-text)]"
+                :class="isNightshade ? 'border-teal-400/10' : 'border-amber-500/10'"
+              >
+                <td class="px-3 py-1 font-mono text-[0.65rem] text-[var(--np-muted-text)]">{{ w.oid }}</td>
+                <td class="px-3 py-1">{{ w.label }}</td>
+                <td class="px-3 py-1 font-mono break-all max-w-xs">{{ w.value }}</td>
+                <td class="px-3 py-1 text-[0.65rem] text-[var(--np-muted-text)]">{{ w.type }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
 </template>

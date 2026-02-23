@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     postgres_db: str = "netpulse"
     postgres_user: str = "netpulse"
     postgres_password: str = "netpulse"
+    database_url_override: str | None = None
 
     # Redis / Celery
     redis_url: str = "redis://redis:6379/0"
@@ -44,7 +45,7 @@ class Settings(BaseSettings):
     pulse_cloudflare_ip: str = "1.1.1.1"
 
     # Paths
-    scripts_base_dir: str = "/scripts"
+    scripts_base_dir: str = "./scripts"
     scripts_uploads_subdir: str = "uploads"
     scripts_prebuilt_subdir: str = "prebuilt"
 
@@ -52,6 +53,11 @@ class Settings(BaseSettings):
     secret_key: str = "CHANGE_ME_IN_PRODUCTION"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
+    allow_open_signup: bool = True
+
+    # Google OAuth
+    google_oauth_client_id: str | None = None
+    google_oauth_client_secret: str | None = None
 
     # Alerting / notifications
     enable_email_alerts: bool = False
@@ -74,16 +80,25 @@ class Settings(BaseSettings):
     alert_health_channel: str = "both"
     alert_device_channel: str = "both"
 
-    # WhatsApp templates
-    whatsapp_message_template: str = "{subject}\n\n{body}"
-    whatsapp_vuln_template: str = "{subject}\n\n{body}"
-    whatsapp_scan_template: str = "{subject}\n\n{body}"
-    whatsapp_report_template: str = "{subject}\n\n{body}"
-    whatsapp_health_template: str = "{subject}\n\n{body}"
-    whatsapp_device_template: str = "{subject}\n\n{body}"
+    # WhatsApp templates (variables: {subject}, {body}, {device_name}, {device_ip}, {device_mac}, {segment_name}, {severity}, {timestamp})
+    whatsapp_message_template: str = "[NetPulse] {subject}\n\n{body}\n\nTime: {timestamp}"
+    whatsapp_vuln_template: str = "[NetPulse Alert] {severity} Vulnerability\n\nDevice: {device_name} ({device_ip})\nMAC: {device_mac}\nSegment: {segment_name}\n\n{body}\n\nTime: {timestamp}"
+    whatsapp_scan_template: str = "[NetPulse] Scan Complete\n\n{subject}\n\nSegment: {segment_name}\n{body}\n\nTime: {timestamp}"
+    whatsapp_report_template: str = "[NetPulse] Report Generated\n\n{subject}\n\n{body}\n\nTime: {timestamp}"
+    whatsapp_health_template: str = "[NetPulse] Health Alert\n\n{subject}\n\nDevice: {device_name} ({device_ip})\nSegment: {segment_name}\n\n{body}\n\nTime: {timestamp}"
+    whatsapp_device_template: str = "[NetPulse] Device Alert\n\nDevice: {device_name}\nIP: {device_ip}\nMAC: {device_mac}\nSegment: {segment_name}\n\n{body}\n\nTime: {timestamp}"
+    
+    # Email templates (same variables available)
+    email_vuln_template: str = "Device: {device_name} ({device_ip})\nMAC: {device_mac}\nSegment: {segment_name}\n\n{body}"
+    email_device_template: str = "Device: {device_name}\nIP: {device_ip}\nMAC: {device_mac}\nSegment: {segment_name}\n\n{body}"
+    email_health_template: str = "Device: {device_name} ({device_ip})\nSegment: {segment_name}\n\n{body}"
 
     # Health alert tuning (Pulse)
     health_alert_threshold: float = 40.0
+
+    # External threat intelligence APIs
+    abuseipdb_api_key: str | None = None
+    abuseipdb_max_age_days: int = 90
 
     # CORS configuration
     cors_allow_origins: List[str] = Field(
@@ -117,6 +132,19 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> str:
         """Build an async SQLAlchemy database URL from Postgres components."""
+        import os
+        from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
+        raw_url = os.environ.get("DATABASE_URL") or self.database_url_override
+        if raw_url:
+            if raw_url.startswith("postgresql://"):
+                raw_url = raw_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            elif raw_url.startswith("postgres://"):
+                raw_url = raw_url.replace("postgres://", "postgresql+asyncpg://", 1)
+            parsed = urlparse(raw_url)
+            params = parse_qs(parsed.query)
+            params.pop("sslmode", None)
+            new_query = urlencode(params, doseq=True)
+            return urlunparse(parsed._replace(query=new_query))
         return (
             f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
@@ -129,6 +157,16 @@ class Settings(BaseSettings):
             self.pulse_isp_ip,
             self.pulse_cloudflare_ip,
         ]
+
+    @property
+    def celery_broker_url(self) -> str:
+        """Celery broker URL (uses Redis)."""
+        return self.redis_url
+
+    @property
+    def celery_result_backend(self) -> str:
+        """Celery result backend URL (uses Redis)."""
+        return self.redis_url
 
 
 @lru_cache(maxsize=1)

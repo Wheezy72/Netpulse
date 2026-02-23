@@ -29,7 +29,9 @@ RUN pip install --no-cache-dir \
       redis \
       scapy \
       python-nmap \
-      fpdf2 \
+      reportlab \
+      slowapi \
+      httpx \
       "python-jose[cryptography]" \
       "passlib[bcrypt]"
 

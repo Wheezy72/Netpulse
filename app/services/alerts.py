@@ -132,6 +132,11 @@ async def send_system_alert(
     *,
     event_type: str | None = None,
     channel: str | None = None,
+    device_name: str | None = None,
+    device_ip: str | None = None,
+    device_mac: str | None = None,
+    segment_name: str | None = None,
+    severity: str | None = None,
 ) -> None:
     """
     Send a generic system alert via configured channels.
@@ -148,6 +153,16 @@ async def send_system_alert(
     channel:
         Override channel routing ("email", "whatsapp", "both", "none").
         If omitted, per-event channel settings in `Settings` are used.
+    device_name:
+        Optional device hostname for template rendering.
+    device_ip:
+        Optional device IP address for template rendering.
+    device_mac:
+        Optional device MAC address for template rendering.
+    segment_name:
+        Optional network segment name for template rendering.
+    severity:
+        Optional severity level for template rendering.
     """
     event_key = (event_type or "").lower()
 
@@ -190,7 +205,23 @@ async def send_system_alert(
         elif event_key == "device":
             template = settings.whatsapp_device_template or template
 
-        formatted = template.format(subject=subject, body=body)
+        # Build template context with all available variables
+        from datetime import datetime
+        template_vars = {
+            "subject": subject,
+            "body": body,
+            "device_name": device_name or "N/A",
+            "device_ip": device_ip or "N/A",
+            "device_mac": device_mac or "N/A",
+            "segment_name": segment_name or "N/A",
+            "severity": severity or "N/A",
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        try:
+            formatted = template.format(**template_vars)
+        except KeyError:
+            # Fallback if template has invalid placeholders
+            formatted = template.format(subject=subject, body=body)
         tasks.append(send_whatsapp_alert(formatted))
 
     if tasks:
@@ -232,6 +263,11 @@ async def process_vulnerability_alerts(db: AsyncSession) -> None:
             subject,
             body,
             event_type="vuln",
+            device_name=device.hostname or device.ip_address,
+            device_ip=device.ip_address,
+            device_mac=device.mac_address,
+            segment_name=device.zone or "Default",
+            severity=vuln.severity.value.upper() if vuln.severity else None,
         )
 
         vuln.alert_sent = True

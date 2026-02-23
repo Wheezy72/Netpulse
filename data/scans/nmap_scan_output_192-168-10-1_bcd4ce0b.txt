@@ -1,0 +1,8 @@
+Command: nmap -T3 -sU -O 192.168.10.1
+Target: 192.168.10.1
+Type: UDP Scan
+Time: 2026-02-08T08:56:59.387500
+============================================================
+
+You requested a scan type which requires root privileges.
+QUITTING!

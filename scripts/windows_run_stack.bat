@@ -6,6 +6,17 @@ REM Python and Node dependencies.
 
 setlocal enabledelayedexpansion
 
+REM Check for admin privileges
+net session >nul 2>&1
+if %errorlevel% neq 0 (
+    echo WARNING: Not running as Administrator.
+    echo Some network scans ^(SYN, OS detection^) may not work.
+    echo For full functionality, right-click and "Run as Administrator".
+    echo.
+    set /p CONTINUE="Continue anyway? [y/N] "
+    if /i not "!CONTINUE!"=="y" exit /b 1
+)
+
 REM Change to repo root (this script lives in scripts\)
 cd /d "%~dp0.."
 

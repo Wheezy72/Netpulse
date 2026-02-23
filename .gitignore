@@ -42,3 +42,17 @@ package-lock.json
 # Docker
 docker-data/
 celerybeat-schedule.db
+
+# Replit & AI Artifacts
+.local/
+.config/
+.replit
+replit.md
+attached_assets/
+
+# Archives
+*.zip
+*.rar
+
+# Temp files
+main.py

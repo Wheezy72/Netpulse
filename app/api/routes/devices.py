@@ -30,7 +30,7 @@ class DeviceOut(BaseModel):
     last_seen: Optional[datetime]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class TopologyNode(BaseModel):

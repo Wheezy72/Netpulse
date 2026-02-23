@@ -66,7 +66,6 @@ async def internet_health_recent(
         .limit(limit)
     )
     rows = list(result.scalars().all())
-    # Return oldest first so charts render left-to-right in time
     rows.reverse()
 
     points = [

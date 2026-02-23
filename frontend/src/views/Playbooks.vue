@@ -2,15 +2,10 @@
 import axios from "axios";
 import { computed, onMounted, ref } from "vue";
 
-type Theme = "cyberdeck" | "sysadmin";
+type Theme = "nightshade" | "sysadmin";
 
 interface Props {
   theme: Theme;
-}
-
-interface ScriptSettingsItem {
-  name: string;
-  allowed: boolean;
 }
 
 interface Playbook {
@@ -18,55 +13,67 @@ interface Playbook {
   label: string;
   scriptName: string;
   description: string;
+  category: string;
+  icon: string;
 }
 
 const props = defineProps<Props>();
+const emit = defineEmits<{
+  (e: "toast", type: "success" | "error" | "warning" | "info", message: string): void;
+}>();
 
-// Personal deployment: any authenticated user can run playbooks.
 const canRun = computed(() => true);
-const isCyberdeck = computed(() => props.theme === "cyberdeck");
+const isNightshade = computed(() => props.theme === "nightshade");
 
-// Script policy from backend
-const scripts = ref<ScriptSettingsItem[]>([]);
-const scriptsLoading = ref(false);
-const scriptsError = ref<string | null>(null);
+interface NmapPlaybook extends Playbook {
+  nmapCommand: string;
+}
 
-// Playbook selection and parameters
-const allPlaybooks: Playbook[] = [
-  {
-    id: "syn-storm",
-    label: "SYN storm",
-    scriptName: "malformed_syn_flood.py",
-    description:
-      "Short SYN storm against a target to test IDS signatures and Internet Health alerts.",
-  },
-  {
-    id: "xmas-scan",
-    label: "Xmas scan",
-    scriptName: "malformed_xmas_scan.py",
-    description:
-      "TCP Xmas scan-style packets across selected ports to exercise firewall / IDS behavior.",
-  },
-  {
-    id: "overlap-fragments",
-    label: "Overlapping fragments",
-    scriptName: "malformed_overlap_fragments.py",
-    description:
-      "Tiny overlapping IP fragment pair to observe reassembly behavior and anomaly detection.",
-  },
+const allPlaybooks: NmapPlaybook[] = [
+  { id: "quick-scan", label: "Quick Scan", scriptName: "nmap", nmapCommand: "nmap -T4 -F", description: "Fast scan of top 100 ports.", category: "Discovery", icon: "search" },
+  { id: "full-port", label: "Full Port Scan", scriptName: "nmap", nmapCommand: "nmap -p- -T4", description: "All 65535 TCP ports.", category: "Discovery", icon: "search" },
+  { id: "version-detect", label: "Version Detection", scriptName: "nmap", nmapCommand: "nmap -sV -T3", description: "Detect service versions.", category: "Discovery", icon: "search" },
+  { id: "os-detect", label: "OS Detection", scriptName: "nmap", nmapCommand: "nmap -O -T3", description: "Detect operating system.", category: "Discovery", icon: "search" },
+  { id: "stealth-scan", label: "Stealth Scan", scriptName: "nmap", nmapCommand: "nmap -sS -T2 -n", description: "SYN scan, slower, no DNS.", category: "Reconnaissance", icon: "search" },
+  { id: "udp-scan", label: "UDP Scan", scriptName: "nmap", nmapCommand: "nmap -sU --top-ports 100", description: "Top 100 UDP ports.", category: "Reconnaissance", icon: "wifi" },
+  { id: "vuln-scan", label: "Vulnerability Scan", scriptName: "nmap", nmapCommand: "nmap -sV --script=vuln", description: "Check for known vulnerabilities.", category: "Security Audit", icon: "shield" },
+  { id: "aggressive-scan", label: "Aggressive Scan", scriptName: "nmap", nmapCommand: "nmap -A -T4", description: "OS, version, scripts, traceroute.", category: "Security Audit", icon: "zap" },
+  { id: "web-scan", label: "Web Server Scan", scriptName: "nmap", nmapCommand: "nmap -p 80,443,8080,8443 -sV", description: "Web server enumeration.", category: "Reconnaissance", icon: "globe" },
+  { id: "smb-scan", label: "SMB Audit", scriptName: "nmap", nmapCommand: "nmap -p 139,445 --script=smb-enum-shares", description: "Windows share enumeration.", category: "Reconnaissance", icon: "folder" },
+  { id: "ssl-check", label: "SSL/TLS Check", scriptName: "nmap", nmapCommand: "nmap -p 443 --script=ssl-cert", description: "Check SSL certificate info.", category: "Security Audit", icon: "lock" },
+  { id: "ping-sweep", label: "Ping Sweep", scriptName: "nmap", nmapCommand: "nmap -sn", description: "Discover live hosts without port scan.", category: "Discovery", icon: "wifi" },
 ];
 
-const selectedPlaybookId = ref<string | null>(allPlaybooks[0]?.id ?? null);
+const categories = computed(() => [...new Set(allPlaybooks.map(p => p.category))]);
+const selectedCategory = ref<string>("All");
+
+const selectedPlaybookIds = ref<string[]>([]);
 const targetIp = ref("");
-const captureDuration = ref(60);
-const runPdfReport = ref(true);
+
+function togglePlaybook(id: string) {
+  const idx = selectedPlaybookIds.value.indexOf(id);
+  if (idx === -1) {
+    selectedPlaybookIds.value.push(id);
+  } else {
+    selectedPlaybookIds.value.splice(idx, 1);
+  }
+}
+
+function isSelected(id: string): boolean {
+  return selectedPlaybookIds.value.includes(id);
+}
+
+function selectAll() {
+  selectedPlaybookIds.value = filteredPlaybooks.value.map(pb => pb.id);
+}
+
+function clearSelection() {
+  selectedPlaybookIds.value = [];
+}
 
 // Status
 const running = ref(false);
 const statusLines = ref<string[]>([]);
-const pcapCaptureId = ref<number | null>(null);
-const attackJobId = ref<number | null>(null);
-const reportJobId = ref<number | null>(null);
 
 function log(message: string): void {
   const now = new Date();
@@ -74,48 +81,40 @@ function log(message: string): void {
   statusLines.value.push(`[${ts}] ${message}`);
 }
 
-async function loadScriptSettings(): Promise<void> {
-  scriptsError.value = null;
-  scriptsLoading.value = true;
-  try {
-    const { data } = await axios.get<{ scripts: ScriptSettingsItem[] }>(
-      "/api/scripts/settings"
-    );
-    scripts.value = data.scripts ?? [];
-  } catch {
-    scriptsError.value =
-      "Failed to load script policy. You may need to be logged in or have viewer permissions.";
-  } finally {
-    scriptsLoading.value = false;
-  }
-}
-
-const availablePlaybooks = computed(() => {
-  if (!scripts.value.length) {
+const filteredPlaybooks = computed(() => {
+  if (selectedCategory.value === "All") {
     return allPlaybooks;
   }
-  const allowedNames = new Set(
-    scripts.value
-      .filter((s) => s.allowed)
-      .map((s) => s.name)
-  );
-  return allPlaybooks.filter((pb) => allowedNames.has(pb.scriptName));
+  return allPlaybooks.filter((pb) => pb.category === selectedCategory.value);
 });
 
-const selectedPlaybook = computed<Playbook | null>(() => {
-  const id = selectedPlaybookId.value;
-  if (!id) return null;
-  const list = availablePlaybooks.value.length ? availablePlaybooks.value : allPlaybooks;
-  return list.find((pb) => pb.id === id) ?? null;
+interface ScanResult {
+  id: string;
+  command: string;
+  target: string;
+  scan_type: string;
+  started_at: string;
+  completed_at: string | null;
+  status: string;
+  output: string | null;
+  file_path: string | null;
+}
+
+const selectedPlaybooks = computed<NmapPlaybook[]>(() => {
+  return allPlaybooks.filter((pb) => selectedPlaybookIds.value.includes(pb.id));
 });
+
+const scanIds = ref<string[]>([]);
+const completedScans = ref<number>(0);
+const totalScans = ref<number>(0);
 
 async function runPlaybookScenario(): Promise<void> {
   if (!canRun.value) {
     return;
   }
-  const pb = selectedPlaybook.value;
-  if (!pb) {
-    log("Select a playbook first.");
+  const playbooks = selectedPlaybooks.value;
+  if (playbooks.length === 0) {
+    log("Select at least one playbook first.");
     return;
   }
   if (!targetIp.value.trim()) {
@@ -125,98 +124,88 @@ async function runPlaybookScenario(): Promise<void> {
 
   running.value = true;
   statusLines.value = [];
-  pcapCaptureId.value = null;
-  attackJobId.value = null;
-  reportJobId.value = null;
+  scanIds.value = [];
+  completedScans.value = 0;
+  totalScans.value = playbooks.length;
 
-  log(`Playbook "${pb.label}" starting for target ${targetIp.value.trim()}`);
+  const playbookNames = playbooks.map(p => p.label).join(", ");
+  log(`Starting ${playbooks.length} scan(s): ${playbookNames}`);
+  log(`Target: ${targetIp.value.trim()}`);
 
   try {
-    // 1) Start PCAP capture window
-    log(`Starting ${captureDuration.value}s capture window...`);
-    const { data: captureTask } = await axios.post<{ task_id: string }>(
-      "/api/vault/pcap/recent",
-      {
-        duration_seconds: captureDuration.value,
-      }
-    );
-    const taskId = captureTask.task_id;
-
-    // 2) Queue lab script
-    log(`Queueing lab script ${pb.scriptName}...`);
-    const attackPayload = {
-      script_name: pb.scriptName,
-      params: {
-        target_ip: targetIp.value.trim(),
-      },
-    };
-    const { data: attackJob } = await axios.post<{ job_id: number }>(
-      "/api/scripts/prebuilt/run",
-      attackPayload
-    );
-    attackJobId.value = attackJob.job_id;
-    log(`Lab script queued (job #${attackJob.job_id}).`);
-
-    // 3) Optionally queue WAN PDF report
-    if (runPdfReport.value) {
-      log("Queueing WAN PDF report...");
+    for (const pb of playbooks) {
+      log(`Executing ${pb.label}...`);
       try {
-        const { data: reportJob } = await axios.post<{ job_id: number }>(
-          "/api/scripts/prebuilt/run",
-          {
-            script_name: "wan_health_pdf_report.py",
-            params: {},
-          }
-        );
-        reportJobId.value = reportJob.job_id;
-        log(`WAN PDF report queued (job #${reportJob.job_id}).`);
-      } catch {
-        log("Failed to queue WAN PDF report.");
+        const { data } = await axios.post<ScanResult>("/api/nmap/execute", {
+          command: pb.nmapCommand,
+          target: targetIp.value.trim(),
+          save_results: true,
+        });
+        scanIds.value.push(data.id);
+        log(`  -> Started scan #${data.id}`);
+      } catch (e: any) {
+        log(`  -> Failed: ${e.response?.data?.detail || "Unknown error"}`);
       }
     }
 
-    // 4) Poll capture status in the background
-    const poll = async () => {
-      try {
-        const { data } = await axios.get<{
-          ready: boolean;
-          capture_id: number | null;
-          state: string;
-          error: string | null;
-        }>(`/api/vault/pcap/task/${taskId}`);
+    log(`Scans initiated: ${scanIds.value.length}/${playbooks.length}`);
+    
+    if (scanIds.value.length === 0) {
+      running.value = false;
+      emit("toast", "error", "All scans failed to start");
+      return;
+    }
 
-        if (!data.ready) {
-          log(`Capture state: ${data.state}`);
-          setTimeout(poll, 5000);
-          return;
-        }
-
-        if (data.error) {
-          log(`Capture error: ${data.error}`);
-          running.value = false;
-          return;
-        }
-
-        if (data.capture_id != null) {
-          pcapCaptureId.value = data.capture_id;
-          log(`Capture ready (id ${data.capture_id}). Download from Vault panel.`);
-          running.value = false;
-        }
-      } catch {
-        log("Failed to query capture status.");
-        running.value = false;
-      }
-    };
-
-    setTimeout(poll, 5000);
+    log("Waiting for scans to complete...");
+    pollScans();
   } catch {
-    log("Failed to start playbook scenario. Check your permissions and script policy.");
+    log("Failed to start playbook scenario.");
     running.value = false;
+    emit("toast", "error", "Failed to start playbook scenario");
   }
 }
 
+async function pollScans(): Promise<void> {
+  const pendingIds = [...scanIds.value];
+  const completedIds = new Set<string>();
+  
+  const poll = async () => {
+    for (const scanId of pendingIds) {
+      if (completedIds.has(scanId)) continue;
+      
+      try {
+        const { data } = await axios.get<ScanResult>(`/api/nmap/result/${scanId}`);
+        
+        if (data.status === "completed" || data.status === "error" || data.status === "timeout") {
+          completedIds.add(scanId);
+          completedScans.value = completedIds.size;
+          
+          if (data.status === "completed") {
+            log(`Scan #${scanId} completed: ${data.scan_type}`);
+          } else {
+            log(`Scan #${scanId} ${data.status}`);
+          }
+        }
+      } catch {
+        // Continue polling
+      }
+    }
+    
+    if (completedIds.size < pendingIds.length) {
+      log(`Progress: ${completedIds.size}/${pendingIds.length} scans complete`);
+      setTimeout(poll, 3000);
+    } else {
+      log(`All ${pendingIds.length} scan(s) completed!`);
+      running.value = false;
+      emit("toast", "success", `${pendingIds.length} scan(s) completed successfully`);
+    }
+  };
+  
+  setTimeout(poll, 3000);
+}
+
 onMounted(() => {
-  loadScriptSettings();
+  // No script settings needed - all scripts are available
 });
 </script>
 
@@ -232,7 +221,7 @@ onMounted(() => {
         </div>
         <span
           class="text-[0.65rem] uppercase tracking-[0.16em]"
-          :class="isCyberdeck ? 'text-cyan-300' : 'text-slate-500'"
+          :class="isNightshade ? 'text-teal-300' : 'text-amber-400'"
         >
           Use on networks you own or control
         </span>
@@ -241,108 +230,148 @@ onMounted(() => {
       <div class="space-y-3 text-xs">
         <div
           class="rounded-md border p-3"
-          :class="isCyberdeck ? 'border-cyan-400/30 bg-black/50' : 'border-slate-200 bg-white'"
+          :class="isNightshade ? 'border-teal-400/30 bg-black/50' : 'border-amber-500/30 bg-slate-800/50'"
         >
-          <p
-            class="text-[0.7rem] uppercase tracking-[0.16em]"
-            :class="isCyberdeck ? 'text-cyan-200' : 'text-slate-600'"
-          >
-            Playbook
-          </p>
-          <p
-            class="mt-1 text-[0.75rem]"
-            :class="isCyberdeck ? 'text-cyan-100/80' : 'text-slate-600'"
-          >
-            Choose a scenario. Scripts must be present in the prebuilt scripts directory and allowed in Settings.
-          </p>
-
-          <div class="mt-2 grid gap-2 md:grid-cols-3">
-            <button
-              v-for="pb in availablePlaybooks"
-              :key="pb.id"
-              type="button"
-              @click="selectedPlaybookId = pb.id"
-              class="rounded border px-2 py-1 text-left text-[0.7rem]"
-              :class="[
-                selectedPlaybookId === pb.id
-                  ? isCyberdeck
-                    ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-200'
-                    : 'border-blue-500 bg-blue-50 text-blue-700'
-                  : isCyberdeck
-                    ? 'border-cyan-400/40 text-cyan-200 hover:bg-cyan-500/10'
-                    : 'border-slate-300 text-slate-700 hover:bg-slate-100'
-              ]"
-            >
-              <span class="block font-semibold">{{ pb.label }}</span>
-              <span
-                class="mt-0.5 block text-[0.65rem]"
-                :class="isCyberdeck ? 'text-cyan-100/80' : 'text-slate-500'"
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-3">
+              <p
+                class="text-[0.7rem] uppercase tracking-[0.16em]"
+                :class="isNightshade ? 'text-teal-200' : 'text-amber-300'"
               >
-                {{ pb.description }}
+                Select Playbooks
+              </p>
+              <span 
+                v-if="selectedPlaybookIds.length > 0"
+                class="px-2 py-0.5 rounded-full text-[0.65rem] font-medium"
+                :class="isNightshade ? 'bg-emerald-500/30 text-emerald-200' : 'bg-amber-500/30 text-amber-200'"
+              >
+                {{ selectedPlaybookIds.length }} selected
               </span>
-            </button>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                @click="selectAll"
+                class="px-2 py-1 rounded text-[0.65rem]"
+                :class="isNightshade 
+                  ? 'text-teal-300 hover:bg-teal-400/20' 
+                  : 'text-amber-300 hover:bg-amber-500/20'"
+              >
+                Select All
+              </button>
+              <button
+                type="button"
+                @click="clearSelection"
+                class="px-2 py-1 rounded text-[0.65rem]"
+                :class="isNightshade 
+                  ? 'text-teal-300 hover:bg-teal-400/20' 
+                  : 'text-amber-300 hover:bg-amber-500/20'"
+              >
+                Clear
+              </button>
+              <select
+                v-model="selectedCategory"
+                class="rounded border px-2 py-1 text-[0.7rem]"
+                :class="isNightshade 
+                  ? 'border-teal-400/40 bg-black/70 text-teal-100' 
+                  : 'border-amber-500/40 bg-slate-700 text-slate-200'"
+              >
+                <option value="All">All Categories</option>
+                <option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</option>
+              </select>
+            </div>
           </div>
 
-          <p
-            v-if="!availablePlaybooks.length && !scriptsLoading"
-            class="mt-2 text-[0.7rem]"
-            :class="isCyberdeck ? 'text-amber-200' : 'text-amber-700'"
-          >
-            No playbook scripts are currently allowed. Enable them in Settings &gt; Script allowlist.
-          </p>
+          <div class="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+            <button
+              v-for="pb in filteredPlaybooks"
+              :key="pb.id"
+              type="button"
+              @click="togglePlaybook(pb.id)"
+              class="rounded-lg border p-3 text-left transition-all"
+              :class="[
+                isSelected(pb.id)
+                  ? isNightshade
+                    ? 'border-emerald-400/60 bg-emerald-500/20 ring-1 ring-emerald-400/30'
+                    : 'border-amber-500 bg-amber-500/20 ring-1 ring-amber-500/30'
+                  : isNightshade
+                    ? 'border-teal-400/30 bg-black/30 hover:bg-teal-500/10 hover:border-teal-400/50'
+                    : 'border-slate-600 bg-slate-700/50 hover:bg-slate-600/50 hover:border-amber-500/50'
+              ]"
+            >
+              <div class="flex items-start gap-2">
+                <div 
+                  class="w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 mt-0.5"
+                  :class="isSelected(pb.id)
+                    ? (isNightshade ? 'border-emerald-400 bg-emerald-500/40' : 'border-amber-400 bg-amber-500/40')
+                    : (isNightshade ? 'border-teal-400/40 bg-black/50' : 'border-slate-500 bg-slate-700')"
+                >
+                  <span v-if="isSelected(pb.id)" class="text-[0.7rem]">✓</span>
+                </div>
+                <div 
+                  class="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0"
+                  :class="isNightshade ? 'bg-teal-400/20' : 'bg-amber-500/20'"
+                >
+                  <span class="text-xs" :class="isNightshade ? 'text-teal-400' : 'text-amber-400'">
+                    {{ pb.icon === 'zap' ? '⚡' : pb.icon === 'search' ? '🔍' : pb.icon === 'shield' ? '🛡️' : pb.icon === 'globe' ? '🌐' : pb.icon === 'lock' ? '🔒' : pb.icon === 'activity' ? '📊' : pb.icon === 'save' ? '💾' : pb.icon === 'power' ? '⏻' : '📋' }}
+                  </span>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <span 
+                    class="block font-semibold text-[0.75rem]"
+                    :class="isSelected(pb.id) 
+                      ? (isNightshade ? 'text-emerald-200' : 'text-amber-200') 
+                      : (isNightshade ? 'text-teal-100' : 'text-slate-200')"
+                  >
+                    {{ pb.label }}
+                  </span>
+                  <span
+                    class="block text-[0.65rem] mt-0.5 line-clamp-2"
+                    :class="isNightshade ? 'text-teal-100/60' : 'text-slate-400'"
+                  >
+                    {{ pb.description }}
+                  </span>
+                  <span
+                    class="inline-block mt-1 px-1.5 py-0.5 rounded text-[0.55rem] uppercase tracking-wide"
+                    :class="isNightshade ? 'bg-teal-400/10 text-teal-300' : 'bg-amber-500/10 text-amber-300'"
+                  >
+                    {{ pb.category }}
+                  </span>
+                </div>
+              </div>
+            </button>
+          </div>
         </div>
 
         <div
           class="rounded-md border p-3"
-          :class="isCyberdeck ? 'border-cyan-400/30 bg-black/50' : 'border-slate-200 bg-white'"
+          :class="isNightshade ? 'border-teal-400/30 bg-black/50' : 'border-amber-500/30 bg-slate-800/50'"
         >
           <p
             class="text-[0.7rem] uppercase tracking-[0.16em]"
-            :class="isCyberdeck ? 'text-cyan-200' : 'text-slate-600'"
+            :class="isNightshade ? 'text-teal-200' : 'text-amber-300'"
           >
-            Target &amp; capture window
+            Target
           </p>
-          <div class="mt-2 grid gap-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+          <div class="mt-2">
             <label class="text-[0.7rem] text-[var(--np-muted-text)]">
-              Target (IP / Hostname)
+              Target IP / Hostname / CIDR
               <input
                 v-model="targetIp"
                 type="text"
                 class="mt-1 w-full rounded-md border px-2 py-1 text-[0.75rem]
                        focus:outline-none focus:ring-1"
-                :class="isCyberdeck
-                  ? 'border-cyan-400/40 bg-black/70 text-cyan-100 focus:ring-cyan-400'
-                  : 'border-slate-300 bg-white text-slate-800 focus:ring-blue-500'"
-                placeholder="10.0.0.5"
+                :class="isNightshade
+                  ? 'border-teal-400/40 bg-black/70 text-teal-100 focus:ring-teal-400'
+                  : 'border-amber-500/40 bg-slate-700 text-slate-200 focus:ring-amber-500'"
+                placeholder="192.168.1.1 or 10.0.0.0/24"
               />
             </label>
-
-            <div class="space-y-1 text-[0.7rem]">
-              <label class="block text-[var(--np-muted-text)]">
-                Capture duration (seconds)
-                <input
-                  v-model.number="captureDuration"
-                  type="number"
-                  min="10"
-                  max="600"
-                  step="10"
-                  class="mt-1 w-full rounded-md border px-2 py-1 text-[0.75rem]
-                         focus:outline-none focus:ring-1"
-                  :class="isCyberdeck
-                    ? 'border-cyan-400/40 bg-black/70 text-cyan-100 focus:ring-cyan-400'
-                    : 'border-slate-300 bg-white text-slate-800 focus:ring-blue-500'"
-                />
-              </label>
-              <label class="flex items-center gap-2 text-[0.7rem]">
-                <input type="checkbox" v-model="runPdfReport" />
-                <span>Queue WAN PDF report alongside scenario</span>
-              </label>
-            </div>
           </div>
 
           <div class="mt-3 flex items-center justify-between text-[0.7rem]">
             <div
-              :class="isCyberdeck ? 'text-cyan-100/80' : 'text-slate-600'"
+              :class="isNightshade ? 'text-teal-100/80' : 'text-slate-400'"
             >
               <p>
                 Playbooks can generate aggressive or malformed traffic. Use only on networks you own or control.
@@ -353,13 +382,13 @@ onMounted(() => {
               @click="runPlaybookScenario"
               class="rounded border px-3 py-1.5 text-[0.75rem] font-medium"
               :class="[
-                isCyberdeck
+                isNightshade
                   ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30'
-                  : 'border-blue-500 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                  : 'border-amber-500 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30'
               ]"
-              :disabled="running"
+              :disabled="running || selectedPlaybookIds.length === 0"
             >
-              {{ running ? "Running scenario..." : "Run playbook" }}
+              {{ running ? "Running scenario..." : selectedPlaybookIds.length > 1 ? `Run ${selectedPlaybookIds.length} playbooks` : "Run playbook" }}
             </button>
           </div>
         </div>
@@ -379,79 +408,69 @@ onMounted(() => {
       <div class="space-y-3 text-xs">
         <div
           class="rounded-md border p-3"
-          :class="isCyberdeck ? 'border-cyan-400/30 bg-black/60' : 'border-slate-200 bg-white'"
+          :class="isNightshade ? 'border-teal-400/30 bg-black/60' : 'border-amber-500/30 bg-slate-800/50'"
         >
           <p
             class="text-[0.7rem] uppercase tracking-[0.16em]"
-            :class="isCyberdeck ? 'text-cyan-200' : 'text-slate-600'"
+            :class="isNightshade ? 'text-teal-200' : 'text-amber-300'"
           >
             Status
           </p>
           <div
             class="mt-2 h-40 overflow-auto rounded border text-[0.7rem] font-mono"
-            :class="isCyberdeck ? 'border-cyan-400/20 bg-black/80 text-cyan-100' : 'border-slate-200 bg-slate-50 text-slate-800'"
+            :class="isNightshade ? 'border-teal-400/20 bg-black/80 text-teal-100' : 'border-slate-600 bg-slate-800 text-slate-200'"
           >
             <div v-if="!statusLines.length" class="p-2 opacity-70">
               Waiting for a playbook run. When you start a scenario, progress will appear here.
             </div>
-            <pre v-else class="whitespace-pre-wrap break-words p-2">
-{{ statusLines.join('\n') }}
-            </pre>
+            <div v-else class="p-2">
+              <div v-if="running" class="flex items-center gap-2 mb-2 pb-2 border-b" :class="isNightshade ? 'border-teal-400/20' : 'border-slate-600'">
+                <svg class="w-4 h-4 animate-spin" :class="isNightshade ? 'text-teal-400' : 'text-amber-400'" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span :class="isNightshade ? 'text-teal-300' : 'text-amber-300'">Running scenario...</span>
+              </div>
+              <pre class="whitespace-pre-wrap break-words">{{ statusLines.join('\n') }}</pre>
+            </div>
           </div>
         </div>
 
-        <div class="grid gap-3 md:grid-cols-3">
+        <div class="grid gap-3 md:grid-cols-2">
           <div
             class="rounded-md border p-3"
-            :class="isCyberdeck ? 'border-cyan-400/30 bg-black/60' : 'border-slate-200 bg-white'"
+            :class="isNightshade ? 'border-teal-400/30 bg-black/60' : 'border-amber-500/30 bg-slate-800/50'"
           >
             <p class="text-[0.7rem] uppercase tracking-[0.16em] text-[var(--np-muted-text)]">
-              PCAP capture
+              Scans Running
             </p>
             <p class="mt-1 text-[0.7rem]">
-              <span v-if="pcapCaptureId != null">
-                Capture ready with id
-                <span class="font-mono">#{{ pcapCaptureId }}</span>. Open Vault to download and inspect.
+              <span v-if="scanIds.length > 0">
+                {{ scanIds.length }} scan(s) initiated: 
+                <span class="font-mono">{{ scanIds.map(id => `#${id}`).join(', ') }}</span>
               </span>
               <span v-else>
-                No capture completed yet for this session.
+                No scans started yet for this session.
               </span>
             </p>
           </div>
           <div
             class="rounded-md border p-3"
-            :class="isCyberdeck ? 'border-cyan-400/30 bg-black/60' : 'border-slate-200 bg-white'"
+            :class="isNightshade ? 'border-teal-400/30 bg-black/60' : 'border-amber-500/30 bg-slate-800/50'"
           >
             <p class="text-[0.7rem] uppercase tracking-[0.16em] text-[var(--np-muted-text)]">
-              Lab script job
+              Progress
             </p>
             <p class="mt-1 text-[0.7rem]">
-              <span v-if="attackJobId != null">
-                Lab script queued as job
-                <span class="font-mono">#{{ attackJobId }}</span>. Logs are available via the script job API or future console integration.
+              <span v-if="totalScans > 0">
+                {{ completedScans }} / {{ totalScans }} scans completed
+                <span 
+                  v-if="completedScans === totalScans && totalScans > 0"
+                  class="ml-2 text-emerald-400"
+                >Done!</span>
               </span>
               <span v-else>
-                No lab script queued yet for this session.
-              </span>
-            </p>
-          </div>
-          <div
-            class="rounded-md border p-3"
-            :class="isCyberdeck ? 'border-cyan-400/30 bg-black/60' : 'border-slate-200 bg-white'"
-          >
-            <p class="text-[0.7rem] uppercase tracking-[0.16em] text-[var(--np-muted-text)]">
-              WAN PDF report
-            </p>
-            <p class="mt-1 text-[0.7rem]">
-              <span v-if="runPdfReport && reportJobId != null">
-                WAN PDF report queued as job
-                <span class="font-mono">#{{ reportJobId }}</span>. Retrieve the artifact from the Vault/reporting workflow.
-              </span>
-              <span v-else-if="runPdfReport">
-                Report has not been queued yet for this session.
-              </span>
-              <span v-else>
-                WAN PDF report is disabled for this playbook run.
+                Waiting for scans to start.
               </span>
             </p>
           </div>
@@ -459,12 +478,12 @@ onMounted(() => {
 
         <div
           class="rounded-md border p-3"
-          :class="isCyberdeck ? 'border-cyan-400/30 bg-black/60' : 'border-slate-200 bg-white'"
+          :class="isNightshade ? 'border-teal-400/30 bg-black/60' : 'border-amber-500/30 bg-slate-800/50'"
         >
           <p class="text-[0.7rem] uppercase tracking-[0.16em] text-[var(--np-muted-text)]">
             Safety note
           </p>
-          <p class="mt-1 text-[0.7rem]" :class="isCyberdeck ? 'text-cyan-100/80' : 'text-slate-600'">
+          <p class="mt-1 text-[0.7rem]" :class="isNightshade ? 'text-teal-100/80' : 'text-slate-400'">
             These playbooks can generate malformed or aggressive packets. Use them responsibly on
             networks and systems you own or are explicitly authorised to test.
           </p>

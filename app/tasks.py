@@ -103,7 +103,7 @@ def packet_capture_recent_task(
                 capture_id = await capture_to_pcap(
                     session,
                     duration_seconds=duration_seconds,
-                    iface="eth0",
+                    iface=None,
                     bpf_filter=bpf_filter,
                 )
                 return capture_id

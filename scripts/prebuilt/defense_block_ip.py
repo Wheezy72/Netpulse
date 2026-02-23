@@ -8,6 +8,7 @@ using iptables. In many production environments you would adapt this
 to call a central firewall API instead of manipulating iptables directly.
 """
 
+import ipaddress
 import subprocess
 from typing import Any
 
@@ -29,6 +30,11 @@ def run(ctx: Any) -> dict:
 
     if not target_ip:
         raise ValueError("target_ip is required")
+
+    try:
+        ipaddress.ip_address(target_ip)
+    except ValueError:
+        raise ValueError(f"target_ip is not a valid IP address: {target_ip}")
 
     ctx.logger(f"defense_block_ip: attempting to block {target_ip} via iptables")
 

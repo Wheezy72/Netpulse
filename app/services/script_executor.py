@@ -18,8 +18,7 @@ from app.models.script_job import ScriptJob, ScriptJobStatus
 class NetworkTools:
     """Network helper methods exposed to user scripts.
 
-    The initial implementation is deliberately minimal; it can be extended
-    with higher-level helpers (SNMP, HTTP, etc.) as needed.
+    Provides network utility functions using scapy for packet manipulation.
     """
 
     async def tcp_rst(
@@ -32,13 +31,124 @@ class NetworkTools:
     ) -> None:
         """Send TCP RST packets to tear down a connection.
 
-        This is a placeholder implementation. In a production deployment,
-        you would implement this using Scapy or raw sockets, and potentially
-        enforce strict safety checks.
+        Uses scapy to craft and send TCP RST packets. Requires root privileges.
+        
+        Args:
+            src_ip: Source IP address
+            src_port: Source port
+            dst_ip: Destination IP address
+            dst_port: Destination port
+            count: Number of RST packets to send
         """
-        # To be implemented with Scapy or raw sockets.
-        # For now, this method is a no-op to keep the service safe by default.
-        await asyncio.sleep(0)
+        def _send_rst() -> None:
+            try:
+                from scapy.all import IP, TCP, send
+                
+                for _ in range(count):
+                    pkt = IP(src=src_ip, dst=dst_ip) / TCP(
+                        sport=src_port,
+                        dport=dst_port,
+                        flags="R",
+                        seq=0,
+                    )
+                    send(pkt, verbose=False)
+            except PermissionError:
+                pass
+            except Exception:
+                pass
+        
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _send_rst)
+
+    async def ping(self, target: str, count: int = 4, timeout: int = 2) -> dict:
+        """Ping a target host and return statistics.
+        
+        Args:
+            target: IP address or hostname to ping
+            count: Number of ping packets
+            timeout: Timeout per packet in seconds
+            
+        Returns:
+            Dictionary with ping statistics
+        """
+        def _ping_sync() -> dict:
+            import subprocess
+            try:
+                result = subprocess.run(
+                    ["ping", "-c", str(count), "-W", str(timeout), target],
+                    capture_output=True,
+                    text=True,
+                    timeout=count * timeout + 5
+                )
+                
+                lines = result.stdout.split("\n")
+                stats = {"target": target, "success": result.returncode == 0}
+                
+                for line in lines:
+                    if "packets transmitted" in line:
+                        parts = line.split(",")
+                        for part in parts:
+                            if "transmitted" in part:
+                                stats["transmitted"] = int(part.strip().split()[0])
+                            elif "received" in part:
+                                stats["received"] = int(part.strip().split()[0])
+                            elif "loss" in part:
+                                stats["loss_percent"] = float(part.strip().split("%")[0].split()[-1])
+                    elif "rtt" in line or "round-trip" in line:
+                        if "=" in line:
+                            rtt_part = line.split("=")[-1].strip()
+                            rtt_values = rtt_part.split("/")
+                            if len(rtt_values) >= 3:
+                                stats["rtt_min"] = float(rtt_values[0])
+                                stats["rtt_avg"] = float(rtt_values[1])
+                                stats["rtt_max"] = float(rtt_values[2])
+                
+                return stats
+            except Exception as e:
+                return {"target": target, "success": False, "error": str(e)}
+        
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _ping_sync)
+
+    async def port_scan(
+        self, target: str, ports: list[int], timeout: float = 1.0
+    ) -> dict:
+        """Scan specific ports on a target host.
+        
+        Args:
+            target: IP address or hostname
+            ports: List of ports to scan
+            timeout: Connection timeout per port
+            
+        Returns:
+            Dictionary with port scan results
+        """
+        import socket
+        
+        async def check_port(port: int) -> tuple[int, bool]:
+            def _check() -> bool:
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(timeout)
+                    result = sock.connect_ex((target, port))
+                    sock.close()
+                    return result == 0
+                except Exception:
+                    return False
+            
+            loop = asyncio.get_event_loop()
+            is_open = await loop.run_in_executor(None, _check)
+            return (port, is_open)
+        
+        tasks = [check_port(port) for port in ports[:100]]
+        results = await asyncio.gather(*tasks)
+        
+        return {
+            "target": target,
+            "open_ports": [port for port, is_open in results if is_open],
+            "closed_ports": [port for port, is_open in results if not is_open],
+            "scanned": len(results),
+        }
 
 
 @dataclass

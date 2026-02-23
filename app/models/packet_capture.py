@@ -1,68 +1,67 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from enum import Enum
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
 
+class PacketCaptureStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class PacketCapture(Base):
-    """Represents a capture session that produced a PCAP file and headers."""
+    """Represents a packet capture session (PCAP file)."""
 
     __tablename__ = "packet_captures"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    iface: Mapped[str] = mapped_column(String(64))
-    bpf_filter: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-
-    pcap_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    filepath: Mapped[str] = mapped_column(String(1024), nullable=False)
+    interface: Mapped[str] = mapped_column(String(64), nullable=True)
+    bpf_filter: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duration_seconds: Mapped[int] = mapped_column(Integer, default=300)
+    status: Mapped[PacketCaptureStatus] = mapped_column(
+        SAEnum(PacketCaptureStatus), default=PacketCaptureStatus.PENDING
+    )
     packet_count: Mapped[int] = mapped_column(Integer, default=0)
-
+    file_size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=datetime.utcnow,
+        DateTime, default=datetime.utcnow, nullable=False
     )
-    started_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-    finished_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     headers: Mapped[list["PacketHeader"]] = relationship(
-        "PacketHeader",
-        back_populates="capture",
-        cascade="all, delete-orphan",
+        "PacketHeader", back_populates="capture", cascade="all, delete-orphan"
     )
 
 
 class PacketHeader(Base):
-    """Simplified representation of captured packet headers for quick inspection."""
+    """Stores parsed header information from captured packets."""
 
     __tablename__ = "packet_headers"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     capture_id: Mapped[int] = mapped_column(
-        ForeignKey("packet_captures.id"),
-        index=True,
-        nullable=False,
+        Integer, ForeignKey("packet_captures.id", ondelete="CASCADE"), nullable=False
     )
-
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    src_ip: Mapped[str] = mapped_column(String(64))
-    dst_ip: Mapped[str] = mapped_column(String(64))
-    src_port: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    dst_port: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    protocol: Mapped[str] = mapped_column(String(16))
-    length: Mapped[int] = mapped_column(Integer)
-    info: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    src_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    dst_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    src_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dst_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    protocol: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    length: Mapped[int] = mapped_column(Integer, default=0)
+    info: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     capture: Mapped[PacketCapture] = relationship(
-        "PacketCapture",
-        back_populates="headers",
+        "PacketCapture", back_populates="headers"
     )
