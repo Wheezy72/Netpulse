@@ -66,6 +66,12 @@ type DeviceDetail = {
   }[];
 };
 
+interface Props {
+  isAdmin: boolean;
+}
+
+const props = defineProps<Props>();
+
 const emit = defineEmits<{
   (e: "node-selected", payload: { ip: string; mac: string | null; type: string | null }): void;
 }>();
@@ -91,7 +97,7 @@ const deviceDetail = ref<DeviceDetail | null>(null);
 const deviceDetailLoading = ref(false);
 const deviceDetailError = ref<string | null>(null);
 
-const canRunRecon = computed(() => true);
+const canRunRecon = computed(() => props.isAdmin);
 const hasRecommendations = computed(() => recommendations.value.length > 0);
 
 let logSocket: WebSocket | null = null;
@@ -124,6 +130,11 @@ async function runPrebuiltScriptForDevice(
   scriptName: string,
   extraParams: Record<string, unknown> = {}
 ): Promise<void> {
+  if (!props.isAdmin) {
+    actionStatus.value = "Admin access required to execute scripts.";
+    return;
+  }
+
   const node = selectedNode.value;
   if (!node) return;
 
@@ -153,6 +164,12 @@ async function runPrebuiltScriptForDevice(
 
 async function scanTarget(): Promise<void> {
   scanError.value = null;
+
+  if (!props.isAdmin) {
+    scanError.value = "Admin access required to run scans.";
+    return;
+  }
+
   const target = selectedTarget.value.trim();
   if (!target) {
     scanError.value = "Please enter a target hostname or IP address.";
@@ -490,7 +507,7 @@ onBeforeUnmount(() => {
         </dl>
 
         <div
-          v-if="selectedNode && selectedNode.id === hoveredNode.id"
+          v-if="props.isAdmin && selectedNode && selectedNode.id === hoveredNode.id"
           class="mt-3 space-y-2"
         >
           <p class="text-[0.65rem] uppercase tracking-[0.16em]" style="color: var(--np-accent-primary)">

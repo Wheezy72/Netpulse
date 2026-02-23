@@ -12,8 +12,8 @@ from pydantic import BaseModel
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, require_role
-from app.models.user import UserRole
+from app.api.deps import db_session, require_admin, require_role
+
 from app.models.uptime import UptimeCheck, UptimeTarget
 
 router = APIRouter(prefix="/uptime", tags=["uptime"])
@@ -86,7 +86,7 @@ class UptimeSummary(BaseModel):
 @router.get(
     "",
     response_model=UptimeSummary,
-    dependencies=[Depends(require_role(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN))],
+    dependencies=[Depends(require_role())],
 )
 async def get_uptime_summary(db: AsyncSession = Depends(db_session)) -> UptimeSummary:
     result = await db.execute(select(UptimeTarget).order_by(UptimeTarget.name))
@@ -127,7 +127,7 @@ async def get_uptime_summary(db: AsyncSession = Depends(db_session)) -> UptimeSu
 @router.post(
     "",
     response_model=UptimeTargetResponse,
-    dependencies=[Depends(require_role(UserRole.OPERATOR, UserRole.ADMIN))],
+    dependencies=[Depends(require_admin)],
 )
 async def create_uptime_target(
     body: UptimeTargetCreate,
@@ -166,7 +166,7 @@ async def create_uptime_target(
 
 @router.delete(
     "/{target_id}",
-    dependencies=[Depends(require_role(UserRole.ADMIN))],
+    dependencies=[Depends(require_admin)],
 )
 async def delete_uptime_target(
     target_id: int,
@@ -183,7 +183,7 @@ async def delete_uptime_target(
 @router.get(
     "/{target_id}/history",
     response_model=List[UptimeCheckResponse],
-    dependencies=[Depends(require_role(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN))],
+    dependencies=[Depends(require_role())],
 )
 async def get_uptime_history(
     target_id: int,
@@ -214,7 +214,7 @@ async def get_uptime_history(
 @router.post(
     "/{target_id}/check",
     response_model=UptimeCheckResponse,
-    dependencies=[Depends(require_role(UserRole.OPERATOR, UserRole.ADMIN))],
+    dependencies=[Depends(require_admin)],
 )
 async def run_manual_check(
     target_id: int,

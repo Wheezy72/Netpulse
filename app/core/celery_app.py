@@ -35,6 +35,11 @@ def create_celery_app() -> Celery:
                 "task": "app.tasks.passive_arp_discovery_task",
                 "schedule": 60.0,
             },
+            # Active SNMP polling: interface counters / bandwidth (every 60 seconds)
+            "poll-network-metrics-every-60s": {
+                "task": "app.tasks.poll_network_metrics",
+                "schedule": 60.0,
+            },
             # Alerts: scan for new high/critical vulnerabilities every 5 minutes
             "vulnerability-alerts-every-5m": {
                 "task": "app.tasks.vulnerability_alert_task",

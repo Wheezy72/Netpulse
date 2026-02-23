@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -43,6 +44,8 @@ class PcapFile(Base):
 
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     index_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    zeek_summary: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     packets: Mapped[list["PcapPacket"]] = relationship(
         "PcapPacket", back_populates="pcap_file", cascade="all, delete-orphan"

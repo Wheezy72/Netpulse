@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, Body, Depends
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_admin
 from app.plugins import plugin_manager
 
 router = APIRouter()
@@ -16,7 +16,7 @@ async def list_plugins(current_user=Depends(get_current_user)):
 
 
 @router.post("/{name}/execute")
-async def execute_plugin(name: str, context: Dict[str, Any] = Body(default={}), current_user=Depends(get_current_user)):
+async def execute_plugin(name: str, context: Dict[str, Any] = Body(default={}), current_user=Depends(require_admin)):
     result = plugin_manager.execute_plugin(name, context)
     return result
 

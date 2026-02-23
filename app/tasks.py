@@ -24,6 +24,7 @@ from app.services.latency_monitor import monitor_latency
 from app.services.packet_capture import capture_to_pcap
 from app.services.recon import passive_arp_discovery
 from app.services.script_executor import execute_script
+from app.services.snmp_poller import poll_network_metrics as poll_network_metrics_service
 
 logger = get_task_logger(__name__)
 
@@ -136,6 +137,21 @@ def passive_arp_discovery_task() -> None:
     asyncio.run(_run())
 
 
+@celery_app.task(name="app.tasks.poll_network_metrics")
+def poll_network_metrics() -> None:
+    """Celery task that polls configured routers via SNMP and stores real metrics."""
+
+    async def _run() -> None:
+        engine, factory = _create_session_factory()
+        try:
+            async with factory() as session:
+                await poll_network_metrics_service(session)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
 @celery_app.task(name="app.tasks.packet_capture_recent_task")
 def packet_capture_recent_task(
     duration_seconds: int = 300,
@@ -168,6 +184,9 @@ def index_pcap_file(pcap_file_id: int, chunk_size: int = 5000) -> int:
     """
 
     async def _run() -> int:
+        import subprocess
+        import tempfile
+        from collections import defaultdict
         from datetime import datetime
         from pathlib import Path
 
@@ -190,7 +209,255 @@ def index_pcap_file(pcap_file_id: int, chunk_size: int = 5000) -> int:
                     await session.commit()
                     return 0
 
+                def _tail(text: str, limit: int = 4000) -> str:
+                    if len(text) <= limit:
+                        return text
+                    return text[-limit:]
+
+                def _parse_int(value: str | None) -> int | None:
+                    if not value or value in {"-", "(empty)"}:
+                        return None
+                    try:
+                        return int(value)
+                    except ValueError:
+                        return None
+
+                def _field_index(fields: list[str], candidates: list[str]) -> int | None:
+                    for name in candidates:
+                        try:
+                            return fields.index(name)
+                        except ValueError:
+                            continue
+                    return None
+
+                def _summarize_conn_log(path: Path) -> list[dict]:
+                    if not path.exists():
+                        return []
+
+                    convs: dict[tuple[str, str, str | None, str | None], dict[str, int]] = defaultdict(
+                        lambda: {"count": 0, "bytes_out": 0, "bytes_in": 0}
+                    )
+
+                    fields: list[str] = []
+                    orig_h_idx = None
+                    resp_h_idx = None
+                    service_idx = None
+                    proto_idx = None
+                    orig_bytes_idx = None
+                    resp_bytes_idx = None
+                    has_bytes_fields = False
+
+                    with path.open("r", encoding="utf-8", errors="replace") as f:
+                        for raw in f:
+                            line = raw.rstrip("\n")
+                            if not line:
+                                continue
+
+                            if line.startswith("#fields\t"):
+                                fields = line.split("\t")[1:]
+                                orig_h_idx = _field_index(fields, ["id.orig_h", "orig_h"])
+                                resp_h_idx = _field_index(fields, ["id.resp_h", "resp_h"])
+                                service_idx = _field_index(fields, ["service"])
+                                proto_idx = _field_index(fields, ["proto"])
+                                orig_bytes_idx = _field_index(fields, ["orig_bytes"])
+                                resp_bytes_idx = _field_index(fields, ["resp_bytes"])
+                                has_bytes_fields = orig_bytes_idx is not None or resp_bytes_idx is not None
+                                continue
+
+                            if line.startswith("#"):
+                                continue
+
+                            if not fields or orig_h_idx is None or resp_h_idx is None:
+                                continue
+
+                            parts = line.split("\t")
+                            if len(parts) < len(fields):
+                                parts += [""] * (len(fields) - len(parts))
+
+                            orig_h = parts[orig_h_idx] or None
+                            resp_h = parts[resp_h_idx] or None
+                            if not orig_h or not resp_h:
+                                continue
+
+                            service = None
+                            if service_idx is not None:
+                                service = parts[service_idx] or None
+                                if service == "-":
+                                    service = None
+
+                            proto = None
+                            if proto_idx is not None:
+                                proto = parts[proto_idx] or None
+                                if proto == "-":
+                                    proto = None
+
+                            key = (orig_h, resp_h, service, proto)
+                            agg = convs[key]
+                            agg["count"] += 1
+
+                            if orig_bytes_idx is not None:
+                                b = _parse_int(parts[orig_bytes_idx])
+                                if b is not None:
+                                    agg["bytes_out"] += b
+
+                            if resp_bytes_idx is not None:
+                                b = _parse_int(parts[resp_bytes_idx])
+                                if b is not None:
+                                    agg["bytes_in"] += b
+
+                    if not convs:
+                        return []
+
+                    top = sorted(
+                        convs.items(),
+                        key=lambda kv: (kv[1]["count"], kv[1]["bytes_out"] + kv[1]["bytes_in"]),
+                        reverse=True,
+                    )[:20]
+
+                    results: list[dict] = []
+                    for (orig_h, resp_h, service, proto), agg in top:
+                        row: dict[str, object] = {
+                            "orig_h": orig_h,
+                            "resp_h": resp_h,
+                            "service": service,
+                            "proto": proto,
+                            "count": agg["count"],
+                        }
+
+                        if has_bytes_fields:
+                            row["bytes_out"] = agg["bytes_out"]
+                            row["bytes_in"] = agg["bytes_in"]
+
+                        results.append(row)
+
+                    return results
+
+                def _summarize_dns_log(path: Path) -> list[dict]:
+                    if not path.exists():
+                        return []
+
+                    counts: dict[tuple[str, str | None], int] = defaultdict(int)
+
+                    fields: list[str] = []
+                    query_idx = None
+                    qtype_idx = None
+
+                    with path.open("r", encoding="utf-8", errors="replace") as f:
+                        for raw in f:
+                            line = raw.rstrip("\n")
+                            if not line:
+                                continue
+
+                            if line.startswith("#fields\t"):
+                                fields = line.split("\t")[1:]
+                                query_idx = _field_index(fields, ["query"])
+                                qtype_idx = _field_index(fields, ["qtype_name", "qtype"])
+                                continue
+
+                            if line.startswith("#"):
+                                continue
+
+                            if not fields or query_idx is None:
+                                continue
+
+                            parts = line.split("\t")
+                            if len(parts) < len(fields):
+                                parts += [""] * (len(fields) - len(parts))
+
+                            query = parts[query_idx] or None
+                            if not query or query == "-":
+                                continue
+
+                            qtype_name = None
+                            if qtype_idx is not None:
+                                qtype_name = parts[qtype_idx] or None
+                                if qtype_name == "-":
+                                    qtype_name = None
+
+                            counts[(query, qtype_name)] += 1
+
+                    if not counts:
+                        return []
+
+                    top = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:20]
+                    return [
+                        {"query": q, "qtype_name": t, "count": cnt}
+                        for (q, t), cnt in top
+                    ]
+
+                async def _run_zeek(pcap: Path) -> dict:
+                    summary: dict[str, object] = {
+                        "ran": False,
+                        "error": None,
+                        "command": ["zeek", "-r", str(pcap)],
+                        "returncode": None,
+                        "stdout_tail": None,
+                        "stderr_tail": None,
+                        "conn": {"top_conversations": []},
+                        "dns": {"top_queries": []},
+                    }
+
+                    with tempfile.TemporaryDirectory(prefix="zeek_") as tmp:
+                        cmd = ["zeek", "-r", str(pcap)]
+                        try:
+                            proc = await asyncio.to_thread(
+                                subprocess.run,
+                                cmd,
+                                cwd=tmp,
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                            )
+                            summary["ran"] = True
+                            summary["returncode"] = proc.returncode
+
+                            stdout = proc.stdout or ""
+                            stderr = proc.stderr or ""
+                            if stdout.strip():
+                                logger.info("Zeek stdout (tail): %s", _tail(stdout))
+                            if stderr.strip():
+                                logger.warning("Zeek stderr (tail): %s", _tail(stderr))
+
+                            summary["stdout_tail"] = _tail(stdout) if stdout else None
+                            summary["stderr_tail"] = _tail(stderr) if stderr else None
+
+                        except FileNotFoundError as exc:
+                            summary["error"] = "zeek not installed"
+                            logger.warning(
+                                "Zeek binary not found; continuing with Scapy indexing: %s", exc
+                            )
+                            return summary
+                        except Exception as exc:
+                            summary["ran"] = True
+                            summary["error"] = str(exc)
+                            logger.warning(
+                                "Zeek execution failed; continuing with Scapy indexing: %s", exc
+                            )
+                            return summary
+
+                        conn_log = Path(tmp) / "conn.log"
+                        dns_log = Path(tmp) / "dns.log"
+
+                        try:
+                            summary["conn"] = {
+                                "top_conversations": await asyncio.to_thread(
+                                    _summarize_conn_log, conn_log
+                                )
+                            }
+                            summary["dns"] = {
+                                "top_queries": await asyncio.to_thread(
+                                    _summarize_dns_log, dns_log
+                                )
+                            }
+                        except Exception as exc:
+                            summary["error"] = f"failed to parse zeek logs: {exc}"
+
+                    return summary
+
                 try:
+                    pcap_file.zeek_summary = await _run_zeek(pcap_path)
+                    await session.commit()
+
                     # Re-indexing should not duplicate rows.
                     await session.execute(
                         delete(PcapPacket).where(PcapPacket.file_id == pcap_file_id)

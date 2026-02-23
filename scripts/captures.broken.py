@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -11,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import db_session, require_admin, require_role
 from app.models.packet_capture import PacketCapture, PacketCaptureStatus
 from app.services.packet_capture import capture_to_pcap, get_capture_stats, parse_pcap_headers
+from app.tasks import packet_capture_recent_task
 
 router = APIRouter()
 
@@ -34,11 +34,12 @@ class CaptureResponse(BaseModel):
     finished_at: Optional[str]
     error_message: Optional[str]
 
-    class Config:
+    @router.post(
+</old_code><new_code>    class Config:
         from_attributes = True
 
 
-@router.post(
+@router.post(</old_code><new_code>@router.post(
     "/start",
     status_code=status.HTTP_202_ACCEPTED,
     summary="Start a new packet capture",
@@ -49,26 +50,33 @@ async def start_capture(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(db_session),
 ) -> dict[str, Any]:
+    """Start a new packet capture session.
+    
+    The capture runs asynchronously. Use the returned capture_id to check status.
+    """
     if payload.duration_seconds < 1:
-        raise HTTPException(status_code=400, detail="Duration must be at least 1 second")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Duration must be at least 1 second"
+        )
+    
     if payload.duration_seconds > 300:
-        raise HTTPException(status_code=400, detail="Duration cannot exceed 300 seconds (5 minutes)")
-
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Duration cannot exceed 300 seconds (5 minutes)"
+        )
+    
     capture_id = await capture_to_pcap(
         db,
         duration_seconds=payload.duration_seconds,
         iface=payload.interface,
         bpf_filter=payload.bpf_filter,
     )
-
-    # The capture runs asynchronously (service starts it). BackgroundTasks is kept
-    # for API compatibility and potential follow-up tasks.
-    _ = background_tasks
-
+    
     return {
         "capture_id": capture_id,
         "status": "started",
-        "message": f"Capture started for {payload.duration_seconds} seconds",
+        "message": f"Capture started for {payload.duration_seconds} seconds"
     }
 
 
@@ -83,6 +91,7 @@ async def list_captures(
     limit: int = 50,
     offset: int = 0,
 ) -> List[CaptureResponse]:
+    """Retrieve a list of all packet captures."""
     result = await db.execute(
         select(PacketCapture)
         .order_by(PacketCapture.created_at.desc())
@@ -90,7 +99,7 @@ async def list_captures(
         .offset(offset)
     )
     captures = result.scalars().all()
-
+    
     return [
         CaptureResponse(
             id=c.id,
@@ -105,22 +114,31 @@ async def list_captures(
             finished_at=c.finished_at.isoformat() if c.finished_at else None,
             error_message=c.error_message,
         )
-        for c in captures
-    ]
-
-
-@router.get(
+        for c</old_code><new_code>@router.get(
     "/{capture_id}",
     summary="Get capture details",
     dependencies=[Depends(require_role())],
 )
 async def get_capture(
+ync def get_capture(
+or c</old_code><new_code>@router.get(
+    "/{capture_id}",
+    summary="Get capture details",
+    dependencies=[Depends(require_role())],
+))],
+)
+)
+async def get_capture(
     capture_id: int,
     db: AsyncSession = Depends(db_session),
 ) -> dict[str, Any]:
+    """Get detailed information about a specific capture."""
     stats = await get_capture_stats(db, capture_id)
     if not stats:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Capture not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Capture not found"
+        )
     return stats
 
 
@@ -134,26 +152,36 @@ async def parse_capture(
     db: AsyncSession = Depends(db_session),
     max_packets: int = 1000,
 ) -> dict[str, Any]:
+    """Parse and store packet headers from a completed capture."""
     capture = await db.get(PacketCapture, capture_id)
     if not capture:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Capture not found")
-
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Capture not found"
+        )
+    
     if capture.status != PacketCaptureStatus.COMPLETED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Capture is not completed (status: {capture.status.value})",
+            detail=f"Capture is not completed (status: {capture.status.value})"
         )
-
+    
     headers_parsed = await parse_pcap_headers(db, capture_id, max_packets)
-
+    
     return {
         "capture_id": capture_id,
         "headers_parsed": headers_parsed,
         "message": f"Parsed {headers_parsed} packet headers",
     }
 
+>@router.delete(
+aders_parsed": headers_parsed,
+        "message": f"Parsed {headers_parsed} packet headers",
+    }
+
 
 @router.delete(
+ pac</old_code><new_code>@router.delete(
     "/{capture_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a capture",
@@ -163,13 +191,19 @@ async def delete_capture(
     capture_id: int,
     db: AsyncSession = Depends(db_session),
 ) -> None:
+    """Delete a packet capture and its associated data."""
+    from pathlib import Path
+    
     capture = await db.get(PacketCapture, capture_id)
     if not capture:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Capture not found")
-
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Capture not found"
+        )
+    
     filepath = Path(capture.filepath)
     if filepath.exists():
         filepath.unlink()
-
+    
     await db.delete(capture)
     await db.commit()

@@ -7,14 +7,14 @@ Provides:
 - db_session: async SQLAlchemy session dependency.
 - Password hashing helpers.
 - JWT creation and validation.
-- A simple authentication dependency (require_role) that ensures the
-  caller is authenticated; all authenticated users are treated the same.
+- A role-based authorization dependency (require_role) that ensures the
+  caller is authenticated and optionally enforces RBAC.
 """
 
 from datetime import datetime, timedelta
 from typing import Annotated, AsyncGenerator, Optional
 
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -23,7 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import async_session_factory
-from app.models.user import User
+from app.models.audit_log import AuditLog
+from app.models.user import User, UserRole
 
 # Use a password hashing scheme that doesn't rely on the external bcrypt module
 # to avoid compatibility issues with newer bcrypt releases.
@@ -32,8 +33,8 @@ security_scheme = HTTPBearer(auto_error=True)
 
 
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
-  async with async_session_factory() as session:
-      yield session
+    async with async_session_factory() as session:
+        yield session
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -51,9 +52,9 @@ def create_access_token(
 ) -> str:
     """Create a signed JWT for the given subject.
 
-    The `role` field is preserved in the token for backward compatibility
-    and potential display purposes, but it is not enforced by the backend.
-    All authenticated users are treated equally by the API.
+    The `role` field is preserved in the token for client display purposes.
+    Authorization decisions are enforced using the current user's role from
+    the database.
     """
     to_encode = {"sub": subject, "role": role}
     expire = datetime.utcnow() + (
@@ -106,16 +107,53 @@ async def get_current_user(
     return user
 
 
-def require_role(*_allowed_roles: object):
-    """Return a dependency that ensures the caller is authenticated.
+def require_role(*allowed_roles: UserRole):
+    """Return a dependency that enforces authentication + (optional) RBAC.
 
-    RBAC has been simplified for this personal deployment: all authenticated
-    users are treated the same. This helper is kept so existing route
-    dependencies continue to work, but it only enforces authentication,
-    not per-role permissions.
+    - If no roles are provided, any authenticated user is allowed.
+    - If roles are provided, the current user must have one of those roles.
     """
 
     async def _require(user: User = Depends(get_current_user)) -> User:
+        if allowed_roles and user.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions",
+            )
         return user
 
     return _require
+
+
+async def require_admin(
+    request: Request,
+    user: User = Depends(get_current_user),
+) -> User:
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required",
+        )
+
+    # Best-effort audit logging for privileged operations.
+    try:
+        async with async_session_factory() as session:
+            session.add(
+                AuditLog(
+                    user_id=user.id,
+                    method=request.method,
+                    path=request.url.path,
+                    action=f"{request.method} {request.url.path}",
+                    ip_address=getattr(request.client, "host", None),
+                    details={
+                        "query": dict(request.query_params),
+                        "path_params": request.scope.get("path_params", {}),
+                    },
+                )
+            )
+            await session.commit()
+    except Exception:
+        # Never block admin operations on audit failures.
+        pass
+
+    return user

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, get_current_user
+from app.api.deps import db_session, get_current_user, require_admin
 from app.core.celery_app import celery_app
 from app.models.router_config_baseline import RouterConfigBaseline
 from app.models.scan_job import ScanJob, ScanJobStatus
@@ -339,12 +339,12 @@ class ConfigDriftCheckResponse(BaseModel):
 @router.post(
     "/config_drift_check",
     response_model=ConfigDriftCheckResponse,
-    summary="Check router config drift and update baseline",
+    summary="Check router config drift and optionally update baseline",
 )
 async def config_drift_check(
     request: ConfigDriftCheckRequest,
     db: AsyncSession = Depends(db_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ) -> ConfigDriftCheckResponse:
     if request.driver == "netmiko" and not request.device_type:
         raise HTTPException(status_code=400, detail="device_type is required for netmiko driver")

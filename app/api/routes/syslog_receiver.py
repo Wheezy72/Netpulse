@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, get_current_user
+from app.api.deps import db_session, get_current_user, require_admin
 from app.db.session import async_session_factory
 from app.models.syslog_event import SyslogEvent
 from app.models.user import User
@@ -184,7 +184,7 @@ async def get_messages(
 
 @router.post("/start")
 async def start_listener(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ) -> Dict[str, Any]:
     global syslog_listener_running, _transport
 
@@ -206,7 +206,7 @@ async def start_listener(
 
 @router.post("/stop")
 async def stop_listener(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ) -> Dict[str, Any]:
     global syslog_listener_running, _transport
 
@@ -239,7 +239,7 @@ async def get_status(
 @router.delete("/messages")
 async def clear_messages(
     db: AsyncSession = Depends(db_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ) -> Dict[str, str]:
     await db.execute(delete(SyslogEvent))
     await db.commit()

@@ -1,15 +1,13 @@
-<scr</old_code><new_code>import axios from "axios";
+<script setup lang="ts">
+import axios from "axios";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import LiveTerminal from "../components/LiveTerminal.vue";
-vue";
 
 type Theme = "nightshade" | "sysadmin";
 
-const props = defineProps<{ theme: Theme }>();
+const props = defineProps<{ theme: Theme; isAdmin: boolean }>();
 const emit = defineEmits<{ (e: "toast", type: "success" | "error" | "warning" | "info", message: string): void }>();
-
-const isNightshade = computed(() => props.theme === "nightshade");
 
 type Playbook = {
   id: string;
@@ -63,7 +61,10 @@ const terminalStreamUrl = computed(() => {
   if (!currentScanId.value) return null;
   const token = localStorage.getItem("np-token");
   if (!token) return null;
-  return `${getWsBase()}/api/ws/scans/${currentScanId.value}?token=${encodeURIComp</old_code><new_code>const downloadUrl = computed(() => {
+  return `${getWsBase()}/api/ws/scans/${currentScanId.value}?token=${encodeURIComponent(token)}`;
+});
+
+const downloadUrl = computed(() => {
   if (!currentScanId.value) return null;
   const filename = `scan_${currentScanId.value}.txt`;
   return `/api/nmap/files/${filename}`;
@@ -130,6 +131,11 @@ function commandForPreset(p: TargetedPresetId): string {
 }
 
 async function startScan(command: string): Promise<void> {
+  if (!props.isAdmin) {
+    emit("toast", "warning", "Admin access required to run scans.");
+    return;
+  }
+
   if (!target.value.trim()) {
     emit("toast", "warning", "Please enter a target (IP, hostname, or CIDR)." );
     return;
@@ -145,11 +151,7 @@ async function startScan(command: string): Promise<void> {
     currentScanId.value = data.id;
     emit("toast", "success", `Scan started: ${data.id}`);
   } catch (e: any) {
-    emit(
-      "toast",
-      "error",
-      e?.response?.data?.detail || e?.message || "Failed to start scan"
-    );
+    emit("toast", "error", e?.response?.data?.detail || e?.message || "Failed to start scan");
   }
 }
 
@@ -226,6 +228,20 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="p-4 space-y-4">
+          <div
+            v-if="!props.isAdmin"
+            class="rounded-lg border px-3 py-2 text-xs"
+            :style="{ borderColor: 'var(--np-border)', background: 'var(--np-surface)' }"
+          >
+            <p class="text-[var(--np-muted-text)]">
+              Scanning is <span class="font-semibold text-[var(--np-text)]">admin-only</span>.
+              You can view scan output and history, but cannot start new scans.
+            </p>
+          </div>
+         < div
+            v-if="!props.isAdmin"
+            class="rounded-lg border px-3 py-2 text-xs"
+            :">
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div class="md:col-span-2">
               <label class="block text-[0.7rem] uppercase tracking-widest text-[var(--np-muted-text)]">Target</label>
@@ -233,8 +249,7 @@ onBeforeUnmount(() => {
                 v-model="target"
                 type="text"
                 placeholder="192.168.1.1 or 192.168.1.0/24 or example.com"
-                class="mt-1 w-full px-3 py-2 rounded-lg text-sm bg-transparent border outline-none"
-                :class="isNightshade ? 'border-teal-400/30 text-teal-100 placeholder-teal-400/40 focus:border-teal-400/60' : 'border-amber-400/30 text-amber-100 placeholder-amber-400/40 focus:border-amber-400/60'"
+                class="mt-1 w-full px-3 py-2 rounded-lg text-sm bg-transparent border outline-none border-[var(--np-border)] text-[var(--np-text)] placeholder:text-[var(--np-muted-text)] focus:border-[var(--np-accent-primary)]"
               />
             </div>
 
@@ -244,7 +259,13 @@ onBeforeUnmount(() => {
                 <input id="save" v-model="saveResults" type="checkbox" class="rounded" />
                 <label for="save" class="text-xs text-[var(--np-muted-text)]">Save output</label>
               </div>
-              <a v-if="downloadUrl" :href="downloadUrl" class="mt-2 inline-block text-xs underline" :class="isNightshade ? 'text-teal-400' : 'text-amber-400'">Download latest</a>
+              <a
+                v-if="downloadUrl"
+                :href="downloadUrl"
+                class="mt-2 inline-block text-xs underline text-[var(--np-accent-primary)] hover:opacity-90"
+              >
+                Download latest
+              </a>
             </div>
           </div>
 
@@ -252,7 +273,11 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="px-3 py-2 rounded-lg text-xs border transition-colors"
-              :class="[activeTab === 'targeted' ? (isNightshade ? 'border-teal-400 text-teal-200 bg-teal-500/10' : 'border-amber-400 text-amber-200 bg-amber-500/10') : 'border-transparent text-[var(--np-muted-text)] hover:bg-white/5']"
+              :class="[
+                activeTab === 'targeted'
+                  ? 'border-[var(--np-accent-primary)] text-[var(--np-text)] bg-[var(--np-bg)]'
+                  : 'border-transparent text-[var(--np-muted-text)] hover:text-[var(--np-text)] hover:border-[var(--np-border)]'
+              ]"
               @click="activeTab = 'targeted'"
             >
               Targeted Scans
@@ -260,7 +285,11 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="px-3 py-2 rounded-lg text-xs border transition-colors"
-              :class="[activeTab === 'playbooks' ? (isNightshade ? 'border-teal-400 text-teal-200 bg-teal-500/10' : 'border-amber-400 text-amber-200 bg-amber-500/10') : 'border-transparent text-[var(--np-muted-text)] hover:bg-white/5']"
+              :class="[
+                activeTab === 'playbooks'
+                  ? 'border-[var(--np-accent-primary)] text-[var(--np-text)] bg-[var(--np-bg)]'
+                  : 'border-transparent text-[var(--np-muted-text)] hover:text-[var(--np-text)] hover:border-[var(--np-border)]'
+              ]"
               @click="activeTab = 'playbooks'"
             >
               Automated Playbooks
@@ -272,8 +301,7 @@ onBeforeUnmount(() => {
               <label class="block text-[0.7rem] uppercase tracking-widest text-[var(--np-muted-text)]">Preset</label>
               <select
                 v-model="preset"
-                class="mt-1 w-full px-3 py-2 rounded-lg text-sm bg-transparent border outline-none"
-                :class="isNightshade ? 'border-teal-400/30 text-teal-100 focus:border-teal-400/60' : 'border-amber-400/30 text-amber-100 focus:border-amber-400/60'"
+                class="mt-1 w-full px-3 py-2 rounded-lg text-sm bg-transparent border outline-none border-[var(--np-border)] text-[var(--np-text)] focus:border-[var(--np-accent-primary)]"
               >
                 <option value="ping">Ping Sweep (-sn)</option>
                 <option value="quick">Quick Ports (-F)</option>
@@ -289,8 +317,7 @@ onBeforeUnmount(() => {
               <input
                 v-model="customCommand"
                 type="text"
-                class="mt-1 w-full px-3 py-2 rounded-lg text-sm bg-transparent border outline-none"
-                :class="isNightshade ? 'border-teal-400/30 text-teal-100 placeholder-teal-400/40 focus:border-teal-400/60' : 'border-amber-400/30 text-amber-100 placeholder-amber-400/40 focus:border-amber-400/60'"
+                class="mt-1 w-full px-3 py-2 rounded-lg text-sm bg-transparent border outline-none border-[var(--np-border)] text-[var(--np-text)] placeholder:text-[var(--np-muted-text)] focus:border-[var(--np-accent-primary)]"
                 placeholder="nmap -sV -sC -T4"
               />
               <p class="mt-1 text-[0.7rem] text-[var(--np-muted-text)]">Only an allowlist of flags/scripts is permitted.</p>
@@ -300,8 +327,8 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 @click="runTargeted"
-                class="px-4 py-2 rounded-lg text-xs font-semibold transition-colors"
-                :class="isNightshade ? 'bg-teal-500/20 text-teal-200 hover:bg-teal-500/30 border border-teal-400/30' : 'bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 border border-amber-400/30'"
+                :disabled="!props.isAdmin"
+                class="px-4 py-2 rounded-lg text-xs font-semibold transition-colors border border-[var(--np-accent-primary)] text-[var(--np-text)] hover:bg-[var(--np-bg)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Run Scan
               </button>
@@ -314,9 +341,8 @@ onBeforeUnmount(() => {
                 <label class="block text-[0.7rem] uppercase tracking-widest text-[var(--np-muted-text)]">Playbook</label>
                 <select
                   v-model="selectedPlaybookId"
-                  class="mt-1 w-full px-3 py-2 rounded-lg text-sm bg-transparent border outline-none"
+                  class="mt-1 w-full px-3 py-2 rounded-lg text-sm bg-transparent border outline-none border-[var(--np-border)] text-[var(--np-text)] focus:border-[var(--np-accent-primary)] disabled:opacity-50"
                   :disabled="playbooksLoading"
-                  :class="isNightshade ? 'border-teal-400/30 text-teal-100 focus:border-teal-400/60 disabled:opacity-50' : 'border-amber-400/30 text-amber-100 focus:border-amber-400/60 disabled:opacity-50'"
                 >
                   <option v-for="pb in playbooks" :key="pb.id" :value="pb.id">
                     {{ pb.category }} — {{ pb.name }}
@@ -328,23 +354,22 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   @click="runPlaybook"
-                  class="px-4 py-2 rounded-lg text-xs font-semibold transition-colors"
-                  :disabled="!selectedPlaybook || playbooksLoading"
-                  :class="isNightshade ? 'bg-teal-500/20 text-teal-200 hover:bg-teal-500/30 border border-teal-400/30 disabled:opacity-50' : 'bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 border border-amber-400/30 disabled:opacity-50'"
+                  class="px-4 py-2 rounded-lg text-xs font-semibold transition-colors border border-[var(--np-accent-primary)] text-[var(--np-text)] hover:bg-[var(--np-bg)] disabled:opacity-50 disabled:cursor-not-allowed"
+                  :disabled="!props.isAdmin || !selectedPlaybook || playbooksLoading"
                 >
                   Run Playbook
                 </button>
               </div>
             </div>
 
-            <div v-if="selectedPlaybook" class="rounded-lg border p-3" :class="isNightshade ? 'border-teal-400/20 bg-black/30' : 'border-amber-400/20 bg-black/30'">
+            <div v-if="selectedPlaybook" class="rounded-lg border p-3 border-[var(--np-border)] bg-[var(--np-bg)]">
               <div class="flex items-center justify-between">
                 <div>
-                  <p class="text-sm font-semibold" :class="isNightshade ? 'text-teal-200' : 'text-amber-200'">{{ selectedPlaybook.name }}</p>
+                  <p class="text-sm font-semibold text-[var(--np-text)]">{{ selectedPlaybook.name }}</p>
                   <p class="text-xs text-[var(--np-muted-text)]">{{ selectedPlaybook.description }}</p>
                 </div>
                 <div class="text-right">
-                  <p class="text-[0.7rem] uppercase tracking-widest" :class="isNightshade ? 'text-teal-400' : 'text-amber-400'">{{ selectedPlaybook.risk_level }}</p>
+                  <p class="text-[0.7rem] uppercase tracking-widest text-[var(--np-accent-primary)]">{{ selectedPlaybook.risk_level }}</p>
                   <p class="text-[0.7rem] text-[var(--np-muted-text)]">{{ selectedPlaybook.estimated_time }}</p>
                 </div>
               </div>
@@ -379,14 +404,14 @@ onBeforeUnmount(() => {
         </div>
         <div class="p-4">
           <p v-if="!currentScanId" class="text-xs text-[var(--np-muted-text)]">Run a scan to generate an automatic analyst summary.</p>
-          <p v-else-if="aiBriefing" class="text-sm leading-relaxed" :class="isNightshade ? 'text-teal-100' : 'text-amber-100'">{{ aiBriefing }}</p>
-          <p v-else-if="aiError" class="text-xs" :class="isNightshade ? 'text-rose-300' : 'text-rose-200'">AI analysis failed: {{ aiError }}</p>
+          <p v-else-if="aiBriefing" class="text-sm leading-relaxed whitespace-pre-wrap text-[var(--np-text)]">{{ aiBriefing }}</p>
+          <p v-else-if="aiError" class="text-xs text-[var(--np-danger)]">AI analysis failed: {{ aiError }}</p>
           <p v-else class="text-xs text-[var(--np-muted-text)]">Waiting for scan completion and AI analysis…</p>
         </div>
       </div>
 
       <div class="flex-1 min-h-0">
-        <LiveTerminal :title="terminalTitle" :stream-url="terminalStreamUrl" :theme="theme" />
+        <LiveTerminal :title="terminalTitle" :stream-url="terminalStreamUrl" :theme="props.theme" />
       </div>
     </div>
   </div>

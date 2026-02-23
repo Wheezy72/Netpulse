@@ -23,10 +23,7 @@ class PacketHeaderResponse(BaseModel):
     dst_port: Optional[int]
     protocol: Optional[str]
     length: int
-    info: Optional[str]
-
-
-class PacketQueryResponse(BaseModel):
+    i</old_code><new_code>class PacketQueryResponse(BaseModel):
     packets: List[PacketHeaderResponse]
     next_cursor: Optional[int]
     has_more: bool
@@ -37,6 +34,9 @@ class PacketQueryResponse(BaseModel):
     response_model=PacketQueryResponse,
     summary="Query packet headers with cursor pagination",
     dependencies=[Depends(require_role())],
+))],
+))],
+)
 )
 async def query_packets(
     db: AsyncSession = Depends(db_session),

@@ -27,6 +27,7 @@ type CurrentUser = {
   id: number;
   email: string;
   full_name: string | null;
+  role: "admin" | "operator";
 };
 
 const theme = ref<Theme>("nightshade");
@@ -35,6 +36,7 @@ const authView = ref<AuthView>("login");
 const accessToken = ref<string | null>(null);
 const isAuthenticated = computed(() => !!accessToken.value);
 const currentUser = ref<CurrentUser | null>(null);
+const isAdmin = computed(() => currentUser.value?.role === "admin");
 
 const sidebarExpanded = ref(true);
 const mobileMenuOpen = ref(false);
@@ -347,7 +349,7 @@ function handleLogout(): void {
                 {{ currentUser?.email || 'Operator' }}
               </p>
               <p :class="['text-[0.6rem] uppercase tracking-widest', isNightshade ? 'text-emerald-400' : 'text-amber-400']">
-                Admin
+                {{ currentUser?.role === 'admin' ? 'Admin' : 'Operator' }}
               </p>
             </div>
           </div>
@@ -374,14 +376,17 @@ function handleLogout(): void {
           <Dashboard
             v-if="currentView === 'dashboard'"
             :info-mode="infoMode"
+            :is-admin="isAdmin"
           />
           <Devices
             v-else-if="currentView === 'devices'"
             :theme="theme"
+            :is-admin="isAdmin"
           />
           <Scanning
             v-else-if="currentView === 'scanning'"
             :theme="theme"
+            :is-admin="isAdmin"
             @toast="(type, msg) => toastRef?.show(type, msg)"
           />
           <PacketBrowser
@@ -396,6 +401,7 @@ function handleLogout(): void {
             v-else
             :theme="theme"
             :info-mode="infoMode"
+            :is-admin="isAdmin"
             @update:info-mode="handleInfoModeUpdate"
           />
         </div>

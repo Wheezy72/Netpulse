@@ -23,7 +23,7 @@ from app.db.session import async_session_factory
 from app.models.metric import Metric
 from app.models.scan_job import ScanJob, ScanJobStatus
 from app.models.script_job import ScriptJob, ScriptJobStatus
-from app.models.user import User
+from app.models.user import User, UserRole
 
 router = APIRouter()
 
@@ -66,6 +66,11 @@ async def websocket_script_logs(websocket: WebSocket, job_id: int) -> None:
         if user is None or not user.is_active:
             await websocket.send_json({"event": "error", "message": "Unauthorized"})
             await websocket.close(code=4401)
+            return
+
+        if user.role != UserRole.ADMIN:
+            await websocket.send_json({"event": "error", "message": "Forbidden"})
+            await websocket.close(code=4403)
             return
 
         try:

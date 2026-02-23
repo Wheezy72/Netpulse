@@ -4,14 +4,15 @@ import TopologyPanel from "../components/TopologyPanel.vue";
 
 interface Props {
   infoMode: "full" | "compact";
+  isAdmin: boolean;
 }
 
-defineProps<Props>();
+const props = defineProps<Props>();
 </script>
 
 <template>
   <div class="grid gap-4 xl:grid-cols-3">
     <PulsePanel class="xl:col-span-2" />
-    <TopologyPanel class="xl:col-span-1" />
+    <TopologyPanel class="xl:col-span-1" :is-admin="props.isAdmin" />
   </div>
 </template>

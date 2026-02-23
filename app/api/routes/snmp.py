@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_admin
 from app.models.user import User
 
 router = APIRouter()
@@ -77,7 +77,7 @@ def _parse_snmp_line(line: str) -> Optional[Dict[str, Any]]:
 @router.post("/poll")
 async def snmp_poll(
     request: SnmpPollRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ) -> Dict[str, Any]:
     if not IP_PATTERN.match(request.target):
         raise HTTPException(status_code=400, detail="Invalid target format")
@@ -134,7 +134,7 @@ async def snmp_poll(
 @router.post("/walk")
 async def snmp_walk(
     request: SnmpWalkRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ) -> Dict[str, Any]:
     if not IP_PATTERN.match(request.target):
         raise HTTPException(status_code=400, detail="Invalid target format")

@@ -12,13 +12,16 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, get_current_user
+from app.api.deps import db_session, require_admin, require_role
 from app.models.enforcement_action import EnforcementAction
 from app.models.user import User
 
 router = APIRouter()
 
 MAC_PATTERN = re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$")
+
+_IPTABLES_TABLE = "raw"
+_IPTABLES_CHAIN = "PREROUTING"
 
 
 def _validate_ip(ip: str) -> bool:
@@ -27,10 +30,6 @@ def _validate_ip(ip: str) -> bool:
         return isinstance(ipaddress.ip_address(ip), ipaddress.IPv4Address)
     except ValueError:
         return False
-
-
-_IPTABLES_TABLE = "raw"
-_IPTABLES_CHAIN = "PREROUTING"
 
 
 async def _run_cmd(argv: Sequence[str], timeout_s: float = 5.0) -> tuple[int, str, str]:
@@ -122,7 +121,7 @@ class KillConnectionRequest(BaseModel):
 async def block_device(
     request: BlockRequest,
     db: AsyncSession = Depends(db_session),
-    current_user: User = Depends(get_current_user),
+    _user: User = Depends(require_admin),
 ) -> Dict[str, Any]:
     if not _validate_ip(request.ip):
         raise HTTPException(status_code=400, detail="Invalid IP address format")
@@ -177,7 +176,7 @@ async def block_device(
 async def unblock_device(
     request: UnblockRequest,
     db: AsyncSession = Depends(db_session),
-    current_user: User = Depends(get_current_user),
+    _user: User = Depends(require_admin),
 ) -> Dict[str, Any]:
     if not _validate_ip(request.ip):
         raise HTTPException(status_code=400, detail="Invalid IP address format")
@@ -220,7 +219,7 @@ async def unblock_device(
 @router.get("/blocked")
 async def get_blocked_devices(
     db: AsyncSession = Depends(db_session),
-    current_user: User = Depends(get_current_user),
+    _user: User = Depends(require_role()),
 ) -> List[Dict[str, Any]]:
     stmt = select(EnforcementAction).order_by(EnforcementAction.created_at.desc())
     actions = (await db.execute(stmt)).scalars().all()
@@ -255,7 +254,7 @@ async def get_blocked_devices(
 async def quarantine_device(
     request: QuarantineRequest,
     db: AsyncSession = Depends(db_session),
-    current_user: User = Depends(get_current_user),
+    _user: User = Depends(require_admin),
 ) -> Dict[str, Any]:
     if not _validate_ip(request.ip):
         raise HTTPException(status_code=400, detail="Invalid IP address format")
@@ -301,7 +300,7 @@ async def quarantine_device(
 @router.post("/arp-fix")
 async def arp_fix(
     request: ArpFixRequest,
-    current_user: User = Depends(get_current_user),
+    _user: User = Depends(require_admin),
 ) -> Dict[str, Any]:
     if not _validate_ip(request.target_ip):
         raise HTTPException(status_code=400, detail="Invalid IP address format")
@@ -313,11 +312,16 @@ async def arp_fix(
     if arping_path:
         try:
             proc = await asyncio.create_subprocess_exec(
-                arping_path, "-c", "3", "-S", request.target_ip, request.target_ip,
+                arping_path,
+                "-c",
+                "3",
+                "-S",
+                request.target_ip,
+                request.target_ip,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+            stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
             return {
                 "status": "arp_fix_sent",
                 "target_ip": request.target_ip,
@@ -331,12 +335,12 @@ async def arp_fix(
                 "correct_mac": request.correct_mac,
                 "note": "arping timed out after 10 seconds",
             }
-        except Exception as e:
+        except Exception as exc:
             return {
                 "status": "arp_fix_error",
                 "target_ip": request.target_ip,
                 "correct_mac": request.correct_mac,
-                "error": str(e),
+                "error": str(exc),
             }
 
     return {
@@ -350,7 +354,7 @@ async def arp_fix(
 @router.post("/kill-connection")
 async def kill_connection(
     request: KillConnectionRequest,
-    current_user: User = Depends(get_current_user),
+    _user: User = Depends(require_admin),
 ) -> Dict[str, Any]:
     if not _validate_ip(request.ip):
         raise HTTPException(status_code=400, detail="Invalid IP address format")
@@ -359,7 +363,10 @@ async def kill_connection(
     if conntrack_path:
         try:
             proc = await asyncio.create_subprocess_exec(
-                conntrack_path, "-D", "-s", request.ip,
+                conntrack_path,
+                "-D",
+                "-s",
+                request.ip,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -370,18 +377,20 @@ async def kill_connection(
                 "ip": request.ip,
                 "output": output.strip(),
             }
-        except Exception as e:
+        except Exception as exc:
             return {
                 "status": "kill_error",
                 "ip": request.ip,
-                "error": str(e),
+                "error": str(exc),
             }
 
     ss_path = shutil.which("ss")
     if ss_path:
         try:
             proc = await asyncio.create_subprocess_exec(
-                ss_path, "-K", f"src={request.ip}",
+                ss_path,
+                "-K",
+                f"src={request.ip}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -393,11 +402,11 @@ async def kill_connection(
                 "tool": "ss",
                 "output": output.strip(),
             }
-        except Exception as e:
+        except Exception as exc:
             return {
                 "status": "kill_error",
                 "ip": request.ip,
-                "error": str(e),
+                "error": str(exc),
             }
 
     return {

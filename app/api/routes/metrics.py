@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-"""
-Metrics-related API endpoints.
+"""Metrics-related API endpoints.
 
 Exposes:
 - internet_health_recent: time-series data for aggregate Internet Health.
@@ -19,7 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import db_session, require_role
 from app.core.config import settings
 from app.models.metric import Metric
-from app.models.user import UserRole
 
 router = APIRouter()
 
@@ -49,7 +47,7 @@ class PulseSummaryResponse(BaseModel):
     "/internet-health-recent",
     response_model=InternetHealthResponse,
     summary="Return recent Internet Health metrics for the Pulse panel",
-    dependencies=[Depends(require_role(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN))],
+    dependencies=[Depends(require_role())],
 )
 async def internet_health_recent(
     db: AsyncSession = Depends(db_session),
@@ -68,10 +66,7 @@ async def internet_health_recent(
     rows = list(result.scalars().all())
     rows.reverse()
 
-    points = [
-        MetricPoint(timestamp=m.timestamp, value=float(m.value))
-        for m in rows
-    ]
+    points = [MetricPoint(timestamp=m.timestamp, value=float(m.value)) for m in rows]
     return InternetHealthResponse(points=points)
 
 
@@ -79,21 +74,12 @@ async def internet_health_recent(
     "/pulse-latest",
     response_model=PulseSummaryResponse,
     summary="Return latest per-target latency/jitter/loss values for the Pulse panel",
-    dependencies=[Depends(require_role(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN))],
+    dependencies=[Depends(require_role())],
 )
 async def pulse_latest(
     db: AsyncSession = Depends(db_session),
 ) -> PulseSummaryResponse:
-    """
-    Return the latest latency, jitter and packet loss metrics per configured Pulse target.
-
-    The metrics are derived from Metric rows with metric_type in:
-      - latency_ms
-      - jitter_ms
-      - packet_loss_pct
-
-    and tags containing {"target": "<ip>"}.
-    """
+    """Return the latest latency, jitter and packet loss metrics per configured Pulse target."""
     metric_types = {"latency_ms", "jitter_ms", "packet_loss_pct"}
     now = datetime.utcnow()
     window_start = now - timedelta(minutes=15)
@@ -129,19 +115,16 @@ async def pulse_latest(
             return "Cloudflare"
         return ip
 
-    summaries: List[PulseTargetSummary] = []
-
-    for target, metrics in latest.items():
-        summaries.append(
-            PulseTargetSummary(
-                target=target,
-                label=_label_for_target(target),
-                latency_ms=metrics.get("latency_ms"),
-                jitter_ms=metrics.get("jitter_ms"),
-                packet_loss_pct=metrics.get("packet_loss_pct"),
-            )
+    summaries: List[PulseTargetSummary] = [
+        PulseTargetSummary(
+            target=target,
+            label=_label_for_target(target),
+            latency_ms=metrics.get("latency_ms"),
+            jitter_ms=metrics.get("jitter_ms"),
+            packet_loss_pct=metrics.get("packet_loss_pct"),
         )
+        for target, metrics in latest.items()
+    ]
 
-    # Sort by label to keep display stable
     summaries.sort(key=lambda s: s.label.lower())
     return PulseSummaryResponse(targets=summaries)

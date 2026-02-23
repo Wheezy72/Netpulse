@@ -20,6 +20,7 @@ from app.api.routes import (
     plugins,
     recon,
     reports,
+    routers,
     scripts,
     settings,
     snmp,
@@ -37,6 +38,7 @@ api_router.include_router(google_auth.router, prefix="/auth/google", tags=["auth
 api_router.include_router(scripts.router, prefix="/scripts", tags=["scripts"])
 api_router.include_router(recon.router, prefix="/recon", tags=["recon"])
 api_router.include_router(devices.router, prefix="/devices", tags=["devices"])
+api_router.include_router(routers.router, prefix="/routers", tags=["routers"])
 api_router.include_router(metrics.router, prefix="/metrics", tags=["metrics"])
 api_router.include_router(captures.router, prefix="/captures", tags=["captures"])
 api_router.include_router(pcaps.router, prefix="/pcaps", tags=["pcaps"])

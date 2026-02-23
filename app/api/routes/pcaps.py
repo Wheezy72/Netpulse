@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session
+from app.api.deps import db_session, require_role
 from app.models.pcap_meta import PcapFile, PcapPacket
 
 router = APIRouter()
@@ -68,7 +68,12 @@ class PacketQueryResponse(BaseModel):
     next_cursor: Optional[str] = None
 
 
-@router.get("/", response_model=List[PcapFileResponse], summary="List PCAP files")
+@router.get(
+    "/",
+    response_model=List[PcapFileResponse],
+    summary="List PCAP files",
+    dependencies=[Depends(require_role())],
+)
 async def list_pcap_files(
     db: AsyncSession = Depends(db_session),
     limit: int = 50,
