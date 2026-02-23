@@ -159,6 +159,132 @@ def packet_capture_recent_task(
     return asyncio.run(_run())
 
 
+@celery_app.task(name="app.tasks.index_pcap_file")
+def index_pcap_file(pcap_file_id: int, chunk_size: int = 5000) -> int:
+    """Parse a raw .pcap on disk and bulk insert packet metadata.
+
+    This is designed for the PacketBrowser: read via PcapReader (streaming) and
+    insert PcapPacket rows in chunks to avoid large in-memory lists.
+    """
+
+    async def _run() -> int:
+        from datetime import datetime
+        from pathlib import Path
+
+        from sqlalchemy import delete, insert
+
+        from app.models.packet_capture import PacketCapture
+        from app.models.pcap_meta import PcapFile, PcapPacket
+
+        engine, factory = _create_session_factory()
+        try:
+            async with factory() as session:
+                pcap_file = await session.get(PcapFile, pcap_file_id)
+                if not pcap_file:
+                    return 0
+
+                pcap_path = Path(pcap_file.filepath)
+                if not pcap_path.exists():
+                    pcap_file.index_error = "PCAP file not found on disk"
+                    pcap_file.indexed_at = datetime.utcnow()
+                    await session.commit()
+                    return 0
+
+                try:
+                    # Re-indexing should not duplicate rows.
+                    await session.execute(
+                        delete(PcapPacket).where(PcapPacket.file_id == pcap_file_id)
+                    )
+                    await session.commit()
+
+                    from scapy.all import IP, IPv6, PcapReader, TCP, UDP
+
+                    packet_index = 0
+                    inserted = 0
+                    batch: list[dict] = []
+
+                    reader = PcapReader(str(pcap_path))
+                    try:
+                        for pkt in reader:
+                            packet_index += 1
+
+                            src_ip = None
+                            dst_ip = None
+                            proto = None
+                            if IP in pkt:
+                                ip_layer = pkt[IP]
+                                src_ip = ip_layer.src
+                                dst_ip = ip_layer.dst
+                                proto = str(ip_layer.proto)
+                            elif IPv6 in pkt:
+                                ip_layer = pkt[IPv6]
+                                src_ip = ip_layer.src
+                                dst_ip = ip_layer.dst
+                                proto = str(ip_layer.nh)
+
+                            src_port = None
+                            dst_port = None
+                            if TCP in pkt:
+                                src_port = pkt[TCP].sport
+                                dst_port = pkt[TCP].dport
+                                proto = "TCP"
+                            elif UDP in pkt:
+                                src_port = pkt[UDP].sport
+                                dst_port = pkt[UDP].dport
+                                proto = "UDP"
+
+                            batch.append(
+                                {
+                                    "file_id": pcap_file_id,
+                                    "packet_index": packet_index,
+                                    "timestamp": datetime.utcfromtimestamp(float(pkt.time)),
+                                    "src_ip": src_ip,
+                                    "dst_ip": dst_ip,
+                                    "src_port": src_port,
+                                    "dst_port": dst_port,
+                                    "protocol": proto,
+                                    "length": len(pkt),
+                                }
+                            )
+
+                            if len(batch) >= chunk_size:
+                                await session.execute(insert(PcapPacket), batch)
+                                await session.commit()
+                                inserted += len(batch)
+                                batch.clear()
+
+                    finally:
+                        reader.close()
+
+                    if batch:
+                        await session.execute(insert(PcapPacket), batch)
+                        await session.commit()
+                        inserted += len(batch)
+
+                    pcap_file.packet_count = packet_index
+                    pcap_file.file_size_bytes = pcap_path.stat().st_size
+                    pcap_file.indexed_at = datetime.utcnow()
+                    pcap_file.index_error = None
+
+                    if pcap_file.capture_id:
+                        capture = await session.get(PacketCapture, pcap_file.capture_id)
+                        if capture:
+                            capture.packet_count = packet_index
+                            capture.file_size_bytes = pcap_file.file_size_bytes
+
+                    await session.commit()
+                    return inserted
+                except Exception as exc:
+                    pcap_file.index_error = str(exc)
+                    pcap_file.indexed_at = datetime.utcnow()
+                    await session.commit()
+                    raise
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_run())
+
+
 @celery_app.task(name="app.tasks.vulnerability_alert_task")
 def vulnerability_alert_task() -> None:
     """Celery task that scans for new high/critical vulnerabilities and sends alerts."""

@@ -3,6 +3,7 @@ from app.models.enforcement_action import EnforcementAction
 from app.models.metric import Metric
 from app.models.network_segment import NetworkSegment
 from app.models.packet_capture import PacketCapture, PacketCaptureStatus, PacketHeader
+from app.models.pcap_meta import PcapFile, PcapPacket
 from app.models.scan_job import ScanJob
 from app.models.script_job import ScriptJob
 from app.models.syslog_event import SyslogEvent
@@ -18,6 +19,8 @@ __all__ = [
     "PacketCapture",
     "PacketCaptureStatus",
     "PacketHeader",
+    "PcapFile",
+    "PcapPacket",
     "ScanJob",
     "ScriptJob",
     "SyslogEvent",

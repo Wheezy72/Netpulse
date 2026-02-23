@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import re
 import shutil
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -17,14 +18,63 @@ from app.models.user import User
 
 router = APIRouter()
 
-IP_PATTERN = re.compile(
-    r'^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$'
-)
 MAC_PATTERN = re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$")
 
 
 def _validate_ip(ip: str) -> bool:
-    return bool(IP_PATTERN.match(ip))
+    """Validate an IPv4 address."""
+    try:
+        return isinstance(ipaddress.ip_address(ip), ipaddress.IPv4Address)
+    except ValueError:
+        return False
+
+
+_IPTABLES_TABLE = "raw"
+_IPTABLES_CHAIN = "PREROUTING"
+
+
+async def _run_cmd(argv: Sequence[str], timeout_s: float = 5.0) -> tuple[int, str, str]:
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+    except asyncio.TimeoutError:
+        proc.kill()
+        stdout, stderr = await proc.communicate()
+        return 124, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+
+    return proc.returncode or 0, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+
+
+async def _iptables_rule_exists(iptables_path: str, rule_args: Sequence[str]) -> bool:
+    rc, _, _ = await _run_cmd(
+        [iptables_path, "-t", _IPTABLES_TABLE, "-C", _IPTABLES_CHAIN, *rule_args],
+        timeout_s=5.0,
+    )
+    return rc == 0
+
+
+async def _iptables_ensure_rule(iptables_path: str, rule_args: Sequence[str]) -> None:
+    if await _iptables_rule_exists(iptables_path, rule_args):
+        return
+    await _run_cmd(
+        [iptables_path, "-t", _IPTABLES_TABLE, "-I", _IPTABLES_CHAIN, *rule_args],
+        timeout_s=5.0,
+    )
+
+
+async def _iptables_delete_rule(iptables_path: str, rule_args: Sequence[str]) -> None:
+    # Remove all matching instances (defensive) with a small cap.
+    for _ in range(6):
+        if not await _iptables_rule_exists(iptables_path, rule_args):
+            return
+        await _run_cmd(
+            [iptables_path, "-t", _IPTABLES_TABLE, "-D", _IPTABLES_CHAIN, *rule_args],
+            timeout_s=5.0,
+        )
 
 
 async def _get_latest_action(db: AsyncSession, ip: str) -> EnforcementAction | None:
@@ -78,8 +128,6 @@ async def block_device(
         raise HTTPException(status_code=400, detail="Invalid IP address format")
 
     current_state = await _get_current_state(db, request.ip)
-    if current_state in {"block", "quarantine"}:
-        raise HTTPException(status_code=409, detail=f"Device {request.ip} is already blocked")
 
     iptables_path = shutil.which("iptables")
     note: str | None = None
@@ -87,39 +135,37 @@ async def block_device(
     if not iptables_path:
         note = "iptables not available - recorded in database only"
     else:
+        # Kill-switch: drop traffic to/from the device as early as possible.
+        # Use raw/PREROUTING to bypass conntrack.
         try:
-            proc = await asyncio.create_subprocess_exec(
-                iptables_path, "-I", "FORWARD", "-s", request.ip, "-j", "DROP",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await asyncio.wait_for(proc.communicate(), timeout=5)
-
-            proc2 = await asyncio.create_subprocess_exec(
-                iptables_path, "-I", "FORWARD", "-d", request.ip, "-j", "DROP",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await asyncio.wait_for(proc2.communicate(), timeout=5)
+            await _iptables_ensure_rule(iptables_path, ["-s", request.ip, "-j", "DROP"])
+            await _iptables_ensure_rule(iptables_path, ["-d", request.ip, "-j", "DROP"])
         except Exception:
-            pass
+            # Best-effort: still record the intent in DB.
+            note = "Failed to apply iptables rule; recorded in database only"
 
-    action = EnforcementAction(
-        ip=request.ip,
-        mac=None,
-        action_type="block",
-        reason=request.reason,
-        created_at=datetime.utcnow(),
-    )
-    db.add(action)
-    await db.commit()
-    await db.refresh(action)
+    # Idempotent behaviour: if it's already blocked/quarantined, don't error.
+    if current_state not in {"block", "quarantine"}:
+        action = EnforcementAction(
+            ip=request.ip,
+            mac=None,
+            action_type="block",
+            reason=request.reason,
+            created_at=datetime.utcnow(),
+        )
+        db.add(action)
+        await db.commit()
+        await db.refresh(action)
+        timestamp = action.created_at.isoformat()
+    else:
+        timestamp = datetime.utcnow().isoformat()
+        note = note or f"Device {request.ip} was already {current_state}"
 
     payload: Dict[str, Any] = {
         "status": "blocked",
         "ip": request.ip,
         "reason": request.reason,
-        "timestamp": action.created_at.isoformat(),
+        "timestamp": timestamp,
     }
     if note:
         payload["note"] = note
@@ -137,40 +183,38 @@ async def unblock_device(
         raise HTTPException(status_code=400, detail="Invalid IP address format")
 
     current_state = await _get_current_state(db, request.ip)
-    if current_state not in {"block", "quarantine"}:
-        raise HTTPException(status_code=404, detail=f"Device {request.ip} is not blocked")
 
     iptables_path = shutil.which("iptables")
+    note: str | None = None
+
     if iptables_path:
         try:
-            proc = await asyncio.create_subprocess_exec(
-                iptables_path, "-D", "FORWARD", "-s", request.ip, "-j", "DROP",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await asyncio.wait_for(proc.communicate(), timeout=5)
-
-            proc2 = await asyncio.create_subprocess_exec(
-                iptables_path, "-D", "FORWARD", "-d", request.ip, "-j", "DROP",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await asyncio.wait_for(proc2.communicate(), timeout=5)
+            await _iptables_delete_rule(iptables_path, ["-s", request.ip, "-j", "DROP"])
+            await _iptables_delete_rule(iptables_path, ["-d", request.ip, "-j", "DROP"])
         except Exception:
-            pass
+            note = "Failed to remove iptables rule(s); recorded in database only"
+    else:
+        note = "iptables not available - recorded in database only"
 
-    db.add(
-        EnforcementAction(
-            ip=request.ip,
-            mac=None,
-            action_type="unblock",
-            reason=None,
-            created_at=datetime.utcnow(),
+    # Idempotent: if it's already unblocked, return OK without inserting noise.
+    if current_state in {"block", "quarantine"}:
+        db.add(
+            EnforcementAction(
+                ip=request.ip,
+                mac=None,
+                action_type="unblock",
+                reason=None,
+                created_at=datetime.utcnow(),
+            )
         )
-    )
-    await db.commit()
+        await db.commit()
+    else:
+        note = note or f"Device {request.ip} was not blocked"
 
-    return {"status": "unblocked", "ip": request.ip}
+    payload: Dict[str, Any] = {"status": "unblocked", "ip": request.ip}
+    if note:
+        payload["note"] = note
+    return payload
 
 
 @router.get("/blocked")
@@ -220,23 +264,16 @@ async def quarantine_device(
         raise HTTPException(status_code=400, detail="Invalid MAC address format")
 
     iptables_path = shutil.which("iptables")
+    note: str | None = None
+
     if iptables_path:
         try:
-            proc = await asyncio.create_subprocess_exec(
-                iptables_path, "-I", "FORWARD", "-s", request.ip, "-j", "DROP",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await asyncio.wait_for(proc.communicate(), timeout=5)
-
-            proc2 = await asyncio.create_subprocess_exec(
-                iptables_path, "-I", "FORWARD", "-d", request.ip, "-j", "DROP",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await asyncio.wait_for(proc2.communicate(), timeout=5)
+            await _iptables_ensure_rule(iptables_path, ["-s", request.ip, "-j", "DROP"])
+            await _iptables_ensure_rule(iptables_path, ["-d", request.ip, "-j", "DROP"])
         except Exception:
-            pass
+            note = "Failed to apply iptables rule; recorded in database only"
+    else:
+        note = "iptables not available - recorded in database only"
 
     action = EnforcementAction(
         ip=request.ip,
@@ -249,13 +286,16 @@ async def quarantine_device(
     await db.commit()
     await db.refresh(action)
 
-    return {
+    payload: Dict[str, Any] = {
         "status": "quarantined",
         "ip": request.ip,
         "mac": request.mac,
         "reason": request.reason,
         "timestamp": action.created_at.isoformat(),
     }
+    if note:
+        payload["note"] = note
+    return payload
 
 
 @router.post("/arp-fix")

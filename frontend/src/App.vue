@@ -7,6 +7,7 @@ import Login from "./views/Login.vue";
 import Register from "./views/Register.vue";
 import Settings from "./views/Settings.vue";
 import Scanning from "./views/Scanning.vue";
+import PacketBrowser from "./views/PacketBrowser.vue";
 import Devices from "./views/Devices.vue";
 import Logs from "./views/Logs.vue";
 import ChatBot from "./components/ChatBot.vue";
@@ -19,7 +20,7 @@ function showToast(type: "success" | "error" | "warning" | "info", message: stri
 }
 
 type Theme = "nightshade" | "sysadmin";
-type View = "dashboard" | "devices" | "scanning" | "logs" | "settings";
+type View = "dashboard" | "devices" | "scanning" | "packets" | "logs" | "settings";
 type AuthView = "login" | "register";
 
 type CurrentUser = {
@@ -54,6 +55,7 @@ const navItems: { id: View; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
   { id: "devices", label: "Devices" },
   { id: "scanning", label: "Scanning" },
+  { id: "packets", label: "Packets" },
   { id: "logs", label: "Logs" },
   { id: "settings", label: "Settings" },
 ];
@@ -299,6 +301,9 @@ function handleLogout(): void {
             <svg v-else-if="item.id === 'scanning'" class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
             </svg>
+            <svg v-else-if="item.id === 'packets'" class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5h10.5m-10.5 4.5h10.5m-10.5 4.5h10.5M5.25 4.5h13.5A2.25 2.25 0 0121 6.75v10.5A2.25 2.25 0 0118.75 19.5H5.25A2.25 2.25 0 013 17.25V6.75A2.25 2.25 0 015.25 4.5z" />
+            </svg>
             <svg v-else-if="item.id === 'logs'" class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
             </svg>
@@ -378,6 +383,10 @@ function handleLogout(): void {
             v-else-if="currentView === 'scanning'"
             :theme="theme"
             @toast="(type, msg) => toastRef?.show(type, msg)"
+          />
+          <PacketBrowser
+            v-else-if="currentView === 'packets'"
+            :theme="theme"
           />
           <Logs
             v-else-if="currentView === 'logs'"
