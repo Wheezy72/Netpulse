@@ -8,9 +8,19 @@ WORKDIR /app
 # System dependencies (for ping, nmap, packet capture, etc.)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+       ca-certificates \
+       curl \
+       gnupg \
        iputils-ping \
        nmap \
        tcpdump \
+    && . /etc/os-release \
+    && zeek_repo_version="${VERSION_ID%%.*}" \
+    && echo "deb [signed-by=/usr/share/keyrings/zeek.gpg] https://download.opensuse.org/repositories/security:/zeek/Debian_${zeek_repo_version}/ /" > /etc/apt/sources.list.d/security_zeek.list \
+    && curl -fsSL "https://download.opensuse.org/repositories/security:/zeek/Debian_${zeek_repo_version}/Release.key" | gpg --dearmor -o /usr/share/keyrings/zeek.gpg \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+       zeek \
     && rm -rf /var/lib/apt/lists/*
 
 COPY app /app

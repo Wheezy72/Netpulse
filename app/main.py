@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
@@ -89,6 +90,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+        # Minimal, idempotent schema fix-ups for deployments that reuse an existing
+        # database volume. `create_all()` does not ALTER existing tables.
+        if engine.dialect.name == "postgresql":
+            await conn.execute(
+                text(
+                    "ALTER TABLE pcap_files ADD COLUMN IF NOT EXISTS zeek_summary JSON NULL"
+                )
+            )
 
     try:
         yield

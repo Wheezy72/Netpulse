@@ -69,6 +69,8 @@ services:
     container_name: netpulse-worker
     restart: unless-stopped
     depends_on:
+      app:
+        condition: service_healthy
       db:
         condition: service_healthy
       redis:
@@ -95,6 +97,8 @@ services:
     container_name: netpulse-beat
     restart: unless-stopped
     depends_on:
+      app:
+        condition: service_healthy
       db:
         condition: service_healthy
       redis:

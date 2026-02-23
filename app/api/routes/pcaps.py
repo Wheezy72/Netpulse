@@ -68,6 +68,12 @@ class PacketQueryResponse(BaseModel):
     next_cursor: Optional[str] = None
 
 
+class PcapZeekSummaryResponse(BaseModel):
+    pcap_file_id: int
+    indexing_status: str
+    zeek_summary: Optional[dict[str, Any]] = None
+
+
 @router.get(
     "/",
     response_model=List[PcapFileResponse],
@@ -188,3 +194,31 @@ async def query_pcap_packets(
         next_cursor = _encode_cursor(last.timestamp, last.packet_index)
 
     return PacketQueryResponse(items=items, next_cursor=next_cursor)
+
+
+@router.get(
+    "/{pcap_file_id}/zeek-summary",
+    response_model=PcapZeekSummaryResponse,
+    summary="Get Zeek summary for a PCAP file",
+    dependencies=[Depends(require_role())],
+)
+async def get_pcap_zeek_summary(
+    pcap_file_id: int,
+    db: AsyncSession = Depends(db_session),
+) -> PcapZeekSummaryResponse:
+    pcap_file = await db.get(PcapFile, pcap_file_id)
+    if not pcap_file:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PCAP not found")
+
+    if pcap_file.index_error:
+        indexing_status = "error"
+    elif pcap_file.indexed_at:
+        indexing_status = "indexed"
+    else:
+        indexing_status = "pending"
+
+    return PcapZeekSummaryResponse(
+        pcap_file_id=pcap_file_id,
+        indexing_status=indexing_status,
+        zeek_summary=pcap_file.zeek_summary,
+    )
