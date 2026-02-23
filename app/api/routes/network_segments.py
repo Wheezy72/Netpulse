@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, require_role
+from app.api.deps import db_session, require_admin, require_role
 from app.models.network_segment import NetworkSegment
 from app.models.user import User
 
@@ -60,7 +60,7 @@ async def list_network_segments(
 async def create_network_segment(
     segment: NetworkSegmentCreate,
     db: AsyncSession = Depends(db_session),
-    _user: User = Depends(require_role()),
+    _user: User = Depends(require_admin),
 ):
     new_segment = NetworkSegment(
         name=segment.name,
@@ -81,7 +81,7 @@ async def update_network_segment(
     segment_id: int,
     segment: NetworkSegmentUpdate,
     db: AsyncSession = Depends(db_session),
-    _user: User = Depends(require_role()),
+    _user: User = Depends(require_admin),
 ):
     result = await db.execute(
         select(NetworkSegment).where(NetworkSegment.id == segment_id)
@@ -107,7 +107,7 @@ async def update_network_segment(
 async def delete_network_segment(
     segment_id: int,
     db: AsyncSession = Depends(db_session),
-    _user: User = Depends(require_role()),
+    _user: User = Depends(require_admin),
 ):
     result = await db.execute(
         select(NetworkSegment).where(NetworkSegment.id == segment_id)

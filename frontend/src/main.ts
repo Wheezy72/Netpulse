@@ -1,6 +1,7 @@
 import { createApp } from "vue";
 import App from "./App.vue";
 import "./assets/styles.css";
+import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 
 import ECharts from "vue-echarts";
 import { use } from "echarts/core";

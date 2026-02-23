@@ -54,7 +54,6 @@ class CreateUserRequest(BaseModel):
     email: EmailStr
     password: str
     full_name: str | None = None
-    role: UserRole = UserRole.OPERATOR
 
 
 class UserMeResponse(BaseModel):
@@ -163,7 +162,7 @@ async def create_user(
         email=payload.email,
         full_name=payload.full_name,
         hashed_password=get_password_hash(payload.password),
-        role=payload.role if first_user else UserRole.ADMIN,
+        role=UserRole.ADMIN if not first_user else UserRole.OPERATOR,
     )
     db.add(user)
     await db.commit()

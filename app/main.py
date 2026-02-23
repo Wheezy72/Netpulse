@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
@@ -30,6 +31,9 @@ from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine
 from app.services.logging_service import setup_logging
+
+# Ensure all model modules are imported so Base.metadata has the full schema.
+import app.models  # noqa: F401
 
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
@@ -86,6 +90,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+        # Minimal, idempotent schema fix-ups for deployments that reuse an existing
+        # database volume. `create_all()` does not ALTER existing tables.
+        if engine.dialect.name == "postgresql":
+            await conn.execute(
+                text(
+                    "ALTER TABLE pcap_files ADD COLUMN IF NOT EXISTS zeek_summary JSON NULL"
+                )
+            )
 
     try:
         yield

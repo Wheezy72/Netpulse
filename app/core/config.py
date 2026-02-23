@@ -44,10 +44,19 @@ class Settings(BaseSettings):
     pulse_isp_ip: str = "8.8.8.8"
     pulse_cloudflare_ip: str = "1.1.1.1"
 
+    # Rogue DHCP detection allowlist (MAC addresses).
+    # Recommended env var format:
+    #   ALLOWED_DHCP_SERVER_MACS="aa:bb:cc:dd:ee:ff,11:22:33:44:55:66"
+    # (We keep this as a string to avoid strict JSON list parsing requirements.)
+    allowed_dhcp_server_macs: str | None = None
+
     # Paths
     scripts_base_dir: str = "./scripts"
     scripts_uploads_subdir: str = "uploads"
     scripts_prebuilt_subdir: str = "prebuilt"
+
+    # Packet capture storage
+    pcap_storage_dir: str = "/tmp/pcaps"
 
     # Security / auth
     secret_key: str = "CHANGE_ME_IN_PRODUCTION"

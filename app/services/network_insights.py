@@ -3,63 +3,144 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.device import Device
+from app.models.metric import Metric
 
 
 async def detect_bottlenecks(db: AsyncSession) -> List[Dict[str, Any]]:
-    """Detect potential network bottlenecks based on device metrics.
-    
-    Returns a list of devices or network segments that may be experiencing issues.
+    """Detect potential network bottlenecks based on persisted metrics.
+
+    This implementation intentionally avoids "fake" per-device fields and instead
+    derives signals from real Metric rows.
+
+    Current signal:
+    - High interface bandwidth (if_in_bps / if_out_bps) collected via SNMP polling.
     """
-    bottlenecks = []
-    
-    result = await db.execute(select(Device))
-    devices = result.scalars().all()
-    
-    for device in devices:
-        issues = []
-        severity = "info"
-        
-        if hasattr(device, 'last_response_time_ms') and device.last_response_time_ms:
-            if device.last_response_time_ms > 200:
-                issues.append(f"High latency: {device.last_response_time_ms}ms response time")
-                severity = "warning"
-            if device.last_response_time_ms > 500:
-                severity = "critical"
-        
-        if hasattr(device, 'packet_loss_percent') and device.packet_loss_percent:
-            if device.packet_loss_percent > 1:
-                issues.append(f"Packet loss: {device.packet_loss_percent}%")
-                severity = "warning"
-            if device.packet_loss_percent > 5:
-                severity = "critical"
-        
-        if hasattr(device, 'cpu_utilization') and device.cpu_utilization:
-            if device.cpu_utilization > 80:
-                issues.append(f"High CPU: {device.cpu_utilization}%")
-                severity = "warning"
-        
-        if hasattr(device, 'bandwidth_utilization') and device.bandwidth_utilization:
-            if device.bandwidth_utilization > 80:
-                issues.append(f"High bandwidth utilization: {device.bandwidth_utilization}%")
-                severity = "warning"
-        
-        if issues:
-            bottlenecks.append({
+
+    now = datetime.utcnow()
+    window_start = now - timedelta(minutes=5)
+
+    metric_result = await db.execute(
+        select(Metric)
+        .where(Metric.metric_type.in_({"if_in_bps", "if_out_bps"}))
+        .where(Metric.timestamp >= window_start)
+        .order_by(Metric.timestamp.desc())
+        .limit(5000)
+    )
+    metrics = list(metric_result.scalars().all())
+
+    # Pair in/out samples by (device_id, ifIndex, timestamp) then compute total bps.
+    samples: Dict[tuple[int, int, datetime], Dict[str, Any]] = {}
+
+    for m in metrics:
+        if m.device_id is None:
+            continue
+
+        tags = m.tags or {}
+        raw_if = tags.get("ifIndex")
+        try:
+            if_index = int(raw_if)
+        except (TypeError, ValueError):
+            continue
+
+        key = (int(m.device_id), if_index, m.timestamp)
+        s = samples.setdefault(
+            key,
+            {
+                "in_bps": 0.0,
+                "out_bps": 0.0,
+                "ifDescr": tags.get("ifDescr"),
+            },
+        )
+        if m.metric_type == "if_in_bps":
+            s["in_bps"] = float(m.value)
+        elif m.metric_type == "if_out_bps":
+            s["out_bps"] = float(m.value)
+
+        if not s.get("ifDescr") and tags.get("ifDescr"):
+            s["ifDescr"] = tags.get("ifDescr")
+
+    # Reduce to per-interface peak total bps over the window.
+    per_iface_peak: Dict[tuple[int, int], Dict[str, Any]] = {}
+    for (device_id, if_index, _), s in samples.items():
+        total_bps = float(s.get("in_bps", 0.0)) + float(s.get("out_bps", 0.0))
+        k = (device_id, if_index)
+        existing = per_iface_peak.get(k)
+        if existing is None or total_bps > float(existing["total_bps"]):
+            per_iface_peak[k] = {
+                "total_bps": total_bps,
+                "in_bps": float(s.get("in_bps", 0.0)),
+                "out_bps": float(s.get("out_bps", 0.0)),
+                "ifDescr": s.get("ifDescr"),
+            }
+
+    # Thresholds are intentionally conservative defaults (bits/sec).
+    warning_bps = 50_000_000.0
+    critical_bps = 200_000_000.0
+
+    flagged: Dict[int, List[Dict[str, Any]]] = {}
+
+    for (device_id, if_index), peak in per_iface_peak.items():
+        total_bps = float(peak["total_bps"])
+        if total_bps < warning_bps:
+            continue
+
+        severity = "warning" if total_bps < critical_bps else "critical"
+
+        issues = flagged.setdefault(device_id, [])
+        issues.append(
+            {
+                "severity": severity,
+                "ifIndex": if_index,
+                "ifDescr": peak.get("ifDescr"),
+                "in_bps": float(peak["in_bps"]),
+                "out_bps": float(peak["out_bps"]),
+                "total_bps": total_bps,
+            }
+        )
+
+    if not flagged:
+        return []
+
+    device_ids = list(flagged.keys())
+    device_result = await db.execute(select(Device).where(Device.id.in_(device_ids)))
+    devices = {d.id: d for d in device_result.scalars().all()}
+
+    bottlenecks: List[Dict[str, Any]] = []
+
+    for device_id, iface_issues in flagged.items():
+        device = devices.get(device_id)
+        if device is None:
+            continue
+
+        # Pick the most severe issue as the device severity.
+        device_severity = "warning"
+        if any(i["severity"] == "critical" for i in iface_issues):
+            device_severity = "critical"
+
+        issue_lines: List[str] = []
+        for i in sorted(iface_issues, key=lambda x: float(x["total_bps"]), reverse=True)[:3]:
+            label = i.get("ifDescr") or f"ifIndex {i['ifIndex']}"
+            mbps = float(i["total_bps"]) / 1_000_000.0
+            issue_lines.append(f"High interface traffic on {label}: {mbps:.1f} Mbps")
+
+        bottlenecks.append(
+            {
                 "device_id": device.id,
                 "hostname": device.hostname or "Unknown",
                 "ip_address": device.ip_address,
-                "device_type": getattr(device, 'device_type', 'unknown'),
-                "issues": issues,
-                "severity": severity,
-                "recommendation": _get_recommendation(issues, device),
-            })
-    
+                "device_type": device.device_type or "unknown",
+                "issues": issue_lines,
+                "severity": device_severity,
+                "recommendation": _get_recommendation(issue_lines, device),
+            }
+        )
+
     bottlenecks.sort(key=lambda x: {"critical": 0, "warning": 1, "info": 2}.get(x["severity"], 3))
-    
+
     return bottlenecks
 
 
@@ -77,9 +158,9 @@ def _get_recommendation(issues: List[str], device: Device) -> str:
         if "cpu" in issue.lower():
             recommendations.append("Identify high-CPU processes")
             recommendations.append("Consider load balancing or hardware upgrade")
-        if "bandwidth" in issue.lower():
-            recommendations.append("Implement QoS policies")
+        if any(k in issue.lower() for k in ["bandwidth", "interface traffic", "traffic"]):
             recommendations.append("Identify top bandwidth consumers")
+            recommendations.append("Implement QoS policies or rate limits")
     
     return "; ".join(recommendations[:2]) if recommendations else "Monitor and investigate further"
 
@@ -203,7 +284,14 @@ async def get_network_health_summary(db: AsyncSession) -> Dict[str, Any]:
     devices = result.scalars().all()
     
     total_devices = len(devices)
-    online_devices = sum(1 for d in devices if getattr(d, 'is_online', True))
+
+    now = datetime.utcnow()
+    online_window = timedelta(minutes=5)
+    online_devices = sum(
+        1
+        for d in devices
+        if d.last_seen is not None and (now - d.last_seen) <= online_window
+    )
     offline_devices = total_devices - online_devices
     
     bottlenecks = await detect_bottlenecks(db)

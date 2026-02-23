@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import axios from "axios";
-import { computed, onMounted, ref, watch, nextTick } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
 import Dashboard from "./views/Dashboard.vue";
 import Login from "./views/Login.vue";
 import Register from "./views/Register.vue";
 import Settings from "./views/Settings.vue";
 import Scanning from "./views/Scanning.vue";
+import PacketBrowser from "./views/PacketBrowser.vue";
 import Devices from "./views/Devices.vue";
 import Logs from "./views/Logs.vue";
 import ChatBot from "./components/ChatBot.vue";
@@ -19,13 +20,14 @@ function showToast(type: "success" | "error" | "warning" | "info", message: stri
 }
 
 type Theme = "nightshade" | "sysadmin";
-type View = "dashboard" | "devices" | "scanning" | "logs" | "settings";
+type View = "dashboard" | "devices" | "scanning" | "packets" | "logs" | "settings";
 type AuthView = "login" | "register";
 
 type CurrentUser = {
   id: number;
   email: string;
   full_name: string | null;
+  role: "admin" | "operator";
 };
 
 const theme = ref<Theme>("nightshade");
@@ -34,10 +36,13 @@ const authView = ref<AuthView>("login");
 const accessToken = ref<string | null>(null);
 const isAuthenticated = computed(() => !!accessToken.value);
 const currentUser = ref<CurrentUser | null>(null);
+const isAdmin = computed(() => currentUser.value?.role === "admin");
 
 const sidebarExpanded = ref(true);
 const mobileMenuOpen = ref(false);
 const logoError = ref(false);
+
+const aiDrawerOpen = ref(false);
 
 const infoMode = ref<'full' | 'compact'>((localStorage.getItem('np-info-mode') as 'full' | 'compact') || 'full');
 
@@ -52,6 +57,7 @@ const navItems: { id: View; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
   { id: "devices", label: "Devices" },
   { id: "scanning", label: "Scanning" },
+  { id: "packets", label: "Packets" },
   { id: "logs", label: "Logs" },
   { id: "settings", label: "Settings" },
 ];
@@ -297,6 +303,9 @@ function handleLogout(): void {
             <svg v-else-if="item.id === 'scanning'" class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
             </svg>
+            <svg v-else-if="item.id === 'packets'" class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5h10.5m-10.5 4.5h10.5m-10.5 4.5h10.5M5.25 4.5h13.5A2.25 2.25 0 0121 6.75v10.5A2.25 2.25 0 0118.75 19.5H5.25A2.25 2.25 0 013 17.25V6.75A2.25 2.25 0 015.25 4.5z" />
+            </svg>
             <svg v-else-if="item.id === 'logs'" class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
             </svg>
@@ -340,7 +349,7 @@ function handleLogout(): void {
                 {{ currentUser?.email || 'Operator' }}
               </p>
               <p :class="['text-[0.6rem] uppercase tracking-widest', isNightshade ? 'text-emerald-400' : 'text-amber-400']">
-                Admin
+                {{ currentUser?.role === 'admin' ? 'Admin' : 'Operator' }}
               </p>
             </div>
           </div>
@@ -367,15 +376,22 @@ function handleLogout(): void {
           <Dashboard
             v-if="currentView === 'dashboard'"
             :info-mode="infoMode"
+            :is-admin="isAdmin"
           />
           <Devices
             v-else-if="currentView === 'devices'"
             :theme="theme"
+            :is-admin="isAdmin"
           />
           <Scanning
             v-else-if="currentView === 'scanning'"
             :theme="theme"
+            :is-admin="isAdmin"
             @toast="(type, msg) => toastRef?.show(type, msg)"
+          />
+          <PacketBrowser
+            v-else-if="currentView === 'packets'"
+            :theme="theme"
           />
           <Logs
             v-else-if="currentView === 'logs'"
@@ -385,12 +401,46 @@ function handleLogout(): void {
             v-else
             :theme="theme"
             :info-mode="infoMode"
+            :is-admin="isAdmin"
             @update:info-mode="handleInfoModeUpdate"
           />
         </div>
       </main>
 
-      <ChatBot :theme="theme" />
+      <button
+        type="button"
+        @click="aiDrawerOpen = !aiDrawerOpen"
+        class="fixed bottom-6 right-6 z-[70] w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-110"
+        :class="[
+          isNightshade
+            ? 'bg-teal-500/20 border-2 border-teal-400 text-teal-400 hover:bg-teal-500/30'
+            : 'bg-amber-500/20 border-2 border-amber-400 text-amber-400 hover:bg-amber-500/30'
+        ]"
+        :style="isNightshade ? { boxShadow: '0 0 20px rgba(20, 184, 166, 0.4)' } : { boxShadow: '0 0 20px rgba(245, 158, 11, 0.4)' }"
+        :title="aiDrawerOpen ? 'Close AI Analyst' : 'Open AI Analyst'"
+      >
+        <svg v-if="!aiDrawerOpen" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+        </svg>
+        <svg v-else class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+
+      <div
+        class="fixed inset-0 z-[55] bg-black/60 transition-opacity duration-300"
+        :class="aiDrawerOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'"
+        @click="aiDrawerOpen = false"
+      ></div>
+
+      <div
+        class="fixed inset-y-0 right-0 z-[60] w-full max-w-md transform transition-transform duration-300"
+        :class="aiDrawerOpen ? 'translate-x-0' : 'translate-x-full'"
+      >
+        <div class="h-full p-4">
+          <ChatBot class="h-full" :theme="theme" @close="aiDrawerOpen = false" />
+        </div>
+      </div>
     </template>
 
     <Toast ref="toastRef" :theme="theme" />

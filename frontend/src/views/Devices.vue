@@ -5,9 +5,11 @@ import Uptime from "./Uptime.vue";
 
 const props = defineProps<{
   theme: "nightshade" | "sysadmin";
+  isAdmin?: boolean;
 }>();
 
 const isNightshade = computed(() => props.theme === "nightshade");
+const isAdmin = computed(() => !!props.isAdmin);
 
 const activeTab = ref<string>("inventory");
 
@@ -412,6 +414,7 @@ onMounted(async () => {
           >
             <span class="font-mono">{{ ip }}</span>
             <button
+              v-if="isAdmin"
               type="button"
               @click="unblockDevice(ip)"
               class="rounded px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase transition-colors"
@@ -497,23 +500,34 @@ onMounted(async () => {
                   {{ d.is_gateway ? "●" : "" }}
                 </td>
                 <td class="px-2 py-1 text-center" @click.stop>
-                  <button
-                    v-if="blockedDevices.has(d.ip_address)"
-                    type="button"
-                    @click="unblockDevice(d.ip_address)"
-                    class="rounded px-2 py-0.5 text-[0.6rem] font-semibold uppercase transition-colors"
-                    :class="isNightshade ? 'bg-teal-500/20 text-teal-300 hover:bg-teal-500/30 border border-teal-400/30' : 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30'"
-                  >
-                    Unblock
-                  </button>
-                  <button
-                    v-else
-                    type="button"
-                    @click="blockDevice(d.ip_address)"
-                    class="rounded px-2 py-0.5 text-[0.6rem] font-semibold uppercase transition-colors border border-rose-400/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20"
-                  >
-                    Block
-                  </button>
+                  <template v-if="isAdmin">
+                    <button
+                      v-if="blockedDevices.has(d.ip_address)"
+                      type="button"
+                      @click="unblockDevice(d.ip_address)"
+                      class="rounded px-2 py-0.5 text-[0.6rem] font-semibold uppercase transition-colors"
+                      :class="isNightshade ? 'bg-teal-500/20 text-teal-300 hover:bg-teal-500/30 border border-teal-400/30' : 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30'"
+                    >
+                      Unblock
+                    </button>
+                    <button
+                      v-else
+                      type="button"
+                      @click="blockDevice(d.ip_address)"
+                      class="rounded px-2 py-0.5 text-[0.6rem] font-semibold uppercase transition-colors border border-rose-400/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20"
+                    >
+                      Block
+                    </button>
+                  </template>
+                  <template v-else>
+                    <span
+                      v-if="blockedDevices.has(d.ip_address)"
+                      class="rounded px-2 py-0.5 text-[0.6rem] font-semibold uppercase border border-rose-400/30 bg-rose-500/10 text-rose-300"
+                    >
+                      Blocked
+                    </span>
+                    <span v-else class="text-[0.65rem] text-[var(--np-muted-text)]">—</span>
+                  </template>
                 </td>
               </tr>
             </tbody>

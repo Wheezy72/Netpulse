@@ -1,20 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
-from collections import deque
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import db_session, get_current_user, require_admin
+from app.db.session import async_session_factory
+from app.models.syslog_event import SyslogEvent
 from app.models.user import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-syslog_messages: deque = deque(maxlen=5000)
 syslog_listener_task = None
 syslog_listener_running = False
 _transport = None
@@ -57,7 +61,7 @@ FACILITY_MAP = {
 def _parse_syslog_message(data: bytes, addr: tuple) -> Dict[str, Any]:
     raw = data.decode(errors="replace").strip()
     source_ip = addr[0]
-    timestamp = datetime.utcnow().isoformat()
+    timestamp = datetime.utcnow()
     facility = "unknown"
     severity = "Info"
     hostname = source_ip
@@ -77,7 +81,6 @@ def _parse_syslog_message(data: bytes, addr: tuple) -> Dict[str, Any]:
             rest,
         )
         if ts_match:
-            timestamp = ts_match.group(1)
             hostname = ts_match.group(2)
             message = ts_match.group(3)
         else:
@@ -98,10 +101,27 @@ def _parse_syslog_message(data: bytes, addr: tuple) -> Dict[str, Any]:
     }
 
 
+async def _persist_syslog_event(parsed: dict[str, Any]) -> None:
+    try:
+        async with async_session_factory() as session:
+            event = SyslogEvent(
+                timestamp=parsed["timestamp"],
+                source_ip=parsed["source_ip"],
+                facility=parsed.get("facility"),
+                severity=parsed.get("severity"),
+                hostname=parsed.get("hostname"),
+                message=parsed.get("message") or "",
+            )
+            session.add(event)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("Failed to persist syslog event: %s", exc)
+
+
 class SyslogProtocol(asyncio.DatagramProtocol):
     def datagram_received(self, data: bytes, addr: tuple) -> None:
         parsed = _parse_syslog_message(data, addr)
-        syslog_messages.appendleft(parsed)
+        asyncio.create_task(_persist_syslog_event(parsed))
 
     def error_received(self, exc: Exception) -> None:
         pass
@@ -117,32 +137,54 @@ async def get_messages(
     search: Optional[str] = Query(None),
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    filtered = list(syslog_messages)
+    conditions = []
 
     if severity:
-        filtered = [m for m in filtered if m["severity"].lower() == severity.lower()]
+        conditions.append(func.lower(func.coalesce(SyslogEvent.severity, "")) == severity.lower())
     if source_ip:
-        filtered = [m for m in filtered if m["source_ip"] == source_ip]
+        conditions.append(SyslogEvent.source_ip == source_ip)
     if search:
         search_lower = search.lower()
-        filtered = [
-            m
-            for m in filtered
-            if search_lower in m["message"].lower()
-            or search_lower in m["hostname"].lower()
-        ]
+        conditions.append(
+            func.lower(SyslogEvent.message).contains(search_lower)
+            | func.lower(func.coalesce(SyslogEvent.hostname, "")).contains(search_lower)
+        )
 
-    total = len(filtered)
-    page = filtered[offset : offset + limit]
+    base_stmt = select(SyslogEvent)
+    if conditions:
+        base_stmt = base_stmt.where(*conditions)
 
-    return {"messages": page, "total": total}
+    count_stmt = select(func.count()).select_from(base_stmt.subquery())
+    total = (await db.execute(count_stmt)).scalar_one()
+
+    page_stmt = (
+        base_stmt.order_by(SyslogEvent.timestamp.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    events = (await db.execute(page_stmt)).scalars().all()
+
+    messages = [
+        {
+            "timestamp": e.timestamp.isoformat(),
+            "source_ip": e.source_ip,
+            "facility": e.facility,
+            "severity": e.severity,
+            "hostname": e.hostname,
+            "message": e.message,
+        }
+        for e in events
+    ]
+
+    return {"messages": messages, "total": total}
 
 
 @router.post("/start")
 async def start_listener(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ) -> Dict[str, Any]:
     global syslog_listener_running, _transport
 
@@ -164,7 +206,7 @@ async def start_listener(
 
 @router.post("/stop")
 async def stop_listener(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ) -> Dict[str, Any]:
     global syslog_listener_running, _transport
 
@@ -181,18 +223,24 @@ async def stop_listener(
 
 @router.get("/status")
 async def get_status(
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
+    count_stmt = select(func.count()).select_from(SyslogEvent)
+    message_count = (await db.execute(count_stmt)).scalar_one()
+
     return {
         "running": syslog_listener_running,
-        "message_count": len(syslog_messages),
+        "message_count": message_count,
         "port": 1514,
     }
 
 
 @router.delete("/messages")
 async def clear_messages(
-    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(db_session),
+    current_user: User = Depends(require_admin),
 ) -> Dict[str, str]:
-    syslog_messages.clear()
+    await db.execute(delete(SyslogEvent))
+    await db.commit()
     return {"status": "cleared"}

@@ -24,6 +24,7 @@ from app.services.latency_monitor import monitor_latency
 from app.services.packet_capture import capture_to_pcap
 from app.services.recon import passive_arp_discovery
 from app.services.script_executor import execute_script
+from app.services.snmp_poller import poll_network_metrics as poll_network_metrics_service
 
 logger = get_task_logger(__name__)
 
@@ -136,6 +137,21 @@ def passive_arp_discovery_task() -> None:
     asyncio.run(_run())
 
 
+@celery_app.task(name="app.tasks.poll_network_metrics")
+def poll_network_metrics() -> None:
+    """Celery task that polls configured routers via SNMP and stores real metrics."""
+
+    async def _run() -> None:
+        engine, factory = _create_session_factory()
+        try:
+            async with factory() as session:
+                await poll_network_metrics_service(session)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
 @celery_app.task(name="app.tasks.packet_capture_recent_task")
 def packet_capture_recent_task(
     duration_seconds: int = 300,
@@ -153,6 +169,510 @@ def packet_capture_recent_task(
                     bpf_filter=bpf_filter,
                 )
                 return capture_id
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_run())
+
+
+@celery_app.task(name="app.tasks.index_pcap_file")
+def index_pcap_file(pcap_file_id: int, chunk_size: int = 5000) -> int:
+    """Parse a raw .pcap on disk and bulk insert packet metadata.
+
+    This is designed for the PacketBrowser: read via PcapReader (streaming) and
+    insert PcapPacket rows in chunks to avoid large in-memory lists.
+    """
+
+    async def _run() -> int:
+        import subprocess
+        import tempfile
+        from collections import defaultdict
+        from datetime import datetime
+        from pathlib import Path
+
+        from sqlalchemy import delete, insert
+
+        from app.models.packet_capture import PacketCapture
+        from app.models.pcap_meta import PcapFile, PcapPacket
+
+        engine, factory = _create_session_factory()
+        try:
+            async with factory() as session:
+                pcap_file = await session.get(PcapFile, pcap_file_id)
+                if not pcap_file:
+                    return 0
+
+                pcap_path = Path(pcap_file.filepath)
+                if not pcap_path.exists():
+                    pcap_file.index_error = "PCAP file not found on disk"
+                    pcap_file.indexed_at = datetime.utcnow()
+                    await session.commit()
+                    return 0
+
+                def _tail(text: str, limit: int = 4000) -> str:
+                    if len(text) <= limit:
+                        return text
+                    return text[-limit:]
+
+                def _parse_int(value: str | None) -> int | None:
+                    if not value or value in {"-", "(empty)"}:
+                        return None
+                    try:
+                        return int(value)
+                    except ValueError:
+                        return None
+
+                def _field_index(fields: list[str], candidates: list[str]) -> int | None:
+                    for name in candidates:
+                        try:
+                            return fields.index(name)
+                        except ValueError:
+                            continue
+                    return None
+
+                def _summarize_conn_log(path: Path) -> list[dict]:
+                    if not path.exists():
+                        return []
+
+                    convs: dict[tuple[str, str, str | None, str | None], dict[str, int]] = defaultdict(
+                        lambda: {"count": 0, "bytes_out": 0, "bytes_in": 0}
+                    )
+
+                    fields: list[str] = []
+                    orig_h_idx = None
+                    resp_h_idx = None
+                    service_idx = None
+                    proto_idx = None
+                    orig_bytes_idx = None
+                    resp_bytes_idx = None
+                    has_bytes_fields = False
+
+                    with path.open("r", encoding="utf-8", errors="replace") as f:
+                        for raw in f:
+                            line = raw.rstrip("\n")
+                            if not line:
+                                continue
+
+                            if line.startswith("#fields\t"):
+                                fields = line.split("\t")[1:]
+                                orig_h_idx = _field_index(fields, ["id.orig_h", "orig_h"])
+                                resp_h_idx = _field_index(fields, ["id.resp_h", "resp_h"])
+                                service_idx = _field_index(fields, ["service"])
+                                proto_idx = _field_index(fields, ["proto"])
+                                orig_bytes_idx = _field_index(fields, ["orig_bytes"])
+                                resp_bytes_idx = _field_index(fields, ["resp_bytes"])
+                                has_bytes_fields = orig_bytes_idx is not None or resp_bytes_idx is not None
+                                continue
+
+                            if line.startswith("#"):
+                                continue
+
+                            if not fields or orig_h_idx is None or resp_h_idx is None:
+                                continue
+
+                            parts = line.split("\t")
+                            if len(parts) < len(fields):
+                                parts += [""] * (len(fields) - len(parts))
+
+                            orig_h = parts[orig_h_idx] or None
+                            resp_h = parts[resp_h_idx] or None
+                            if not orig_h or not resp_h:
+                                continue
+
+                            service = None
+                            if service_idx is not None:
+                                service = parts[service_idx] or None
+                                if service == "-":
+                                    service = None
+
+                            proto = None
+                            if proto_idx is not None:
+                                proto = parts[proto_idx] or None
+                                if proto == "-":
+                                    proto = None
+
+                            key = (orig_h, resp_h, service, proto)
+                            agg = convs[key]
+                            agg["count"] += 1
+
+                            if orig_bytes_idx is not None:
+                                b = _parse_int(parts[orig_bytes_idx])
+                                if b is not None:
+                                    agg["bytes_out"] += b
+
+                            if resp_bytes_idx is not None:
+                                b = _parse_int(parts[resp_bytes_idx])
+                                if b is not None:
+                                    agg["bytes_in"] += b
+
+                    if not convs:
+                        return []
+
+                    top = sorted(
+                        convs.items(),
+                        key=lambda kv: (kv[1]["count"], kv[1]["bytes_out"] + kv[1]["bytes_in"]),
+                        reverse=True,
+                    )[:20]
+
+                    results: list[dict] = []
+                    for (orig_h, resp_h, service, proto), agg in top:
+                        row: dict[str, object] = {
+                            "orig_h": orig_h,
+                            "resp_h": resp_h,
+                            "service": service,
+                            "proto": proto,
+                            "count": agg["count"],
+                        }
+
+                        if has_bytes_fields:
+                            row["bytes_out"] = agg["bytes_out"]
+                            row["bytes_in"] = agg["bytes_in"]
+
+                        results.append(row)
+
+                    return results
+
+                def _summarize_dns_log(path: Path) -> list[dict]:
+                    if not path.exists():
+                        return []
+
+                    counts: dict[tuple[str, str | None], int] = defaultdict(int)
+
+                    fields: list[str] = []
+                    query_idx = None
+                    qtype_idx = None
+
+                    with path.open("r", encoding="utf-8", errors="replace") as f:
+                        for raw in f:
+                            line = raw.rstrip("\n")
+                            if not line:
+                                continue
+
+                            if line.startswith("#fields\t"):
+                                fields = line.split("\t")[1:]
+                                query_idx = _field_index(fields, ["query"])
+                                qtype_idx = _field_index(fields, ["qtype_name", "qtype"])
+                                continue
+
+                            if line.startswith("#"):
+                                continue
+
+                            if not fields or query_idx is None:
+                                continue
+
+                            parts = line.split("\t")
+                            if len(parts) < len(fields):
+                                parts += [""] * (len(fields) - len(parts))
+
+                            query = parts[query_idx] or None
+                            if not query or query == "-":
+                                continue
+
+                            qtype_name = None
+                            if qtype_idx is not None:
+                                qtype_name = parts[qtype_idx] or None
+                                if qtype_name == "-":
+                                    qtype_name = None
+
+                            counts[(query, qtype_name)] += 1
+
+                    if not counts:
+                        return []
+
+                    top = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:20]
+                    return [
+                        {"query": q, "qtype_name": t, "count": cnt}
+                        for (q, t), cnt in top
+                    ]
+
+                async def _run_zeek(pcap: Path) -> dict:
+                    summary: dict[str, object] = {
+                        "ran": False,
+                        "error": None,
+                        "command": ["zeek", "-r", str(pcap)],
+                        "timeout_seconds": None,
+                        "returncode": None,
+                        "stdout_tail": None,
+                        "stderr_tail": None,
+                        "conn": {"top_conversations": []},
+                        "dns": {"top_queries": []},
+                    }
+
+                    with tempfile.TemporaryDirectory(prefix="zeek_") as tmp:
+                        cmd = ["zeek", "-r", str(pcap)]
+                        timeout_seconds = 60
+                        try:
+                            # Basic scaling: Zeek runtime depends heavily on the PCAP size.
+                            size_mb = max(0.0, pcap.stat().st_size / (1024 * 1024))
+                            timeout_seconds = int(max(60, min(1800, 60 + (size_mb * 2))))
+                        except Exception:
+                            timeout_seconds = 600
+
+                        summary["timeout_seconds"] = timeout_seconds
+
+                        try:
+                            proc = await asyncio.to_thread(
+                                subprocess.run,
+                                cmd,
+                                cwd=tmp,
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                                timeout=timeout_seconds,
+                            )
+                            summary["ran"] = True
+                            summary["returncode"] = proc.returncode
+
+                            stdout = proc.stdout or ""
+                            stderr = proc.stderr or ""
+                            if stdout.strip():
+                                logger.info("Zeek stdout (tail): %s", _tail(stdout))
+                            if stderr.strip():
+                                logger.warning("Zeek stderr (tail): %s", _tail(stderr))
+
+                            summary["stdout_tail"] = _tail(stdout) if stdout else None
+                            summary["stderr_tail"] = _tail(stderr) if stderr else None
+
+                            if proc.returncode != 0:
+                                summary["error"] = f"zeek exited with {proc.returncode}"
+
+                        except FileNotFoundError as exc:
+                            summary["error"] = "zeek not installed"
+                            logger.warning(
+                                "Zeek binary not found; continuing with Scapy indexing: %s", exc
+                            )
+                            return summary
+                        except subprocess.TimeoutExpired as exc:
+                            summary["ran"] = True
+                            summary["error"] = "zeek timed out"
+
+                            def _to_text(value: object) -> str:
+                                if value is None:
+                                    return ""
+                                if isinstance(value, bytes):
+                                    return value.decode(errors="replace")
+                                return str(value)
+
+                            stdout = _to_text(getattr(exc, "stdout", None))
+                            stderr = _to_text(getattr(exc, "stderr", None))
+                            summary["stdout_tail"] = _tail(stdout) if stdout else None
+                            summary["stderr_tail"] = _tail(stderr) if stderr else None
+
+                            logger.warning(
+                                "Zeek timed out; continuing with Scapy indexing. stderr (tail): %s",
+                                _tail(stderr),
+                            )
+                            return summary
+                        except Exception as exc:
+                            summary["ran"] = True
+                            summary["error"] = str(exc)
+                            logger.warning(
+                                "Zeek execution failed; continuing with Scapy indexing: %s", exc
+                            )
+                            return summary
+
+                        conn_log = Path(tmp) / "conn.log"
+                        dns_log = Path(tmp) / "dns.log"
+
+                        try:
+                            summary["conn"] = {
+                                "top_conversations": await asyncio.to_thread(
+                                    _summarize_conn_log, conn_log
+                                )
+                            }
+                            summary["dns"] = {
+                                "top_queries": await asyncio.to_thread(
+                                    _summarize_dns_log, dns_log
+                                )
+                            }
+                        except Exception as exc:
+                            summary["error"] = f"failed to parse zeek logs: {exc}"
+
+                    return summary
+
+                try:
+                    pcap_file.zeek_summary = await _run_zeek(pcap_path)
+                    await session.commit()
+
+                    # Re-indexing should not duplicate rows.
+                    await session.execute(
+                        delete(PcapPacket).where(PcapPacket.file_id == pcap_file_id)
+                    )
+                    await session.commit()
+
+                    from scapy.all import IP, IPv6, PcapReader, TCP, UDP
+
+                    packet_index = 0
+                    inserted = 0
+                    batch: list[dict] = []
+
+                    reader = PcapReader(str(pcap_path))
+                    try:
+                        for pkt in reader:
+                            packet_index += 1
+
+                            src_ip = None
+                            dst_ip = None
+                            proto = None
+                            if IP in pkt:
+                                ip_layer = pkt[IP]
+                                src_ip = ip_layer.src
+                                dst_ip = ip_layer.dst
+                                proto = str(ip_layer.proto)
+                            elif IPv6 in pkt:
+                                ip_layer = pkt[IPv6]
+                                src_ip = ip_layer.src
+                                dst_ip = ip_layer.dst
+                                proto = str(ip_layer.nh)
+
+                            src_port = None
+                            dst_port = None
+                            if TCP in pkt:
+                                src_port = pkt[TCP].sport
+                                dst_port = pkt[TCP].dport
+                                proto = "TCP"
+                            elif UDP in pkt:
+                                src_port = pkt[UDP].sport
+                                dst_port = pkt[UDP].dport
+                                proto = "UDP"
+
+                            batch.append(
+                                {
+                                    "file_id": pcap_file_id,
+                                    "packet_index": packet_index,
+                                    "timestamp": datetime.utcfromtimestamp(float(pkt.time)),
+                                    "src_ip": src_ip,
+                                    "dst_ip": dst_ip,
+                                    "src_port": src_port,
+                                    "dst_port": dst_port,
+                                    "protocol": proto,
+                                    "length": len(pkt),
+                                }
+                            )
+
+                            if len(batch) >= chunk_size:
+                                await session.execute(insert(PcapPacket), batch)
+                                await session.commit()
+                                inserted += len(batch)
+                                batch.clear()
+
+                    finally:
+                        reader.close()
+
+                    if batch:
+                        await session.execute(insert(PcapPacket), batch)
+                        await session.commit()
+                        inserted += len(batch)
+
+                    pcap_file.packet_count = packet_index
+                    pcap_file.file_size_bytes = pcap_path.stat().st_size
+                    pcap_file.indexed_at = datetime.utcnow()
+                    pcap_file.index_error = None
+
+                    if pcap_file.capture_id:
+                        capture = await session.get(PacketCapture, pcap_file.capture_id)
+                        if capture:
+                            capture.packet_count = packet_index
+                            capture.file_size_bytes = pcap_file.file_size_bytes
+
+                    await session.commit()
+
+                    # Create a synthetic ScanJob summarizing the PCAP index so it can be
+                    # automatically analyzed by the Implicit AI Analyst.
+                    try:
+                        import uuid
+                        from pathlib import Path as _Path
+
+                        from sqlalchemy import func, select
+
+                        from app.models.scan_job import ScanJob, ScanJobStatus
+
+                        time_bounds = await session.execute(
+                            select(
+                                func.min(PcapPacket.timestamp),
+                                func.max(PcapPacket.timestamp),
+                            ).where(PcapPacket.file_id == pcap_file_id)
+                        )
+                        first_ts, last_ts = time_bounds.one()
+
+                        proto_counts = await session.execute(
+                            select(PcapPacket.protocol, func.count())
+                            .where(PcapPacket.file_id == pcap_file_id)
+                            .group_by(PcapPacket.protocol)
+                            .order_by(func.count().desc())
+                            .limit(10)
+                        )
+
+                        proto_lines: list[str] = [
+                            f"- {proto or 'unknown'}: {cnt}" for proto, cnt in proto_counts.all()
+                        ]
+
+                        scan_id = str(uuid.uuid4())
+                        scans_dir = _Path("data/scans")
+                        scans_dir.mkdir(parents=True, exist_ok=True)
+                        artifact_path = scans_dir / f"scan_{scan_id}.txt"
+
+                        now = datetime.utcnow()
+                        artifact = "\n".join(
+                            [
+                                "Profile: PCAP Index Summary",
+                                f"PCAP File: {pcap_file.filename}",
+                                f"Path: {pcap_file.filepath}",
+                                f"Indexed packets: {pcap_file.packet_count}",
+                                f"First packet: {first_ts.isoformat() if first_ts else '(unknown)'}",
+                                f"Last packet: {last_ts.isoformat() if last_ts else '(unknown)'}",
+                                "",
+                                "Top protocols:",
+                                *(proto_lines or ["- (none)"]),
+                                "",
+                                "Notes:",
+                                "- This is metadata only (no payloads).",
+                            ]
+                        )
+
+                        await asyncio.to_thread(
+                            artifact_path.write_text, artifact, encoding="utf-8"
+                        )
+
+                        session.add(
+                            ScanJob(
+                                id=scan_id,
+                                target=pcap_file.filename,
+                                profile="PCAP Index Summary",
+                                arguments={
+                                    "pcap_file_id": pcap_file_id,
+                                    "filepath": pcap_file.filepath,
+                                },
+                                status=ScanJobStatus.COMPLETED,
+                                result_summary={
+                                    "pcap_file_id": pcap_file_id,
+                                    "packet_count": pcap_file.packet_count,
+                                    "first_packet_at": first_ts.isoformat() if first_ts else None,
+                                    "last_packet_at": last_ts.isoformat() if last_ts else None,
+                                },
+                                artifact_path=str(artifact_path),
+                                requested_by_user_id=None,
+                                started_at=now,
+                                completed_at=now,
+                            )
+                        )
+                        await session.commit()
+
+                        try:
+                            celery_app.send_task("app.tasks.analyze_scan_results", args=[scan_id])
+                        except Exception:
+                            pass
+                    except Exception:
+                        # Indexing success should not be impacted by AI analysis failures.
+                        pass
+
+                    return inserted
+
+                except Exception as exc:
+                    pcap_file.index_error = str(exc)
+                    pcap_file.indexed_at = datetime.utcnow()
+                    await session.commit()
+                    raise
         finally:
             await engine.dispose()
 
@@ -191,5 +711,226 @@ def scheduled_scan_reminder_task() -> None:
             "  - Review the dashboard for new vulnerabilities or anomalies."
         )
         await send_system_alert(subject, body, event_type="scan")
+
+    asyncio.run(_run())
+
+
+@celery_app.task(name="app.tasks.analyze_scan_results")
+def analyze_scan_results(scan_id: str) -> None:
+    """Analyze a completed ScanJob artifact with the configured LLM.
+
+    The result is stored back into ScanJob.result_summary under the key
+    `ai_briefing` so the UI can display an "AI Analyst Briefing".
+
+    Notes:
+    - Uses provider/model from the requesting user's stored AI settings.
+    - API keys are loaded from environment variables only.
+    - Input is truncated to avoid sending huge artifacts.
+    """
+
+    async def _run() -> None:
+        import os
+        from datetime import datetime
+        from pathlib import Path
+
+        import httpx
+
+        from app.api.routes.settings import AISettings, get_ai_api_key, load_ai_settings
+        from app.models.scan_job import ScanJob, ScanJobStatus
+
+        engine, factory = _create_session_factory()
+        try:
+            async with factory() as session:
+                job = await session.get(ScanJob, scan_id)
+                if not job:
+                    return
+
+                if job.status != ScanJobStatus.COMPLETED:
+                    return
+
+                # Determine which AI config to use.
+                config: AISettings | None = None
+                if job.requested_by_user_id:
+                    config = await load_ai_settings(session, job.requested_by_user_id)
+
+                # If no per-user settings are available, fall back to a sane default
+                # if an environment key exists.
+                if not config:
+                    if os.environ.get("OPENAI_API_KEY"):
+                        config = AISettings(provider="openai", model="gpt-4o-mini", enabled=True)
+                    elif os.environ.get("ANTHROPIC_API_KEY"):
+                        config = AISettings(provider="anthropic", model="claude-3-5-sonnet-latest", enabled=True)
+
+                if not config or not config.enabled:
+                    return
+
+                # Do not re-run analysis if we already have one.
+                existing = job.result_summary or {}
+                if isinstance(existing, dict) and existing.get("ai_briefing"):
+                    return
+
+                artifact_text = ""
+                if job.artifact_path and Path(job.artifact_path).exists():
+                    # Read the tail to cap memory usage.
+                    max_bytes = 80_000
+                    p = Path(job.artifact_path)
+                    size = p.stat().st_size
+                    with p.open("rb") as f:
+                        if size > max_bytes:
+                            f.seek(size - max_bytes)
+                        artifact_text = f.read().decode(errors="replace")
+
+                if not artifact_text.strip():
+                    existing = job.result_summary or {}
+                    if isinstance(existing, dict):
+                        existing["ai_error"] = "No artifact output available to analyze"
+                        existing["ai_analyzed_at"] = datetime.utcnow().isoformat() + "Z"
+                        job.result_summary = existing
+                        await session.commit()
+                    return
+
+                system_prompt = (
+                    "You are a Senior Security Analyst. Summarize the scan results for an operator. "
+                    "Return ONE short paragraph (max ~100 words) highlighting ONLY: "
+                    "(1) Critical/high CVEs or vulnerabilities, (2) exposed sensitive ports/services, "
+                    "(3) unusual anomalies. If nothing critical is found, say so briefly."
+                )
+
+                user_prompt = (
+                    f"Scan ID: {job.id}\nTarget: {job.target}\nProfile: {job.profile}\n\n"
+                    "RAW OUTPUT (may be truncated):\n"
+                    f"{artifact_text}\n"
+                )
+
+                provider = config.provider
+                if provider in {"groq", "together", "google"}:
+                    provider = "openai"
+
+                api_key = get_ai_api_key(provider)
+
+                model_name = config.model
+                if provider == "custom" and config.custom_model:
+                    model_name = config.custom_model
+
+                async def _call_openai(base_url: str) -> str:
+                    if not api_key:
+                        raise ValueError("Missing OPENAI_API_KEY")
+                    payload = {
+                        "model": model_name,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "max_tokens": 220,
+                        "temperature": 0.2,
+                    }
+                    async with httpx.AsyncClient(timeout=60) as client:
+                        resp = await client.post(
+                            base_url,
+                            headers={"Authorization": f"Bearer {api_key}"},
+                            json=payload,
+                        )
+                        resp.raise_for_status()
+                        data = resp.json()
+                        choices = data.get("choices") or []
+                        if not choices:
+                            raise ValueError("No choices in OpenAI response")
+                        return (choices[0].get("message") or {}).get("content") or ""
+
+                async def _call_anthropic() -> str:
+                    if not api_key:
+                        raise ValueError("Missing ANTHROPIC_API_KEY")
+                    async with httpx.AsyncClient(timeout=60) as client:
+                        resp = await client.post(
+                            "https://api.anthropic.com/v1/messages",
+                            headers={
+                                "x-api-key": api_key,
+                                "anthropic-version": "2023-06-01",
+                                "content-type": "application/json",
+                            },
+                            json={
+                                "model": config.model,
+                                "max_tokens": 220,
+                                "system": system_prompt,
+                                "messages": [{"role": "user", "content": user_prompt}],
+                            },
+                        )
+                        resp.raise_for_status()
+                        data = resp.json()
+                        blocks = data.get("content") or []
+                        return " ".join(
+                            b.get("text", "") for b in blocks if b.get("type") == "text"
+                        )
+
+                async def _call_ollama() -> str:
+                    base = (config.custom_base_url or "http://localhost:11434").rstrip("/")
+                    async with httpx.AsyncClient(timeout=120) as client:
+                        resp = await client.post(
+                            f"{base}/api/chat",
+                            json={
+                                "model": config.model or config.custom_model or "llama3.1",
+                                "messages": [
+                                    {"role": "system", "content": system_prompt},
+                                    {"role": "user", "content": user_prompt},
+                                ],
+                                "stream": False,
+                            },
+                        )
+                        resp.raise_for_status()
+                        data = resp.json()
+                        return (data.get("message") or {}).get("content") or ""
+
+                async def _call_custom_openai() -> str:
+                    base = (config.custom_base_url or "").rstrip("/")
+                    if not base:
+                        raise ValueError("Missing custom_base_url")
+                    return await _call_openai(f"{base}/chat/completions")
+
+                try:
+                    briefing = ""
+                    if provider in ("openai",):
+                        briefing = await _call_openai("https://api.openai.com/v1/chat/completions")
+                    elif provider == "custom":
+                        briefing = await _call_custom_openai()
+                    elif provider == "anthropic":
+                        briefing = await _call_anthropic()
+                    elif provider == "ollama":
+                        briefing = await _call_ollama()
+                    else:
+                        raise ValueError(f"Unsupported provider: {provider}")
+
+                    briefing = briefing.strip()
+                    if not briefing:
+                        raise ValueError("Empty AI response")
+
+                    result = job.result_summary or {}
+                    if not isinstance(result, dict):
+                        result = {}
+                    result.update(
+                        {
+                            "ai_briefing": briefing,
+                            "ai_provider": provider,
+                            "ai_model": model_name,
+                            "ai_analyzed_at": datetime.utcnow().isoformat() + "Z",
+                        }
+                    )
+                    job.result_summary = result
+                    await session.commit()
+                except Exception as exc:
+                    result = job.result_summary or {}
+                    if not isinstance(result, dict):
+                        result = {}
+                    result.update(
+                        {
+                            "ai_error": str(exc),
+                            "ai_provider": provider,
+                            "ai_model": model_name,
+                            "ai_analyzed_at": datetime.utcnow().isoformat() + "Z",
+                        }
+                    )
+                    job.result_summary = result
+                    await session.commit()
+        finally:
+            await engine.dispose()
 
     asyncio.run(_run())

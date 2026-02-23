@@ -10,15 +10,15 @@ from app.db.base import Base
 
 
 class UserRole(str, Enum):
-    """Simple role model for RBAC.
+    """Role model for RBAC.
 
-    In a production deployment you might extend this with permissions tables,
-    but this covers common operational needs.
+    Roles are intentionally minimal:
+      - admin: can perform destructive operations.
+      - operator: read-only / non-destructive access.
     """
 
-    VIEWER = "viewer"
-    OPERATOR = "operator"
     ADMIN = "admin"
+    OPERATOR = "operator"
 
 
 class User(Base):
@@ -32,8 +32,8 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=True)
     auth_provider: Mapped[str] = mapped_column(String(50), default="local", nullable=False)
     role: Mapped[UserRole] = mapped_column(
-        SAEnum(UserRole),
-        default=UserRole.VIEWER,
+        SAEnum(UserRole, name="user_role"),
+        default=UserRole.OPERATOR,
         nullable=False,
         index=True,
     )

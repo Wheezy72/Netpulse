@@ -66,6 +66,16 @@ type DeviceDetail = {
   }[];
 };
 
+interface Props {
+  isAdmin: boolean;
+}
+
+const props = defineProps<Props>();
+
+const emit = defineEmits<{
+  (e: "node-selected", payload: { ip: string; mac: string | null; type: string | null }): void;
+}>();
+
 const selectedTarget = ref("");
 const selectedServices = ref<ReconTargetService[]>([]);
 const recommendations = ref<NmapRecommendation[]>([]);
@@ -87,7 +97,7 @@ const deviceDetail = ref<DeviceDetail | null>(null);
 const deviceDetailLoading = ref(false);
 const deviceDetailError = ref<string | null>(null);
 
-const canRunRecon = computed(() => true);
+const canRunRecon = computed(() => props.isAdmin);
 const hasRecommendations = computed(() => recommendations.value.length > 0);
 
 let logSocket: WebSocket | null = null;
@@ -120,6 +130,11 @@ async function runPrebuiltScriptForDevice(
   scriptName: string,
   extraParams: Record<string, unknown> = {}
 ): Promise<void> {
+  if (!props.isAdmin) {
+    actionStatus.value = "Admin access required to execute scripts.";
+    return;
+  }
+
   const node = selectedNode.value;
   if (!node) return;
 
@@ -149,6 +164,12 @@ async function runPrebuiltScriptForDevice(
 
 async function scanTarget(): Promise<void> {
   scanError.value = null;
+
+  if (!props.isAdmin) {
+    scanError.value = "Admin access required to run scans.";
+    return;
+  }
+
   const target = selectedTarget.value.trim();
   if (!target) {
     scanError.value = "Please enter a target hostname or IP address.";
@@ -289,9 +310,9 @@ async function loadTopology(): Promise<void> {
         hoveredNode.value = null;
       });
 
-      cy.on("tap", "node", (event) => {
+      cy.on("tap", "node", async (event) => {
         const data = event.target.data();
-        selectedNode.value = {
+        const tappedNode: TopologyNode = {
           id: Number(data.id),
           label: data.label,
           ip_address: data.ip,
@@ -303,7 +324,18 @@ async function loadTopology(): Promise<void> {
           vulnerability_count: Number(data.vulnerabilityCount ?? 0),
           last_seen: data.lastSeen,
         };
-        loadDeviceDetail(selectedNode.value.id);
+
+        selectedNode.value = tappedNode;
+        const detail = await loadDeviceDetail(tappedNode.id);
+
+        const mac = detail?.device.mac_address ?? null;
+        const type =
+          detail?.type_guess ??
+          detail?.device.device_type ??
+          tappedNode.device_type ??
+          null;
+
+        emit("node-selected", { ip: tappedNode.ip_address, mac, type });
       });
     } else {
       cy.elements().remove();
@@ -328,16 +360,18 @@ async function loadZones(): Promise<void> {
   }
 }
 
-async function loadDeviceDetail(deviceId: number): Promise<void> {
+async function loadDeviceDetail(deviceId: number): Promise<DeviceDetail | null> {
   deviceDetailLoading.value = true;
   deviceDetailError.value = null;
 
   try {
     const { data } = await axios.get<DeviceDetail>(`/api/devices/${deviceId}/detail`);
     deviceDetail.value = data;
+    return data;
   } catch {
     deviceDetailError.value = "Failed to load device detail.";
     deviceDetail.value = null;
+    return null;
   } finally {
     deviceDetailLoading.value = false;
   }
@@ -473,7 +507,7 @@ onBeforeUnmount(() => {
         </dl>
 
         <div
-          v-if="selectedNode && selectedNode.id === hoveredNode.id"
+          v-if="props.isAdmin && selectedNode && selectedNode.id === hoveredNode.id"
           class="mt-3 space-y-2"
         >
           <p class="text-[0.65rem] uppercase tracking-[0.16em]" style="color: var(--np-accent-primary)">

@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, db_session
+from app.api.deps import db_session, require_admin
 from app.models.user import User
 
 router = APIRouter()
@@ -67,7 +67,7 @@ TABLE_COLUMN_ALLOWLIST = {
 @router.post("/export")
 async def export_db(
     db: AsyncSession = Depends(db_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
     data: Dict[str, Any] = {}
     for table in EXPORTABLE_TABLES:
@@ -88,7 +88,7 @@ async def export_db(
 
 @router.get("/list")
 async def list_backups(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ) -> List[Dict[str, Any]]:
     backups = []
     for file in sorted(BACKUP_DIR.glob("netpulse_backup_*.json"), key=lambda f: f.stat().st_mtime, reverse=True):
@@ -104,7 +104,7 @@ async def list_backups(
 @router.delete("/{filename}")
 async def delete_backup(
     filename: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ) -> Dict[str, str]:
     if not filename.startswith(FILENAME_PATTERN) or not filename.endswith(".json"):
         raise HTTPException(status_code=400, detail="Invalid backup filename format")
@@ -124,7 +124,7 @@ async def delete_backup(
 async def restore_db(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(db_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ) -> Dict[str, Any]:
     if not file.filename or not file.filename.endswith(".json"):
         raise HTTPException(status_code=400, detail="Only JSON backup files are accepted")

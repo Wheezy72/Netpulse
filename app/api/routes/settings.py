@@ -5,10 +5,12 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import db_session, get_current_user
 from app.core.config import settings as app_settings
 from app.models.user import User
+from app.models.user_settings import UserSettings
 
 router = APIRouter()
 
@@ -46,10 +48,40 @@ class ScanSchedule(BaseModel):
     notify_on_complete: bool = True
 
 
-_notification_settings: dict[int, NotificationSettings] = {}
-_ai_settings: dict[int, AISettings] = {}
-_threat_intel_settings: dict[int, ThreatIntelSettings] = {}
-_scan_schedules: dict[int, ScanSchedule] = {}
+async def _get_user_settings(db: AsyncSession, user_id: int) -> UserSettings | None:
+    return await db.get(UserSettings, user_id)
+
+
+async def _upsert_user_settings(
+    db: AsyncSession,
+    user_id: int,
+    **fields: Any,
+) -> UserSettings:
+    row = await _get_user_settings(db, user_id)
+    if row is None:
+        row = UserSettings(user_id=user_id, **fields)
+        db.add(row)
+    else:
+        for key, value in fields.items():
+            setattr(row, key, value)
+
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+async def load_ai_settings(db: AsyncSession, user_id: int) -> AISettings | None:
+    row = await _get_user_settings(db, user_id)
+    if row is None or not row.ai_settings:
+        return None
+
+    config = AISettings(**row.ai_settings)
+
+    # Backwards-compat: normalize older providers (previously supported) to OpenAI.
+    if config.provider in {"groq", "together", "google"}:
+        config.provider = "openai"
+
+    return config
 
 
 @router.get(
@@ -58,12 +90,13 @@ _scan_schedules: dict[int, ScanSchedule] = {}
     summary="Get notification settings",
 )
 async def get_notification_settings(
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> NotificationSettings:
     """Retrieve notification settings for the current user."""
-    user_id = current_user.id
-    if user_id in _notification_settings:
-        return _notification_settings[user_id]
+    row = await _get_user_settings(db, current_user.id)
+    if row and row.notification_settings:
+        return NotificationSettings(**row.notification_settings)
     return NotificationSettings()
 
 
@@ -74,11 +107,15 @@ async def get_notification_settings(
 )
 async def update_notification_settings(
     settings: NotificationSettings,
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> NotificationSettings:
     """Update notification settings for the current user."""
-    user_id = current_user.id
-    _notification_settings[user_id] = settings
+    await _upsert_user_settings(
+        db,
+        current_user.id,
+        notification_settings=settings.model_dump(),
+    )
     return settings
 
 
@@ -117,29 +154,24 @@ def is_ai_key_configured(provider: str) -> bool:
     summary="Get AI settings",
 )
 async def get_ai_settings(
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Retrieve AI settings for the current user."""
-    user_id = current_user.id
-    if user_id in _ai_settings:
-        s = _ai_settings[user_id]
+    config = await load_ai_settings(db, current_user.id)
+    s = config or AISettings()
 
-        provider = s.provider
-        if provider in {"groq", "together", "google"}:
-            provider = "openai"
+    provider = s.provider
+    if provider in {"groq", "together", "google"}:
+        provider = "openai"
 
-        return {
-            "provider": provider,
-            "model": s.model,
-            "enabled": s.enabled,
-            "api_key_configured": is_ai_key_configured(provider),
-            "custom_base_url": s.custom_base_url,
-            "custom_model": s.custom_model,
-        }
-    defaults = AISettings()
     return {
-        **defaults.model_dump(),
-        "api_key_configured": is_ai_key_configured(defaults.provider),
+        "provider": provider,
+        "model": s.model,
+        "enabled": s.enabled,
+        "api_key_configured": is_ai_key_configured(provider),
+        "custom_base_url": s.custom_base_url,
+        "custom_model": s.custom_model,
     }
 
 
@@ -149,16 +181,20 @@ async def get_ai_settings(
 )
 async def update_ai_settings(
     settings: AISettings,
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Update AI settings for the current user."""
-    user_id = current_user.id
 
     # Backwards-compat: normalize older providers (previously supported) to OpenAI.
     if settings.provider in {"groq", "together", "google"}:
         settings.provider = "openai"
 
-    _ai_settings[user_id] = settings
+    await _upsert_user_settings(
+        db,
+        current_user.id,
+        ai_settings=settings.model_dump(),
+    )
 
     return {
         "provider": settings.provider,
@@ -179,21 +215,20 @@ def _is_abuseipdb_key_configured() -> bool:
     summary="Get threat intelligence settings",
 )
 async def get_threat_intel_settings(
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Retrieve threat intelligence settings for the current user."""
-    user_id = current_user.id
-    if user_id in _threat_intel_settings:
-        s = _threat_intel_settings[user_id]
-        return {
-            "abuseipdb_enabled": s.abuseipdb_enabled,
-            "abuseipdb_api_key_configured": _is_abuseipdb_key_configured(),
-            "abuseipdb_max_age": s.abuseipdb_max_age,
-        }
-    defaults = ThreatIntelSettings()
+    row = await _get_user_settings(db, current_user.id)
+    if row and row.threat_intel_settings:
+        s = ThreatIntelSettings(**row.threat_intel_settings)
+    else:
+        s = ThreatIntelSettings()
+
     return {
-        **defaults.model_dump(),
+        "abuseipdb_enabled": s.abuseipdb_enabled,
         "abuseipdb_api_key_configured": _is_abuseipdb_key_configured(),
+        "abuseipdb_max_age": s.abuseipdb_max_age,
     }
 
 
@@ -203,17 +238,22 @@ async def get_threat_intel_settings(
 )
 async def update_threat_intel_settings(
     settings: ThreatIntelSettings,
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Update threat intelligence settings for the current user."""
-    user_id = current_user.id
-    _threat_intel_settings[user_id] = settings
-    
+    await _upsert_user_settings(
+        db,
+        current_user.id,
+        threat_intel_settings=settings.model_dump(),
+    )
+
     from app.services.abuseipdb import abuseipdb_service
+
     abuseipdb_key = os.environ.get("ABUSEIPDB_API_KEY") or app_settings.abuseipdb_api_key
     if settings.abuseipdb_enabled and abuseipdb_key:
         abuseipdb_service.api_token = abuseipdb_key
-    
+
     return {
         "abuseipdb_enabled": settings.abuseipdb_enabled,
         "abuseipdb_api_key_configured": _is_abuseipdb_key_configured(),
@@ -227,12 +267,13 @@ async def update_threat_intel_settings(
     summary="Get scan schedule settings",
 )
 async def get_scan_schedule(
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> ScanSchedule:
     """Retrieve scan schedule settings for the current user."""
-    user_id = current_user.id
-    if user_id in _scan_schedules:
-        return _scan_schedules[user_id]
+    row = await _get_user_settings(db, current_user.id)
+    if row and row.scan_schedule:
+        return ScanSchedule(**row.scan_schedule)
     return ScanSchedule()
 
 
@@ -243,11 +284,15 @@ async def get_scan_schedule(
 )
 async def update_scan_schedule(
     schedule: ScanSchedule,
+    db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> ScanSchedule:
     """Update scan schedule settings for the current user."""
-    user_id = current_user.id
-    _scan_schedules[user_id] = schedule
+    await _upsert_user_settings(
+        db,
+        current_user.id,
+        scan_schedule=schedule.model_dump(),
+    )
     return schedule
 
 
