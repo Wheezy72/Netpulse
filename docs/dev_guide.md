@@ -62,7 +62,7 @@ Netpulse/
 │   │   └── ...
 │   ├── services/
 │   │   └── latency_monitor.py  # Background latency check logic
-│   └── main.py                 # App entry, lifespan, background tasks
+│   └── main.py                 # App entry + lifespan (schema init only)
 ├── frontend/                   # Vue 3 frontend
 │   ├── src/
 │   │   ├── assets/styles.css   # Theme system (Nightshade + SysAdmin)
@@ -192,14 +192,15 @@ Themes use CSS custom properties (`--np-accent-primary`, `--np-border`, `--np-su
 
 ## Background Tasks
 
-NetPulse uses in-process asyncio loops (no Celery/Redis required):
+NetPulse runs recurring monitoring work via **Celery Beat + Celery workers** (with Redis as broker/backend).
+The FastAPI web process does **not** run long-lived asyncio loops.
 
-| Task | Interval | Description |
+| Task | Schedule | Description |
 |------|----------|-------------|
-| Latency Monitor | 15 seconds | Pings gateway, ISP, and Cloudflare IPs |
-| Uptime Monitor | Per-target (min 10s) | Checks active uptime targets (ping or HTTP) |
+| Latency Monitor | every 10 seconds | Pings gateway, ISP, and Cloudflare IPs |
+| Uptime Monitor | every 10 seconds (per-target interval enforced) | Checks active uptime targets (ping or HTTP) |
 
-Both tasks start on application boot and gracefully cancel on shutdown.
+If you run the web server without `celery_worker` + `celery_beat`, dashboards will load but periodic metrics/uptime updates will not run.
 
 ---
 
@@ -246,9 +247,8 @@ Both tasks start on application boot and gracefully cancel on shutdown.
 | `PULSE_ISP_IP` | ISP DNS for latency monitoring | `8.8.8.8` |
 | `PULSE_CLOUDFLARE_IP` | Cloudflare DNS for latency monitoring | `1.1.1.1` |
 | `CORS_ALLOW_ORIGINS` | Allowed CORS origins | `["http://localhost:5000"]` |
-| `AI_PROVIDER` | AI provider name | `openai` |
-| `AI_API_KEY` | AI provider API key | (optional) |
-| `AI_MODEL` | AI model name | `gpt-4o-mini` |
+| `OPENAI_API_KEY` | OpenAI API key for AI assistant features | (optional) |
+| `ANTHROPIC_API_KEY` | Anthropic API key for AI assistant features | (optional) |
 | `ABUSEIPDB_API_KEY` | AbuseIPDB API key | (optional) |
 
 ---
@@ -271,7 +271,10 @@ docker-compose up -d --build
 | Service | Image | Port | Description |
 |---------|-------|------|-------------|
 | `db` | postgres:16-alpine | 5432 (internal) | PostgreSQL with health check |
+| `redis` | redis:7-alpine | 6379 (internal) | Celery broker/backend |
 | `app` | Custom (multi-stage) | 8000 | Backend + built frontend |
+| `celery_worker` | Custom (multi-stage) | (none) | Executes background jobs |
+| `celery_beat` | Custom (multi-stage) | (none) | Schedules periodic jobs |
 
 ### Environment Configuration
 

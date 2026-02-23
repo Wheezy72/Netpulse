@@ -27,7 +27,7 @@ A self-hosted network monitoring console for home labs and enterprise NOC/SOC te
 git clone <repo-url> && cd netpulse
 docker compose up -d
 
-# That's it. Open http://localhost:8080
+# That's it. Open http://localhost:8000
 ```
 
 **What you get:**
@@ -45,8 +45,9 @@ Create a `.env` file to customize:
 SECRET_KEY=your-secure-secret-key
 ENABLE_EMAIL_ALERTS=false
 ENABLE_WHATSAPP_ALERTS=false
-AI_PROVIDER=openai
-AI_API_KEY=your-key-here
+# AI Assistant (optional)
+# OPENAI_API_KEY=sk-...
+# ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 </details>

@@ -117,20 +117,21 @@ class IPReputationResult:
 class AbuseIPDBService:
     BASE_URL = "https://api.abuseipdb.com/api/v2"
     
-    def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or getattr(settings, "ABUSEIPDB_API_KEY", None)
+    def __init__(self, api_token: Optional[str] = None):
+        # Prefer explicit token, otherwise load from application settings/environment.
+        self.api_token = api_token or settings.abuseipdb_api_key
         self._client: Optional[httpx.AsyncClient] = None
     
     @property
     def is_configured(self) -> bool:
-        return bool(self.api_key)
+        return bool(self.api_token)
     
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 base_url=self.BASE_URL,
                 headers={
-                    "Key": self.api_key or "",
+                    "Key": self.api_token or "",
                     "Accept": "application/json",
                 },
                 timeout=30.0,

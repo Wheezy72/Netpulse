@@ -35,6 +35,6 @@ start "netpulse-frontend" cmd /c "npm run dev"
 
 echo NetPulse stack starting...
 echo   Backend:  http://localhost:8000
-echo   Frontend: http://localhost:5173
+echo   Frontend: http://localhost:5000
 echo Close these windows or press Ctrl+C in each to stop.
 endlocal

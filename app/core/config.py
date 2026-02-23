@@ -102,7 +102,9 @@ class Settings(BaseSettings):
 
     # CORS configuration
     cors_allow_origins: List[str] = Field(
-        default_factory=lambda: ["http://localhost:8080"]
+        # Vite dev server defaults to 5173, but this repo's vite.config.ts uses 5000.
+        # Include both common defaults.
+        default_factory=lambda: ["http://localhost:5000", "http://localhost:5173"]
     )
 
     # Script governance.

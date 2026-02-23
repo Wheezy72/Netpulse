@@ -47,6 +47,9 @@ DEFAULT_POLL_OIDS = [
 ]
 
 IP_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9.\-:]+$")
+COMMUNITY_PATTERN = re.compile(r"^[\x21-\x7e]{1,64}$")
+OID_PATTERN = re.compile(r"^\d+(?:\.\d+)*$")
+ALLOWED_VERSIONS = {"1", "2c", "3"}
 
 
 def _parse_snmp_line(line: str) -> Optional[Dict[str, Any]]:
@@ -78,15 +81,28 @@ async def snmp_poll(
 ) -> Dict[str, Any]:
     if not IP_PATTERN.match(request.target):
         raise HTTPException(status_code=400, detail="Invalid target format")
+    if request.version not in ALLOWED_VERSIONS:
+        raise HTTPException(status_code=400, detail="Invalid SNMP version")
+    if not COMMUNITY_PATTERN.match(request.community):
+        raise HTTPException(status_code=400, detail="Invalid SNMP community string")
 
     oids = request.oids if request.oids else DEFAULT_POLL_OIDS
+    if len(oids) > 50:
+        raise HTTPException(status_code=400, detail="Too many OIDs requested")
+
+    normalized_oids: List[str] = []
+    for oid in oids:
+        oid = str(oid).strip().lstrip(".")
+        if not OID_PATTERN.match(oid):
+            raise HTTPException(status_code=400, detail=f"Invalid OID: {oid}")
+        normalized_oids.append(oid)
 
     snmpget_path = shutil.which("snmpget")
     if not snmpget_path:
         raise HTTPException(status_code=503, detail="snmpget is not installed on this system")
 
     version_flag = f"-v{request.version}"
-    cmd = [snmpget_path, version_flag, "-c", request.community, request.target] + oids
+    cmd = [snmpget_path, version_flag, "-c", request.community, request.target] + normalized_oids
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -122,12 +138,18 @@ async def snmp_walk(
 ) -> Dict[str, Any]:
     if not IP_PATTERN.match(request.target):
         raise HTTPException(status_code=400, detail="Invalid target format")
+    if not COMMUNITY_PATTERN.match(request.community):
+        raise HTTPException(status_code=400, detail="Invalid SNMP community string")
+
+    request_oid = request.oid.strip().lstrip(".")
+    if not OID_PATTERN.match(request_oid):
+        raise HTTPException(status_code=400, detail="Invalid OID format")
 
     snmpwalk_path = shutil.which("snmpwalk")
     if not snmpwalk_path:
         raise HTTPException(status_code=503, detail="snmpwalk is not installed on this system")
 
-    cmd = [snmpwalk_path, "-v2c", "-c", request.community, request.target, request.oid]
+    cmd = [snmpwalk_path, "-v2c", "-c", request.community, request.target, request_oid]
 
     try:
         proc = await asyncio.create_subprocess_exec(

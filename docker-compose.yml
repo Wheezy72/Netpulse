@@ -80,5 +80,24 @@ services:
       - NET_RAW
       - NET_ADMIN
 
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: netpulse-beat
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "app.core.celery_app.celery_app", "beat", "--loglevel=info"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@db:5432/netpulse
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
+      ENVIRONMENT: production
+      SCRIPTS_BASE_DIR: /app/scripts
+
 volumes:
   db_data:

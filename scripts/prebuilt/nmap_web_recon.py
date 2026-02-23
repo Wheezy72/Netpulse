@@ -11,7 +11,10 @@ permission to test. This wraps common Nmap web flags into a repeatable
 Smart Script.
 """
 
+import re
 from typing import Any, Dict, List
+
+TARGET_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9.\-:/]+$")
 
 
 async def run(ctx: Any) -> Dict[str, Any]:
@@ -31,6 +34,10 @@ async def run(ctx: Any) -> Dict[str, Any]:
     if not target:
         ctx.logger("nmap_web_recon: missing 'target' in ctx.params")
         return {"error": "missing target"}
+
+    if len(target) > 256 or not TARGET_PATTERN.match(target):
+        ctx.logger("nmap_web_recon: invalid target")
+        return {"error": "invalid target"}
 
     ctx.logger(f"nmap_web_recon: running web profile against {target}")
 
@@ -72,19 +79,19 @@ async def run(ctx: Any) -> Dict[str, Any]:
     if code != 0:
         ctx.logger(f"nmap_web_recon: nmap exited with code {code}")
         if stderr:
-            ctx.logger(stderr.decode(errors=\"ignore\"))
+            ctx.logger(stderr.decode(errors="ignore"))
         return {
-            \"status\": \"error\",
-            \"return_code\": code,
-            \"stderr\": stderr.decode(errors=\"ignore\"),
+            "status": "error",
+            "return_code": code,
+            "stderr": stderr.decode(errors="ignore"),
         }
 
-    output_text = stdout.decode(errors=\"ignore\")
-    ctx.logger(\"nmap_web_recon: scan completed\")
+    output_text = stdout.decode(errors="ignore")
+    ctx.logger("nmap_web_recon: scan completed")
 
     return {
-        \"status\": \"ok\",
-        \"target\": target,
-        \"return_code\": code,
-        \"output\": output_text,
+        "status": "ok",
+        "target": target,
+        "return_code": code,
+        "output": output_text,
     }

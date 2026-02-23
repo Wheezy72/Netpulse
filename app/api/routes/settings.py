@@ -3,12 +3,10 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
-from app.api.deps import db_session, get_current_user
+from app.api.deps import get_current_user
 from app.core.config import settings as app_settings
 from app.models.user import User
 
@@ -84,18 +82,34 @@ async def update_notification_settings(
     return settings
 
 
-def _is_ai_key_configured(provider: str) -> bool:
-    env_map = {
-        "openai": "OPENAI_API_KEY",
-        "anthropic": "ANTHROPIC_API_KEY",
-        "google": "GOOGLE_AI_API_KEY",
-        "groq": "GROQ_API_KEY",
-        "together": "TOGETHER_API_KEY",
-    }
-    env_var = env_map.get(provider)
-    if env_var:
-        return bool(os.environ.get(env_var))
-    return False
+AI_PROVIDER_ENV_VARS: dict[str, str] = {
+    "openai": "OPENAI_API_KEY",
+    "custom": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
+
+
+def ai_provider_env_var(provider: str) -> str | None:
+    return AI_PROVIDER_ENV_VARS.get(provider)
+
+
+def get_ai_api_key(provider: str) -> str | None:
+    """Return the API key for the selected provider from environment.
+
+    Per deployment policy, we never store provider keys per-user.
+    """
+
+    env_var = ai_provider_env_var(provider)
+    if not env_var:
+        return None
+    return os.environ.get(env_var)
+
+
+def is_ai_key_configured(provider: str) -> bool:
+    env_var = ai_provider_env_var(provider)
+    if not env_var:
+        return False
+    return bool(os.environ.get(env_var))
 
 
 @router.get(
@@ -109,18 +123,23 @@ async def get_ai_settings(
     user_id = current_user.id
     if user_id in _ai_settings:
         s = _ai_settings[user_id]
+
+        provider = s.provider
+        if provider in {"groq", "together", "google"}:
+            provider = "openai"
+
         return {
-            "provider": s.provider,
+            "provider": provider,
             "model": s.model,
             "enabled": s.enabled,
-            "api_key_configured": _is_ai_key_configured(s.provider),
+            "api_key_configured": is_ai_key_configured(provider),
             "custom_base_url": s.custom_base_url,
             "custom_model": s.custom_model,
         }
     defaults = AISettings()
     return {
         **defaults.model_dump(),
-        "api_key_configured": _is_ai_key_configured(defaults.provider),
+        "api_key_configured": is_ai_key_configured(defaults.provider),
     }
 
 
@@ -134,13 +153,18 @@ async def update_ai_settings(
 ) -> dict[str, Any]:
     """Update AI settings for the current user."""
     user_id = current_user.id
+
+    # Backwards-compat: normalize older providers (previously supported) to OpenAI.
+    if settings.provider in {"groq", "together", "google"}:
+        settings.provider = "openai"
+
     _ai_settings[user_id] = settings
-    
+
     return {
         "provider": settings.provider,
         "model": settings.model,
         "enabled": settings.enabled,
-        "api_key_configured": _is_ai_key_configured(settings.provider),
+        "api_key_configured": is_ai_key_configured(settings.provider),
         "custom_base_url": settings.custom_base_url,
         "custom_model": settings.custom_model,
     }
@@ -188,7 +212,7 @@ async def update_threat_intel_settings(
     from app.services.abuseipdb import abuseipdb_service
     abuseipdb_key = os.environ.get("ABUSEIPDB_API_KEY") or app_settings.abuseipdb_api_key
     if settings.abuseipdb_enabled and abuseipdb_key:
-        abuseipdb_service.api_key = abuseipdb_key
+        abuseipdb_service.api_token = abuseipdb_key
     
     return {
         "abuseipdb_enabled": settings.abuseipdb_enabled,
@@ -267,9 +291,6 @@ async def get_env_status(
     return {
         "openai_api_key": bool(os.environ.get("OPENAI_API_KEY")),
         "anthropic_api_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
-        "google_ai_api_key": bool(os.environ.get("GOOGLE_AI_API_KEY")),
-        "groq_api_key": bool(os.environ.get("GROQ_API_KEY")),
-        "together_api_key": bool(os.environ.get("TOGETHER_API_KEY")),
         "abuseipdb_api_key": bool(os.environ.get("ABUSEIPDB_API_KEY") or app_settings.abuseipdb_api_key),
         "google_oauth_client_id": bool(os.environ.get("GOOGLE_OAUTH_CLIENT_ID") or app_settings.google_oauth_client_id),
         "google_oauth_client_secret": bool(os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET") or app_settings.google_oauth_client_secret),

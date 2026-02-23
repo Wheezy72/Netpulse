@@ -22,6 +22,47 @@ BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 EXPORTABLE_TABLES = ["devices", "uptime_targets", "network_segments"]
 FILENAME_PATTERN = "netpulse_backup_"
 
+TABLE_COLUMN_ALLOWLIST = {
+    "devices": {
+        "id",
+        "hostname",
+        "ip_address",
+        "mac_address",
+        "device_type",
+        "os",
+        "vendor",
+        "zone",
+        "is_gateway",
+        "last_seen",
+        "created_at",
+        "updated_at",
+    },
+    "uptime_targets": {
+        "id",
+        "name",
+        "target",
+        "check_type",
+        "interval_seconds",
+        "is_active",
+        "created_at",
+        "last_status",
+        "last_checked_at",
+        "last_latency_ms",
+        "consecutive_failures",
+    },
+    "network_segments": {
+        "id",
+        "name",
+        "cidr",
+        "description",
+        "vlan_id",
+        "is_active",
+        "scan_enabled",
+        "created_at",
+        "updated_at",
+    },
+}
+
 
 @router.post("/export")
 async def export_db(
@@ -106,6 +147,10 @@ async def restore_db(
         if not isinstance(rows, list):
             continue
 
+        allowed_columns = TABLE_COLUMN_ALLOWLIST.get(table_name)
+        if not allowed_columns:
+            continue
+
         try:
             await db.execute(text(f"DELETE FROM {table_name}"))
         except Exception:
@@ -115,12 +160,28 @@ async def restore_db(
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            columns = ", ".join(row.keys())
-            placeholders = ", ".join(f":{k}" for k in row.keys())
+
+            invalid_columns = [k for k in row.keys() if k not in allowed_columns]
+            if invalid_columns:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Backup contains invalid column(s) for table '{table_name}': "
+                        + ", ".join(invalid_columns)
+                    ),
+                )
+
+            filtered_row = {k: v for k, v in row.items() if k in allowed_columns}
+            if not filtered_row:
+                continue
+
+            column_names = list(filtered_row.keys())
+            columns = ", ".join(column_names)
+            placeholders = ", ".join(f":{k}" for k in column_names)
             try:
                 await db.execute(
                     text(f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"),
-                    row,
+                    filtered_row,
                 )
                 inserted += 1
             except Exception:

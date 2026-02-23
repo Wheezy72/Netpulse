@@ -10,26 +10,22 @@ Use this only against systems you control or have explicit permission
 to test.
 """
 
+import re
 from typing import Any, Dict
+
+TARGET_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9.\-:/]+$")
 
 
 async def run(ctx: Any) -> Dict[str, Any]:
-    """
-    Execute an SMB-focused Nmap profile against ctx.params["target"].
-
-    Parameters
-    ----------
-    ctx.params["target"] : str
-        Target hostname or IP.
-
-    Returns
-    -------
-    dict with Nmap arguments and raw output.
-    """
+    """Execute an SMB-focused Nmap profile against ctx.params["target"]."""
     target = str(ctx.params.get("target", "")).strip()
     if not target:
         ctx.logger("nmap_smb_audit: missing 'target' in ctx.params")
         return {"error": "missing target"}
+
+    if len(target) > 256 or not TARGET_PATTERN.match(target):
+        ctx.logger("nmap_smb_audit: invalid target")
+        return {"error": "invalid target"}
 
     ctx.logger(f"nmap_smb_audit: running SMB profile against {target}")
 
@@ -40,7 +36,8 @@ async def run(ctx: Any) -> Dict[str, Any]:
         "nmap",
         "-sV",
         "-Pn",
-        "-p", "139,445",
+        "-p",
+        "139,445",
         "--script",
         ",".join(
             [
@@ -68,19 +65,19 @@ async def run(ctx: Any) -> Dict[str, Any]:
     if code != 0:
         ctx.logger(f"nmap_smb_audit: nmap exited with code {code}")
         if stderr:
-            ctx.logger(stderr.decode(errors=\"ignore\"))
+            ctx.logger(stderr.decode(errors="ignore"))
         return {
-            \"status\": \"error\",
-            \"return_code\": code,
-            \"stderr\": stderr.decode(errors=\"ignore\"),
+            "status": "error",
+            "return_code": code,
+            "stderr": stderr.decode(errors="ignore"),
         }
 
-    output_text = stdout.decode(errors=\"ignore\")
-    ctx.logger(\"nmap_smb_audit: scan completed\")
+    output_text = stdout.decode(errors="ignore")
+    ctx.logger("nmap_smb_audit: scan completed")
 
     return {
-        \"status\": \"ok\",
-        \"target\": target,
-        \"return_code\": code,
-        \"output\": output_text,
+        "status": "ok",
+        "target": target,
+        "return_code": code,
+        "output": output_text,
     }
