@@ -265,12 +265,19 @@ class ScanResult(BaseModel):
     status: str
     output: Optional[str] = None
     file_path: Optional[str] = None
+    result_summary: Optional[Dict[str, Any]] = None
+    ai_briefing: Optional[str] = None
 
 
 def _job_to_scan_result(job: ScanJob, include_output: bool = True) -> ScanResult:
     output = _read_artifact_tail(job.artifact_path) if include_output else None
 
     command = (job.arguments or {}).get("command") or ""
+    summary: Dict[str, Any] | None = job.result_summary if isinstance(job.result_summary, dict) else None
+    ai_briefing: str | None = None
+    if summary:
+        ai_briefing = summary.get("ai_briefing")
+
     return ScanResult(
         id=job.id,
         command=command,
@@ -281,6 +288,8 @@ def _job_to_scan_result(job: ScanJob, include_output: bool = True) -> ScanResult
         status=job.status.value,
         output=output,
         file_path=job.artifact_path,
+        result_summary=summary,
+        ai_briefing=ai_briefing,
     )
 
 
@@ -368,6 +377,7 @@ async def execute_nmap(
 @router.get("/result/{scan_id}", response_model=ScanResult)
 async def get_scan_result(
     scan_id: str,
+    include_output: bool = True,
     db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> ScanResult:
@@ -375,7 +385,7 @@ async def get_scan_result(
     job = await db.get(ScanJob, scan_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Scan not found")
-    return _job_to_scan_result(job)
+    return _job_to_scan_result(job, include_output=include_output)
 
 
 @router.get("/history", response_model=List[ScanResult])

@@ -1,12 +1,23 @@
 from __future__ import annotations
 
-from typing import Any, List, Optional
+import asyncio
+import hashlib
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Any, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import db_session, get_current_user
+from app.core.celery_app import celery_app
+from app.models.router_config_baseline import RouterConfigBaseline
+from app.models.scan_job import ScanJob, ScanJobStatus
 from app.models.user import User
+from app.services.routers import create_router_driver
 
 router = APIRouter()
 
@@ -303,3 +314,153 @@ async def list_categories(
 ) -> List[str]:
     """Get all available scan categories."""
     return list(set(s.category for s in ALL_SCANS))
+
+
+class ConfigDriftCheckRequest(BaseModel):
+    driver: Literal["mikrotik", "netmiko"]
+    host: str
+    username: str
+    password: str
+    port: int | None = None
+
+    # Netmiko-only options
+    device_type: str | None = None
+    enable_secret: str | None = None
+
+
+class ConfigDriftCheckResponse(BaseModel):
+    scan_id: str
+    changed: bool
+    old_hash: str | None
+    new_hash: str
+    artifact_path: str
+
+
+@router.post(
+    "/config_drift_check",
+    response_model=ConfigDriftCheckResponse,
+    summary="Check router config drift and update baseline",
+)
+async def config_drift_check(
+    request: ConfigDriftCheckRequest,
+    db: AsyncSession = Depends(db_session),
+    current_user: User = Depends(get_current_user),
+) -> ConfigDriftCheckResponse:
+    if request.driver == "netmiko" and not request.device_type:
+        raise HTTPException(status_code=400, detail="device_type is required for netmiko driver")
+
+    driver = create_router_driver(
+        request.driver,
+        host=request.host,
+        username=request.username,
+        password=request.password,
+        port=request.port,
+        device_type=request.device_type,
+        enable_secret=request.enable_secret,
+    )
+
+    config = await driver.get_config()
+    config_bytes = config.encode("utf-8", errors="replace")
+    new_hash = hashlib.sha256(config_bytes).hexdigest()
+
+    effective_port = driver.port
+
+    result = await db.execute(
+        select(RouterConfigBaseline).where(
+            RouterConfigBaseline.host == request.host,
+            RouterConfigBaseline.driver == request.driver,
+            RouterConfigBaseline.username == request.username,
+            RouterConfigBaseline.port == effective_port,
+        )
+    )
+    baseline = result.scalar_one_or_none()
+
+    old_hash = baseline.config_hash if baseline else None
+    changed = old_hash != new_hash
+
+    now = datetime.utcnow()
+    if baseline:
+        baseline.config_hash = new_hash
+        baseline.last_seen_at = now
+    else:
+        baseline = RouterConfigBaseline(
+            host=request.host,
+            driver=request.driver,
+            username=request.username,
+            port=effective_port,
+            config_hash=new_hash,
+            last_seen_at=now,
+        )
+        db.add(baseline)
+
+    scan_id = str(uuid.uuid4())
+    scans_dir = Path("data/scans")
+    scans_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = scans_dir / f"scan_{scan_id}.txt"
+
+    config_lines = config.splitlines()
+    preview = "\n".join(config_lines[:200])
+
+    header_lines = [
+        f"Profile: Config Drift Check",
+        f"Target: {request.host}",
+        f"Driver: {request.driver}",
+        f"Username: {request.username}",
+        f"Port: {effective_port}",
+        f"Time: {now.isoformat()}Z",
+        "= " * 30,
+        f"Old hash: {old_hash or '(none)'}",
+        f"New hash: {new_hash}",
+        "",
+    ]
+
+    if changed:
+        header_lines.append("Baseline updated (hash changed).")
+        header_lines.append("")
+        header_lines.append("Config preview (first ~200 lines):")
+        header_lines.append(preview)
+        header_lines.append("")
+    else:
+        header_lines.append("No drift detected (hash unchanged).")
+        header_lines.append("")
+
+    artifact_content = "\n".join(header_lines)
+    await asyncio.to_thread(artifact_path.write_text, artifact_content, encoding="utf-8")
+
+    job = ScanJob(
+        id=scan_id,
+        target=request.host,
+        profile="Config Drift Check",
+        arguments={
+            "driver": request.driver,
+            "username": request.username,
+            "port": effective_port,
+            "device_type": request.device_type,
+        },
+        status=ScanJobStatus.COMPLETED,
+        result_summary={
+            "changed": changed,
+            "old_hash": old_hash,
+            "new_hash": new_hash,
+        },
+        artifact_path=str(artifact_path),
+        requested_by_user_id=current_user.id,
+        started_at=now,
+        completed_at=now,
+    )
+    db.add(job)
+
+    await db.commit()
+
+    try:
+        celery_app.send_task("app.tasks.analyze_scan_results", args=[scan_id])
+    except Exception:
+        pass
+
+    return ConfigDriftCheckResponse(
+        scan_id=scan_id,
+        changed=changed,
+        old_hash=old_hash,
+        new_hash=new_hash,
+        artifact_path=str(artifact_path),
+    )

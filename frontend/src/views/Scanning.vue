@@ -1,8 +1,8 @@
-<script setup lang="ts">
-import axios from "axios";
-import { computed, onMounted, ref } from "vue";
+<scr</old_code><new_code>import axios from "axios";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import LiveTerminal from "../components/LiveTerminal.vue";
+vue";
 
 type Theme = "nightshade" | "sysadmin";
 
@@ -40,6 +40,19 @@ const selectedPlaybookId = ref<string>("");
 
 const currentScanId = ref<string | null>(null);
 
+type ScanMeta = {
+  id: string;
+  status: string;
+  result_summary?: Record<string, any> | null;
+  ai_briefing?: string | null;
+  completed_at?: string | null;
+};
+
+const scanMeta = ref<ScanMeta | null>(null);
+const scanMetaLoading = ref(false);
+
+let scanPollTimer: number | null = null;
+
 function getWsBase(): string {
   const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || window.location.origin;
   return String(apiBase).replace(/^http/, "ws");
@@ -50,16 +63,54 @@ const terminalStreamUrl = computed(() => {
   if (!currentScanId.value) return null;
   const token = localStorage.getItem("np-token");
   if (!token) return null;
-  return `${getWsBase()}/api/ws/scans/${currentScanId.value}?token=${encodeURIComponent(token)}`;
-});
-
-const downloadUrl = computed(() => {
+  return `${getWsBase()}/api/ws/scans/${currentScanId.value}?token=${encodeURIComp</old_code><new_code>const downloadUrl = computed(() => {
   if (!currentScanId.value) return null;
   const filename = `scan_${currentScanId.value}.txt`;
   return `/api/nmap/files/${filename}`;
 });
 
+const aiBriefing = computed(() => scanMeta.value?.ai_briefing || null);
+const aiError = computed(() => (scanMeta.value?.result_summary as any)?.ai_error || null);
+
 const selectedPlaybook = computed(() => playbooks.value.find((p) => p.id === selectedPlaybookId.value) || null);
+
+async function fetchScanMeta(): Promise<void> {
+  if (!currentScanId.value) return;
+  scanMetaLoading.value = true;
+  try {
+    const { data } = await axios.get<ScanMeta>(`/api/nmap/result/${currentScanId.value}`, {
+      params: { include_output: false },
+    });
+    scanMeta.value = data;
+  } catch {
+    // ignore transient polling errors
+  } finally {
+    scanMetaLoading.value = false;
+  }
+}
+
+function stopScanPolling(): void {
+  if (scanPollTimer) {
+    window.clearInterval(scanPollTimer);
+    scanPollTimer = null;
+  }
+}
+
+function startScanPolling(): void {
+  stopScanPolling();
+  scanMeta.value = null;
+  void fetchScanMeta();
+  scanPollTimer = window.setInterval(async () => {
+    await fetchScanMeta();
+    const meta = scanMeta.value;
+    if (!meta) return;
+
+    const done = meta.status === "completed" || meta.status === "failed";
+    if (done && (meta.ai_briefing || meta.result_summary)) {
+      stopScanPolling();
+    }
+  }, 2000);
+}
 
 function commandForPreset(p: TargetedPresetId): string {
   switch (p) {
@@ -80,7 +131,7 @@ function commandForPreset(p: TargetedPresetId): string {
 
 async function startScan(command: string): Promise<void> {
   if (!target.value.trim()) {
-    emit("toast", "warning", "Please enter a target (IP, hostname, or CIDR)."");
+    emit("toast", "warning", "Please enter a target (IP, hostname, or CIDR)." );
     return;
   }
 
@@ -144,6 +195,22 @@ async function loadPlaybooks(): Promise<void> {
 
 onMounted(() => {
   loadPlaybooks();
+});
+
+watch(
+  () => currentScanId.value,
+  (next) => {
+    if (next) {
+      startScanPolling();
+    } else {
+      stopScanPolling();
+      scanMeta.value = null;
+    }
+  }
+);
+
+onBeforeUnmount(() => {
+  stopScanPolling();
 });
 </script>
 
@@ -300,8 +367,27 @@ onMounted(() => {
       </div>
     </div>
 
-    <div class="h-[70vh] xl:h-[calc(100vh-9rem)]">
-      <LiveTerminal :title="terminalTitle" :stream-url="terminalStreamUrl" :theme="theme" />
+    <div class="h-[70vh] xl:h-[calc(100vh-9rem)] flex flex-col gap-4">
+      <div class="np-panel">
+        <div class="flex items-center justify-between px-4 py-3 border-b" :style="{ borderColor: 'var(--np-border)' }">
+          <h3 class="np-panel-title">AI Analyst Briefing</h3>
+          <div class="text-[0.7rem] text-[var(--np-muted-text)]">
+            <span v-if="!currentScanId">Idle</span>
+            <span v-else-if="scanMetaLoading">Analyzing…</span>
+            <span v-else>Auto</span>
+          </div>
+        </div>
+        <div class="p-4">
+          <p v-if="!currentScanId" class="text-xs text-[var(--np-muted-text)]">Run a scan to generate an automatic analyst summary.</p>
+          <p v-else-if="aiBriefing" class="text-sm leading-relaxed" :class="isNightshade ? 'text-teal-100' : 'text-amber-100'">{{ aiBriefing }}</p>
+          <p v-else-if="aiError" class="text-xs" :class="isNightshade ? 'text-rose-300' : 'text-rose-200'">AI analysis failed: {{ aiError }}</p>
+          <p v-else class="text-xs text-[var(--np-muted-text)]">Waiting for scan completion and AI analysis…</p>
+        </div>
+      </div>
+
+      <div class="flex-1 min-h-0">
+        <LiveTerminal :title="terminalTitle" :stream-url="terminalStreamUrl" :theme="theme" />
+      </div>
     </div>
   </div>
 </template>

@@ -150,6 +150,15 @@ async def run_scan_job(
 
     await db.commit()
 
+    if proc.returncode == 0:
+        try:
+            from app.core.celery_app import celery_app
+
+            celery_app.send_task("app.tasks.analyze_scan_results", args=[job.id])
+        except Exception:
+            # Scan completion should not fail if the broker/worker is unavailable.
+            pass
+
     # For now, we keep the artifact even when save_results is False because it
     # is useful for postmortem/debugging. Future: cleanup job.
     _ = save_results

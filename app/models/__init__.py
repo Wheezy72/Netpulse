@@ -4,6 +4,7 @@ from app.models.metric import Metric
 from app.models.network_segment import NetworkSegment
 from app.models.packet_capture import PacketCapture, PacketCaptureStatus, PacketHeader
 from app.models.pcap_meta import PcapFile, PcapPacket
+from app.models.router_config_baseline import RouterConfigBaseline
 from app.models.scan_job import ScanJob
 from app.models.script_job import ScriptJob
 from app.models.syslog_event import SyslogEvent
@@ -21,6 +22,7 @@ __all__ = [
     "PacketHeader",
     "PcapFile",
     "PcapPacket",
+    "RouterConfigBaseline",
     "ScanJob",
     "ScriptJob",
     "SyslogEvent",
