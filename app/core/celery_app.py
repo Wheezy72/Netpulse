@@ -25,6 +25,11 @@ def create_celery_app() -> Celery:
                 "task": "app.tasks.monitor_latency_task",
                 "schedule": 10.0,
             },
+            # Uptime: run due checks (per-target interval is enforced in the task)
+            "uptime-monitor-every-10s": {
+                "task": "app.tasks.uptime_monitor_task",
+                "schedule": 10.0,
+            },
             # Eye: passive ARP discovery every 60 seconds
             "passive-arp-discovery-every-60s": {
                 "task": "app.tasks.passive_arp_discovery_task",

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
+import re
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -15,6 +17,26 @@ from app.models.user import UserRole
 from app.models.uptime import UptimeCheck, UptimeTarget
 
 router = APIRouter(prefix="/uptime", tags=["uptime"])
+
+PING_TARGET_PATTERN = re.compile(
+    r"^(?=.{1,255}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"
+)
+
+
+def _validate_ping_target(target: str) -> bool:
+    if not target or len(target) > 255:
+        return False
+    if target.startswith("-"):
+        return False
+    if any(ch.isspace() for ch in target):
+        return False
+
+    try:
+        ipaddress.ip_address(target)
+        return True
+    except ValueError:
+        return bool(PING_TARGET_PATTERN.match(target))
 
 
 class UptimeTargetCreate(BaseModel):
@@ -115,6 +137,8 @@ async def create_uptime_target(
         raise HTTPException(status_code=400, detail="check_type must be 'ping' or 'http'")
     if body.interval_seconds < 10:
         raise HTTPException(status_code=400, detail="interval_seconds must be >= 10")
+    if body.check_type == "ping" and not _validate_ping_target(body.target):
+        raise HTTPException(status_code=400, detail="Invalid ping target")
 
     target = UptimeTarget(
         name=body.name,
@@ -236,6 +260,14 @@ async def _perform_check(target: UptimeTarget) -> UptimeCheck:
 
 
 async def _ping_check(target: UptimeTarget, now: datetime) -> UptimeCheck:
+    if not _validate_ping_target(target.target):
+        return UptimeCheck(
+            target_id=target.id,
+            timestamp=now,
+            status="down",
+            error_message="Invalid ping target",
+        )
+
     try:
         process = await asyncio.create_subprocess_exec(
             "ping", "-c", "3", "-W", "2", target.target,

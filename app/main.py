@@ -11,12 +11,8 @@ Responsible for:
 - Serving the built Vue SPA frontend.
 """
 
-import asyncio
-import logging
 import os
-import secrets
 from contextlib import asynccontextmanager
-from datetime import datetime
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -78,90 +74,22 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-_bg_logger = logging.getLogger("netpulse.background")
-
-
-async def _latency_monitor_loop() -> None:
-    from app.db.session import async_session_factory
-    from app.services.latency_monitor import monitor_latency
-
-    await asyncio.sleep(5)
-    while True:
-        try:
-            async with async_session_factory() as session:
-                await monitor_latency(session)
-            _bg_logger.debug("Latency check completed")
-        except asyncio.CancelledError:
-            break
-        except Exception as exc:
-            _bg_logger.warning("Latency monitor error: %s", exc)
-        await asyncio.sleep(15)
-
-
-async def _uptime_monitor_loop() -> None:
-    from app.db.session import async_session_factory
-    from app.models.uptime import UptimeTarget, UptimeCheck
-    from app.api.routes.uptime import _perform_check
-    from sqlalchemy import select
-
-    await asyncio.sleep(10)
-    while True:
-        try:
-            async with async_session_factory() as session:
-                result = await session.execute(
-                    select(UptimeTarget).where(UptimeTarget.is_active == True)
-                )
-                targets = list(result.scalars().all())
-
-                now = datetime.utcnow()
-                for target in targets:
-                    if target.last_checked_at:
-                        elapsed = (now - target.last_checked_at).total_seconds()
-                        if elapsed < target.interval_seconds:
-                            continue
-
-                    check = await _perform_check(target)
-                    session.add(check)
-
-                    target.last_status = check.status
-                    target.last_checked_at = check.timestamp
-                    target.last_latency_ms = check.latency_ms
-                    if check.status == "up":
-                        target.consecutive_failures = 0
-                    else:
-                        target.consecutive_failures += 1
-
-                await session.commit()
-        except asyncio.CancelledError:
-            break
-        except Exception as exc:
-            _bg_logger.warning("Uptime monitor error: %s", exc)
-        await asyncio.sleep(15)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """FastAPI lifespan handler.
+
+    Note: recurring monitoring jobs (Pulse latency monitoring, uptime checks, etc.)
+    are intentionally NOT run in the web process. They are scheduled via Celery Beat
+    (see app/core/celery_app.py) and executed by Celery workers.
+    """
     setup_logging()
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    bg_task = asyncio.create_task(_latency_monitor_loop())
-    uptime_task = asyncio.create_task(_uptime_monitor_loop())
-
     try:
         yield
     finally:
-        bg_task.cancel()
-        uptime_task.cancel()
-        try:
-            await bg_task
-        except asyncio.CancelledError:
-            pass
-        try:
-            await uptime_task
-        except asyncio.CancelledError:
-            pass
         await engine.dispose()
 
 

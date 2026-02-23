@@ -4,11 +4,11 @@ import logging
 import re
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from app.api.deps import get_current_user
-from app.api.routes.settings import _ai_settings, AISettings
+from app.api.routes.settings import AISettings, _ai_settings, ai_provider_env_var, get_ai_api_key
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -683,13 +683,33 @@ EXTENDED_TOPICS: dict[str, tuple[str, list[str]]] = {
 def get_ai_response(message: str, user_id: int, context: Optional[str] = None) -> tuple[str, List[str]]:
     ai_config = _ai_settings.get(user_id)
 
-    if ai_config and ai_config.enabled and ai_config.api_key:
-        try:
-            return _call_external_ai(message, ai_config, context)
-        except Exception as exc:
-            logger.warning("External AI call failed: %s", exc)
+    if not ai_config or not ai_config.enabled:
+        return _fallback_response(message)
 
-    return _fallback_response(message)
+    api_key: str | None = None
+
+    if ai_config.provider != "ollama":
+        api_key = get_ai_api_key(ai_config.provider)
+        if not api_key:
+            env_var = ai_provider_env_var(ai_config.provider)
+            if env_var:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"AI Assistant is enabled, but {env_var} is not set in the environment.",
+                )
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"AI provider '{ai_config.provider}' is not supported. "
+                    "Supported providers: openai, anthropic, ollama, custom."
+                ),
+            )
+
+    try:
+        return _call_external_ai(message, ai_config, api_key, context)
+    except Exception as exc:
+        logger.warning("External AI call failed: %s", exc)
+        return _fallback_response(message)
 
 
 def _fallback_response(message: str) -> tuple[str, list[str]]:
@@ -783,7 +803,12 @@ def _general_answer(message: str) -> tuple[str, list[str]]:
     )
 
 
-def _call_external_ai(message: str, config: AISettings, context: Optional[str]) -> tuple[str, List[str]]:
+def _call_external_ai(
+    message: str,
+    config: AISettings,
+    api_key: str | None,
+    context: Optional[str],
+) -> tuple[str, List[str]]:
     import httpx
 
     system_prompt = (
@@ -831,22 +856,21 @@ def _call_external_ai(message: str, config: AISettings, context: Optional[str]) 
     if context:
         user_content = f"Context: {context}\n\nQuestion: {message}"
 
-    if config.provider == "openai" or config.provider in ("groq", "together", "custom"):
+    if config.provider in ("openai", "custom"):
         base_url = "https://api.openai.com/v1/chat/completions"
-        if config.provider == "groq":
-            base_url = "https://api.groq.com/openai/v1/chat/completions"
-        elif config.provider == "together":
-            base_url = "https://api.together.xyz/v1/chat/completions"
-        elif config.provider == "custom" and config.custom_base_url:
+        if config.provider == "custom" and config.custom_base_url:
             base_url = config.custom_base_url.rstrip("/") + "/chat/completions"
 
         model = config.model
         if config.provider == "custom" and config.custom_model:
             model = config.custom_model
 
+        if not api_key:
+            raise ValueError("Missing OPENAI_API_KEY")
+
         response = httpx.post(
             base_url,
-            headers={"Authorization": f"Bearer {config.api_key}"},
+            headers={"Authorization": f"Bearer {api_key}"},
             json={
                 "model": model,
                 "messages": [
@@ -866,10 +890,13 @@ def _call_external_ai(message: str, config: AISettings, context: Optional[str]) 
         return ai_response, ["Tell me more", "What else should I know?", "Can you give an example?"]
 
     elif config.provider == "anthropic":
+        if not api_key:
+            raise ValueError("Missing ANTHROPIC_API_KEY")
+
         response = httpx.post(
             "https://api.anthropic.com/v1/messages",
             headers={
-                "x-api-key": config.api_key,
+                "x-api-key": api_key,
                 "anthropic-version": "2023-06-01",
                 "content-type": "application/json",
             },
@@ -887,23 +914,7 @@ def _call_external_ai(message: str, config: AISettings, context: Optional[str]) 
         ai_response = " ".join(b.get("text", "") for b in content_blocks if b.get("type") == "text")
         return ai_response, ["Tell me more", "What else should I know?", "Can you give an example?"]
 
-    elif config.provider == "google":
-        response = httpx.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{config.model}:generateContent?key={config.api_key}",
-            json={
-                "contents": [{"parts": [{"text": f"{system_prompt}\n\n{user_content}"}]}],
-                "generationConfig": {"maxOutputTokens": 1000},
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()
-        candidates = data.get("candidates", [])
-        if candidates:
-            parts = candidates[0].get("content", {}).get("parts", [])
-            ai_response = " ".join(p.get("text", "") for p in parts)
-            return ai_response, ["Tell me more", "What else should I know?", "Can you give an example?"]
-        raise ValueError("No candidates in Google AI response")
+    
 
     elif config.provider == "ollama":
         base_url = config.custom_base_url or "http://localhost:11434"

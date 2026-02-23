@@ -188,10 +188,9 @@ if not exist ".env" (
         echo # WhatsApp Alerts
         echo ENABLE_WHATSAPP_ALERTS=false
         echo.
-        echo # AI Provider
-        echo AI_PROVIDER=openai
-        echo AI_API_KEY=
-        echo AI_MODEL=gpt-4o-mini
+        echo # AI Assistant (optional)
+        echo # OPENAI_API_KEY=sk-...
+        echo # ANTHROPIC_API_KEY=sk-ant-...
     ) > .env
     echo [+] .env created
 ) else (
@@ -247,7 +246,7 @@ echo.
 echo   Start the stack:
 echo     scripts\windows_run_stack.bat
 echo.
-echo   Then open: http://localhost:5173
+echo   Then open: http://localhost:5000
 echo.
 
 pause

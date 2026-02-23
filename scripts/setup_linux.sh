@@ -204,10 +204,9 @@ WHATSAPP_API_URL=
 WHATSAPP_API_TOKEN=
 WHATSAPP_RECIPIENT=
 
-# AI Provider
-AI_PROVIDER=openai
-AI_API_KEY=
-AI_MODEL=gpt-4o-mini
+# AI Assistant (optional)
+# OPENAI_API_KEY=sk-...
+# ANTHROPIC_API_KEY=sk-ant-...
 EOF
   print_success ".env created with secure random SECRET_KEY"
 else
@@ -265,5 +264,5 @@ echo ""
 echo "  Start the stack:"
 echo -e "    ${CYAN}./scripts/run_stack.sh${NC}"
 echo ""
-echo "  Then open: http://localhost:5173"
+echo "  Then open: http://localhost:5000"
 echo ""

@@ -335,11 +335,35 @@ async def ai_generate_script(
     payload: AIScriptRequest,
     current_user: User = Depends(get_current_user),
 ) -> AIScriptResponse:
-    from app.api.routes.settings import _ai_settings
+    from app.api.routes.settings import _ai_settings, ai_provider_env_var, get_ai_api_key
 
     ai_config = _ai_settings.get(current_user.id)
 
-    if ai_config and ai_config.enabled and ai_config.api_key:
+    if ai_config and ai_config.enabled:
+        provider = ai_config.provider
+        api_key = get_ai_api_key(provider)
+        env_var = ai_provider_env_var(provider)
+
+        if provider == "ollama":
+            raise HTTPException(
+                status_code=400,
+                detail="AI script generation does not support ollama. Choose OpenAI or Anthropic, or disable AI to use fallback generation.",
+            )
+
+        if not api_key:
+            if env_var:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"AI is enabled, but {env_var} is not set in the environment.",
+                )
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"AI provider '{provider}' is not supported for script generation. "
+                    "Supported providers: openai, anthropic, custom."
+                ),
+            )
+
         try:
             import httpx
 
@@ -358,7 +382,7 @@ async def ai_generate_script(
                 "- Use ctx.logger() for all output messages\n"
                 "- Use ctx.params.get(\"target\", \"default\") for target parameters\n"
                 "- Use ctx.db for database queries (SQLAlchemy async)\n"
-                "- For shell commands, use subprocess.run() with timeout\n"
+                "- For OS commands, use subprocess.run([...], timeout=...) with shell=False (do not enable the shell)\n"
                 "- Always return a dict with results\n"
                 "- Include proper error handling\n"
                 "- Keep scripts focused and practical for network operations\n\n"
@@ -370,27 +394,68 @@ async def ai_generate_script(
             if payload.target:
                 user_msg += f"\nTarget: {payload.target}"
 
-            response = httpx.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {ai_config.api_key}"},
-                json={
-                    "model": ai_config.model or "gpt-4o-mini",
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_msg},
-                    ],
-                    "max_tokens": 1500,
-                },
-                timeout=30,
-            )
-            response.raise_for_status()
-            data = response.json()
+            if provider in ("openai", "custom"):
+                base_url = "https://api.openai.com/v1/chat/completions"
+                if provider == "custom" and ai_config.custom_base_url:
+                    base_url = ai_config.custom_base_url.rstrip("/") + "/chat/completions"
 
-            choices = data.get("choices")
-            if not choices:
-                raise ValueError("No choices in AI response")
+                model = ai_config.model or "gpt-4o-mini"
+                if provider == "custom" and ai_config.custom_model:
+                    model = ai_config.custom_model
 
-            ai_text = choices[0]["message"]["content"]
+                response = httpx.post(
+                    base_url,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_msg},
+                        ],
+                        "max_tokens": 1500,
+                    },
+                    timeout=30,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                choices = data.get("choices")
+                if not choices:
+                    raise ValueError("No choices in AI response")
+
+                ai_text = choices[0]["message"]["content"]
+
+            elif provider == "anthropic":
+                response = httpx.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": ai_config.model,
+                        "max_tokens": 1500,
+                        "system": system_prompt,
+                        "messages": [{"role": "user", "content": user_msg}],
+                    },
+                    timeout=30,
+                )
+                response.raise_for_status()
+                data = response.json()
+                content_blocks = data.get("content", [])
+                ai_text = "\n".join(
+                    b.get("text", "") for b in content_blocks if b.get("type") == "text"
+                )
+
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"AI provider '{provider}' is not supported for script generation. "
+                        "Supported providers: openai, anthropic, custom."
+                    ),
+                )
 
             code_match = re.search(r"```python\s*\n(.*?)```", ai_text, re.DOTALL)
             if code_match:
@@ -406,6 +471,8 @@ async def ai_generate_script(
             full_script = f'"""\nAuto-generated NetPulse script\nDescription: {payload.description}\n"""\n\n{script_code}\n'
 
             return AIScriptResponse(script=full_script, filename=filename, explanation=explanation)
+        except HTTPException:
+            raise
         except Exception as exc:
             import logging
             logging.getLogger(__name__).warning("AI script generation failed: %s", exc)

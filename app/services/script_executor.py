@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import inspect
+import ipaddress
+import re
 import textwrap
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,6 +14,27 @@ from typing import Any, Callable, Dict, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.script_job import ScriptJob, ScriptJobStatus
+
+
+_HOSTNAME_PATTERN = re.compile(
+    r"^(?=.{1,255}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"
+)
+
+
+def _validate_ping_target(target: str) -> bool:
+    if not target or len(target) > 255:
+        return False
+    if target.startswith("-"):
+        return False
+    if any(ch.isspace() for ch in target):
+        return False
+
+    try:
+        ipaddress.ip_address(target)
+        return True
+    except ValueError:
+        return bool(_HOSTNAME_PATTERN.match(target))
 
 
 @dataclass
@@ -73,6 +96,16 @@ class NetworkTools:
         """
         def _ping_sync() -> dict:
             import subprocess
+
+            if not _validate_ping_target(target):
+                return {"target": target, "success": False, "error": "Invalid target"}
+
+            if count < 1 or count > 10:
+                return {"target": target, "success": False, "error": "Invalid count"}
+
+            if timeout < 1 or timeout > 10:
+                return {"target": target, "success": False, "error": "Invalid timeout"}
+
             try:
                 result = subprocess.run(
                     ["ping", "-c", str(count), "-W", str(timeout), target],

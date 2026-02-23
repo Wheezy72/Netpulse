@@ -580,11 +580,8 @@ const settingsTabs: { key: SettingsTab; label: string; icon: string }[] = [
                 >
                   <option value="openai">OpenAI</option>
                   <option value="anthropic">Anthropic (Claude)</option>
-                  <option value="google">Google (Gemini)</option>
-                  <option value="groq">Groq</option>
-                  <option value="together">Together AI</option>
                   <option value="ollama">Ollama (Local)</option>
-                  <option value="custom">Custom / Other</option>
+                  <option value="custom">Custom / OpenAI-compatible</option>
                 </select>
               </label>
 
@@ -628,19 +625,7 @@ const settingsTabs: { key: SettingsTab; label: string; icon: string }[] = [
                     <option value="claude-3-opus-20240229">Claude 3 Opus</option>
                     <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
                   </template>
-                  <template v-else-if="aiSettings.provider === 'google'">
-                    <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-                    <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
-                  </template>
-                  <template v-else-if="aiSettings.provider === 'groq'">
-                    <option value="llama-3.1-70b-versatile">Llama 3.1 70B</option>
-                    <option value="llama-3.1-8b-instant">Llama 3.1 8B</option>
-                    <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
-                  </template>
-                  <template v-else-if="aiSettings.provider === 'together'">
-                    <option value="meta-llama/Llama-3-70b-chat-hf">Llama 3 70B</option>
-                    <option value="mistralai/Mixtral-8x7B-Instruct-v0.1">Mixtral 8x7B</option>
-                  </template>
+                  
                   <template v-else-if="aiSettings.provider === 'ollama'">
                     <option value="llama3.1">Llama 3.1</option>
                     <option value="mistral">Mistral</option>

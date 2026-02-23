@@ -8,9 +8,11 @@ closed lab environments to reproduce traffic patterns and validate IDS/IPS
 behaviour. Requires raw packet send permissions on the chosen interface.
 """
 
-import subprocess
+import re
 from pathlib import Path
 from typing import Any
+
+IFACE_PATTERN = re.compile(r"^[a-zA-Z0-9_.:-]{1,32}$")
 
 from scapy.all import rdpcap, sendp  # type: ignore[import-untyped]
 
@@ -31,7 +33,7 @@ def run(ctx: Any) -> dict:
     """
     params = getattr(ctx, "params", {}) or {}
     pcap_path = params.get("pcap_path")
-    iface = params.get("iface", "eth0")
+    iface = str(params.get("iface", "eth0")).strip()
 
     if not pcap_path:
         raise ValueError("pcap_path is required")
@@ -46,6 +48,9 @@ def run(ctx: Any) -> dict:
     if not packets:
         ctx.logger("replay_pcap: no packets in file")
         return {"status": "empty", "pcap_path": pcap_path}
+
+    if not IFACE_PATTERN.match(iface):
+        raise ValueError("iface is not a valid interface name")
 
     ctx.logger(f"replay_pcap: sending {len(packets)} packets via {iface}")
 

@@ -43,11 +43,57 @@ def _create_session_factory():
 @celery_app.task(name="app.tasks.monitor_latency_task")
 def monitor_latency_task() -> None:
     """Celery task wrapper for the Pulse module's latency monitoring."""
+
     async def _run() -> None:
         engine, factory = _create_session_factory()
         try:
             async with factory() as session:
                 await monitor_latency(session)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+@celery_app.task(name="app.tasks.uptime_monitor_task")
+def uptime_monitor_task() -> None:
+    """Celery task that runs due uptime checks and persists results."""
+
+    async def _run() -> None:
+        from datetime import datetime
+
+        from sqlalchemy import select
+
+        from app.api.routes.uptime import _perform_check
+        from app.models.uptime import UptimeTarget
+
+        engine, factory = _create_session_factory()
+        try:
+            async with factory() as session:
+                result = await session.execute(
+                    select(UptimeTarget).where(UptimeTarget.is_active == True)
+                )
+                targets = list(result.scalars().all())
+
+                now = datetime.utcnow()
+                for target in targets:
+                    if target.last_checked_at:
+                        elapsed = (now - target.last_checked_at).total_seconds()
+                        if elapsed < target.interval_seconds:
+                            continue
+
+                    check = await _perform_check(target)
+                    session.add(check)
+
+                    target.last_status = check.status
+                    target.last_checked_at = check.timestamp
+                    target.last_latency_ms = check.latency_ms
+                    if check.status == "up":
+                        target.consecutive_failures = 0
+                    else:
+                        target.consecutive_failures += 1
+
+                await session.commit()
         finally:
             await engine.dispose()
 
