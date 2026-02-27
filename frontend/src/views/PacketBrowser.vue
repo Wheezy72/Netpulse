@@ -141,6 +141,14 @@ function pickZeekSummary(payload: unknown): ZeekSummary | null {
   return obj as ZeekSummary;
 }
 
+function getApiErrorMessage(e: any, fallback: string): string {
+  return (
+    e?.response?.data?.error?.message ||
+    e?.response?.data?.detail ||
+    fallback
+  );
+}
+
 const hasZeekSummary = computed(() => {
   if (!zeekSummary.value) return false;
   return Object.keys(zeekSummary.value).length > 0;
@@ -221,10 +229,14 @@ async function loadPcaps(): Promise<void> {
   }
 }
 
+let packetsRequestId = 0;
 async function loadPackets(reset = false): Promise<void> {
   if (!selectedPcapId.value) return;
-  if (packetsLoading.value) return;
+  if (!reset && packetsLoading.value) return;
   if (!reset && !hasMore.value) return;
+
+  const pcapId = selectedPcapId.value;
+  const requestId = (packetsRequestId += 1);
 
   packetsLoading.value = true;
   packetsError.value = null;
@@ -238,9 +250,11 @@ async function loadPackets(reset = false): Promise<void> {
       params.cursor = nextCursor.value;
     }
 
-    const { data } = await axios.get<PacketQueryResponse>(`/api/pcaps/${selectedPcapId.value}/packets`, {
+    const { data } = await axios.get<PacketQueryResponse>(`/api/pcaps/${pcapId}/packets`, {
       params,
     });
+
+    if (requestId !== packetsRequestId) return;
 
     if (reset) {
       packets.value = data.items;
@@ -259,9 +273,12 @@ async function loadPackets(reset = false): Promise<void> {
       hasMore.value = true;
     }
   } catch (e: any) {
-    packetsError.value = e?.response?.data?.detail || "Failed to load packets";
+    if (requestId !== packetsRequestId) return;
+    packetsError.value = getApiErrorMessage(e, "Failed to load packets");
   } finally {
-    packetsLoading.value = false;
+    if (requestId === packetsRequestId) {
+      packetsLoading.value = false;
+    }
   }
 }
 
@@ -291,15 +308,8 @@ async function loadZeekSummary(reset = false): Promise<void> {
   } catch (e: any) {
     if (requestId !== zeekSummaryRequestId) return;
 
-    if (e?.response?.status === 404) {
-      // Summary not available yet; keep the UI clean.
-      zeekSummary.value = null;
-      zeekSummaryError.value = null;
-      return;
-    }
-
     zeekSummary.value = null;
-    zeekSummaryError.value = e?.response?.data?.detail || "Failed to load Zeek summary";
+    zeekSummaryError.value = getApiErrorMessage(e, "Failed to load Zeek summary");
   } finally {
     if (requestId === zeekSummaryRequestId) {
       zeekSummaryLoading.value = false;
@@ -308,6 +318,7 @@ async function loadZeekSummary(reset = false): Promise<void> {
 }
 
 function refreshPackets(): void {
+  packetsRequestId += 1;
   packets.value = [];
   nextCursor.value = null;
   hasMore.value = true;

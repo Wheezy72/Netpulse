@@ -2,26 +2,26 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import logging
 import re
 import shutil
 from datetime import datetime
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, require_admin, require_role
+from app.core.config import settings
 from app.models.enforcement_action import EnforcementAction
 from app.models.user import User
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 MAC_PATTERN = re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$")
-
-_IPTABLES_TABLE = "raw"
-_IPTABLES_CHAIN = "PREROUTING"
 
 
 def _validate_ip(ip: str) -> bool:
@@ -30,50 +30,6 @@ def _validate_ip(ip: str) -> bool:
         return isinstance(ipaddress.ip_address(ip), ipaddress.IPv4Address)
     except ValueError:
         return False
-
-
-async def _run_cmd(argv: Sequence[str], timeout_s: float = 5.0) -> tuple[int, str, str]:
-    proc = await asyncio.create_subprocess_exec(
-        *argv,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
-    except asyncio.TimeoutError:
-        proc.kill()
-        stdout, stderr = await proc.communicate()
-        return 124, stdout.decode(errors="replace"), stderr.decode(errors="replace")
-
-    return proc.returncode or 0, stdout.decode(errors="replace"), stderr.decode(errors="replace")
-
-
-async def _iptables_rule_exists(iptables_path: str, rule_args: Sequence[str]) -> bool:
-    rc, _, _ = await _run_cmd(
-        [iptables_path, "-t", _IPTABLES_TABLE, "-C", _IPTABLES_CHAIN, *rule_args],
-        timeout_s=5.0,
-    )
-    return rc == 0
-
-
-async def _iptables_ensure_rule(iptables_path: str, rule_args: Sequence[str]) -> None:
-    if await _iptables_rule_exists(iptables_path, rule_args):
-        return
-    await _run_cmd(
-        [iptables_path, "-t", _IPTABLES_TABLE, "-I", _IPTABLES_CHAIN, *rule_args],
-        timeout_s=5.0,
-    )
-
-
-async def _iptables_delete_rule(iptables_path: str, rule_args: Sequence[str]) -> None:
-    # Remove all matching instances (defensive) with a small cap.
-    for _ in range(6):
-        if not await _iptables_rule_exists(iptables_path, rule_args):
-            return
-        await _run_cmd(
-            [iptables_path, "-t", _IPTABLES_TABLE, "-D", _IPTABLES_CHAIN, *rule_args],
-            timeout_s=5.0,
-        )
 
 
 async def _get_latest_action(db: AsyncSession, ip: str) -> EnforcementAction | None:
@@ -113,8 +69,9 @@ class ArpFixRequest(BaseModel):
     correct_mac: str
 
 
-class KillConnectionRequest(BaseModel):
+class AttemptKickRequest(BaseModel):
     ip: str
+    duration_s: float = Field(8.0, ge=1.0, le=60.0)
 
 
 @router.post("/block")
@@ -127,21 +84,7 @@ async def block_device(
         raise HTTPException(status_code=400, detail="Invalid IP address format")
 
     current_state = await _get_current_state(db, request.ip)
-
-    iptables_path = shutil.which("iptables")
     note: str | None = None
-
-    if not iptables_path:
-        note = "iptables not available - recorded in database only"
-    else:
-        # Kill-switch: drop traffic to/from the device as early as possible.
-        # Use raw/PREROUTING to bypass conntrack.
-        try:
-            await _iptables_ensure_rule(iptables_path, ["-s", request.ip, "-j", "DROP"])
-            await _iptables_ensure_rule(iptables_path, ["-d", request.ip, "-j", "DROP"])
-        except Exception:
-            # Best-effort: still record the intent in DB.
-            note = "Failed to apply iptables rule; recorded in database only"
 
     # Idempotent behaviour: if it's already blocked/quarantined, don't error.
     if current_state not in {"block", "quarantine"}:
@@ -156,12 +99,15 @@ async def block_device(
         await db.commit()
         await db.refresh(action)
         timestamp = action.created_at.isoformat()
+        state = action.action_type
     else:
         timestamp = datetime.utcnow().isoformat()
-        note = note or f"Device {request.ip} was already {current_state}"
+        state = current_state
+        note = f"Device {request.ip} was already {current_state}"
 
     payload: Dict[str, Any] = {
         "status": "blocked",
+        "state": state,
         "ip": request.ip,
         "reason": request.reason,
         "timestamp": timestamp,
@@ -182,18 +128,7 @@ async def unblock_device(
         raise HTTPException(status_code=400, detail="Invalid IP address format")
 
     current_state = await _get_current_state(db, request.ip)
-
-    iptables_path = shutil.which("iptables")
     note: str | None = None
-
-    if iptables_path:
-        try:
-            await _iptables_delete_rule(iptables_path, ["-s", request.ip, "-j", "DROP"])
-            await _iptables_delete_rule(iptables_path, ["-d", request.ip, "-j", "DROP"])
-        except Exception:
-            note = "Failed to remove iptables rule(s); recorded in database only"
-    else:
-        note = "iptables not available - recorded in database only"
 
     # Idempotent: if it's already unblocked, return OK without inserting noise.
     if current_state in {"block", "quarantine"}:
@@ -208,9 +143,9 @@ async def unblock_device(
         )
         await db.commit()
     else:
-        note = note or f"Device {request.ip} was not blocked"
+        note = f"Device {request.ip} was not blocked"
 
-    payload: Dict[str, Any] = {"status": "unblocked", "ip": request.ip}
+    payload: Dict[str, Any] = {"status": "unblocked", "state": "unblock", "ip": request.ip}
     if note:
         payload["note"] = note
     return payload
@@ -262,18 +197,6 @@ async def quarantine_device(
     if not MAC_PATTERN.match(request.mac):
         raise HTTPException(status_code=400, detail="Invalid MAC address format")
 
-    iptables_path = shutil.which("iptables")
-    note: str | None = None
-
-    if iptables_path:
-        try:
-            await _iptables_ensure_rule(iptables_path, ["-s", request.ip, "-j", "DROP"])
-            await _iptables_ensure_rule(iptables_path, ["-d", request.ip, "-j", "DROP"])
-        except Exception:
-            note = "Failed to apply iptables rule; recorded in database only"
-    else:
-        note = "iptables not available - recorded in database only"
-
     action = EnforcementAction(
         ip=request.ip,
         mac=request.mac,
@@ -285,16 +208,14 @@ async def quarantine_device(
     await db.commit()
     await db.refresh(action)
 
-    payload: Dict[str, Any] = {
+    return {
         "status": "quarantined",
+        "state": action.action_type,
         "ip": request.ip,
         "mac": request.mac,
         "reason": request.reason,
         "timestamp": action.created_at.isoformat(),
     }
-    if note:
-        payload["note"] = note
-    return payload
 
 
 @router.post("/arp-fix")
@@ -351,66 +272,43 @@ async def arp_fix(
     }
 
 
-@router.post("/kill-connection")
-async def kill_connection(
-    request: KillConnectionRequest,
+async def _attempt_kick_worker(target_ip: str, duration_s: float) -> None:
+    """Best-effort L2 disruption via ARP poisoning.
+
+    NetPulse runs as a side-node; it cannot reliably block traffic with iptables.
+    This worker uses the existing Scapy-based ARP spoofing service as a best-effort
+    attempt to disrupt the target host on the local broadcast domain.
+
+    NOTE: This requires CAP_NET_RAW (typically root) and the target must be on the
+    same L2 segment.
+    """
+
+    def _kick() -> None:
+        import time
+
+        from app.services import arp_spoof
+
+        gateway_ip = settings.pulse_gateway_ip
+        if not _validate_ip(gateway_ip):
+            raise RuntimeError("Invalid pulse_gateway_ip setting")
+
+        session = arp_spoof.poison(target_ip, gateway_ip, iface=None, interval=1.0)
+        time.sleep(duration_s)
+        session.stop(restore_network=True)
+
+    try:
+        await asyncio.to_thread(_kick)
+    except Exception:
+        logger.exception("Attempt-kick failed for %s", target_ip)
+
+
+@router.post("/attempt-kick")
+async def attempt_kick(
+    request: AttemptKickRequest,
     _user: User = Depends(require_admin),
 ) -> Dict[str, Any]:
     if not _validate_ip(request.ip):
         raise HTTPException(status_code=400, detail="Invalid IP address format")
 
-    conntrack_path = shutil.which("conntrack")
-    if conntrack_path:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                conntrack_path,
-                "-D",
-                "-s",
-                request.ip,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5)
-            output = stdout.decode(errors="replace") + stderr.decode(errors="replace")
-            return {
-                "status": "connections_killed",
-                "ip": request.ip,
-                "output": output.strip(),
-            }
-        except Exception as exc:
-            return {
-                "status": "kill_error",
-                "ip": request.ip,
-                "error": str(exc),
-            }
-
-    ss_path = shutil.which("ss")
-    if ss_path:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                ss_path,
-                "-K",
-                f"src={request.ip}",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5)
-            output = stdout.decode(errors="replace") + stderr.decode(errors="replace")
-            return {
-                "status": "connections_killed",
-                "ip": request.ip,
-                "tool": "ss",
-                "output": output.strip(),
-            }
-        except Exception as exc:
-            return {
-                "status": "kill_error",
-                "ip": request.ip,
-                "error": str(exc),
-            }
-
-    return {
-        "status": "manual_action_required",
-        "ip": request.ip,
-        "note": "Neither conntrack nor ss with kill support is available.",
-    }
+    asyncio.create_task(_attempt_kick_worker(request.ip, request.duration_s))
+    return {"status": "kick_scheduled", "ip": request.ip, "duration_s": request.duration_s}
