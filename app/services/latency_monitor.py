@@ -14,7 +14,7 @@ import asyncio
 import statistics
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable, List, Tuple
+from typing import Iterable, List
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,50 +31,79 @@ class PingResult:
     packet_loss_pct: float
 
 
-async def _ping_target(target: str, count: int = 3, timeout: int = 2) -> PingResult:
+async def _ping_target(target: str, count: int = 15, timeout: int = 1) -> PingResult:
     """Ping a target using the system ping command.
 
-    This implementation is intentionally simple and portable.
-    It parses the output of the `ping` utility and extracts per-packet RTTs.
+    Notes
+    -----
+    - We default to a higher ping count (>=15) to stabilize packet loss and jitter.
+    - We do **not** treat non-zero ping exit codes as total failure: on Linux, ping
+      returns non-zero on partial loss.
     """
-    # Use -c on Unix-like systems (assumed for containerized deployment)
-    process = await asyncio.create_subprocess_exec(
-        "ping",
-        "-c",
-        str(count),
-        "-W",
-        str(timeout),
-        target,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await process.communicate()
-    if process.returncode != 0:
-        # Treat as 100% packet loss
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "ping",
+            "-c",
+            str(count),
+            "-W",
+            str(timeout),
+            target,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_b, _stderr_b = await process.communicate()
+    except Exception:
         return PingResult(target=target, latencies_ms=[], packet_loss_pct=100.0)
 
-    latencies: List[float] = []
-    sent = 0
-    received = 0
+    stdout = stdout_b.decode(errors="replace")
 
-    for line in stdout.decode().splitlines():
+    latencies: List[float] = []
+    for line in stdout.splitlines():
         if "bytes from" in line and "time=" in line:
-            sent += 1
             try:
                 # Example: "64 bytes from 1.1.1.1: icmp_seq=1 ttl=57 time=12.3 ms"
-                time_part = line.split("time=")[1]
+                time_part = line.split("time=", 1)[1]
                 ms_str = time_part.split()[0]
                 latencies.append(float(ms_str))
-                received += 1
             except (IndexError, ValueError):
                 continue
 
-    if sent == 0:
-        packet_loss_pct = 100.0
-    else:
-        packet_loss_pct = ((sent - received) / sent) * 100.0
+    # Prefer summary line parsing for tx/rx/loss.
+    sent = None
+    received = None
+    loss_pct = None
+    for line in stdout.splitlines():
+        if "packets transmitted" in line and "packet loss" in line:
+            # e.g. "15 packets transmitted, 14 received, 6% packet loss, time 14014ms"
+            try:
+                tx_part = line.split("packets transmitted", 1)[0].strip()
+                tx = int(tx_part.split()[-1])
+                after_tx = line.split("packets transmitted", 1)[1]
+                rx_part = after_tx.split("received", 1)[0]
+                rx = int(rx_part.replace(",", " ").split()[-1])
 
-    return PingResult(target=target, latencies_ms=latencies, packet_loss_pct=packet_loss_pct)
+                loss_str = line.split("packet loss", 1)[0].split(",")[-1]
+                loss = float(loss_str.strip().replace("%", ""))
+
+                sent, received, loss_pct = tx, rx, loss
+                break
+            except Exception:
+                # Fall back below.
+                pass
+
+    if sent is None:
+        sent = count
+    if received is None:
+        received = len(latencies)
+
+    if loss_pct is None:
+        if sent <= 0:
+            loss_pct = 100.0
+        else:
+            loss_pct = max(0.0, min(100.0, ((sent - received) / sent) * 100.0))
+
+    return PingResult(target=target, latencies_ms=latencies, packet_loss_pct=float(loss_pct))
 
 
 def _calculate_jitter(latencies: Iterable[float]) -> float:
@@ -87,26 +116,34 @@ def _calculate_jitter(latencies: Iterable[float]) -> float:
 
 
 def _internet_health_score(
-    avg_latency_ms: float,
-    jitter_ms: float,
-    packet_loss_pct: float,
+    wan_latency_ms: float,
+    wan_jitter_ms: float,
+    wan_packet_loss_pct: float,
 ) -> float:
-    """Heuristic Internet Health score in the range [0, 100]."""
-    score = 100.0
+    """Heuristic Internet Health score in the range [0, 100].
 
-    # Latency penalty
-    if avg_latency_ms > 30:
-        score -= (avg_latency_ms - 30) * 0.5
-    if avg_latency_ms > 100:
-        score -= (avg_latency_ms - 100) * 0.5
+    Design goals
+    ------------
+    - Penalize **WAN** conditions only (latency/jitter/loss to ISP + Cloudflare).
+    - Avoid extreme drops from a single lost packet.
+    - Keep the score intuitive: loss hurts most, then latency, then jitter.
+    """
 
-    # Jitter penalty
-    if jitter_ms > 10:
-        score -= (jitter_ms - 10) * 0.7
+    # Latency penalty: starts above 30ms and caps.
+    lat_pen = 0.0
+    if wan_latency_ms > 30:
+        lat_pen = min(40.0, (wan_latency_ms - 30.0) * 0.35)
 
-    # Packet loss penalty (very strong signal)
-    score -= packet_loss_pct * 2.0
+    # Jitter penalty: starts above 5ms and caps.
+    jit_pen = 0.0
+    if wan_jitter_ms > 5:
+        jit_pen = min(25.0, (wan_jitter_ms - 5.0) * 1.0)
 
+    # Loss penalty: nonlinear ramp so small loss doesn't instantly tank the score.
+    loss = max(0.0, min(100.0, wan_packet_loss_pct)) / 100.0
+    loss_pen = 70.0 * (loss**0.6)
+
+    score = 100.0 - (lat_pen + jit_pen + loss_pen)
     return max(0.0, min(100.0, score))
 
 
@@ -122,7 +159,8 @@ async def monitor_latency(db: AsyncSession) -> None:
     # Store per-target metrics
     for result in results:
         if result.latencies_ms:
-            avg_latency = float(statistics.mean(result.latencies_ms))
+            # Median is less sensitive to single outliers and makes graphs less spiky.
+            avg_latency = float(statistics.median(result.latencies_ms))
             jitter = _calculate_jitter(result.latencies_ms)
         else:
             avg_latency = 0.0
@@ -153,31 +191,30 @@ async def monitor_latency(db: AsyncSession) -> None:
         ]
         db.add_all(metrics)
 
-    # Compute aggregated Internet Health score based on all targets
-    lat_values: List[float] = []
-    jit_values: List[float] = []
-    loss_values: List[float] = []
+    # Compute aggregated Internet Health score based on WAN targets only.
+    # (We do not average gateway latency into WAN health.)
+    wan_targets = {settings.pulse_isp_ip, settings.pulse_cloudflare_ip}
+
+    wan_lat_values: List[float] = []
+    wan_jit_values: List[float] = []
+    wan_loss_values: List[float] = []
 
     for result in results:
+        if result.target not in wan_targets:
+            continue
+
         if result.latencies_ms:
-            lat_values.append(float(statistics.mean(result.latencies_ms)))
-            jit_values.append(_calculate_jitter(result.latencies_ms))
-        loss_values.append(result.packet_loss_pct)
+            # Median is more stable than mean and reduces spikiness.
+            wan_lat_values.append(float(statistics.median(result.latencies_ms)))
+            wan_jit_values.append(_calculate_jitter(result.latencies_ms))
+        wan_loss_values.append(result.packet_loss_pct)
 
-    if lat_values:
-        avg_latency_all = float(statistics.mean(lat_values))
-    else:
-        avg_latency_all = 0.0
-    if jit_values:
-        jitter_all = float(statistics.mean(jit_values))
-    else:
-        jitter_all = 0.0
-    if loss_values:
-        packet_loss_all = float(statistics.mean(loss_values))
-    else:
-        packet_loss_all = 0.0
+    avg_wan_latency = float(statistics.mean(wan_lat_values)) if wan_lat_values else 0.0
+    avg_wan_jitter = float(statistics.mean(wan_jit_values)) if wan_jit_values else 0.0
+    # Use worst-of for loss: if either WAN target is dropping packets, health should degrade.
+    wan_packet_loss = float(max(wan_loss_values)) if wan_loss_values else 0.0
 
-    health_score = _internet_health_score(avg_latency_all, jitter_all, packet_loss_all)
+    health_score = _internet_health_score(avg_wan_latency, avg_wan_jitter, wan_packet_loss)
 
     # Check previous Internet Health to detect a degradation event
     prev_result = await db.execute(
@@ -206,15 +243,15 @@ async def monitor_latency(db: AsyncSession) -> None:
     ):
         lines = [
             f"Internet Health degraded to {health_score:.1f}%",
-            f"Average latency: {avg_latency_all:.1f} ms",
-            f"Average jitter: {jitter_all:.1f} ms",
-            f"Average packet loss: {packet_loss_all:.1f}%",
+            f"WAN latency (avg): {avg_wan_latency:.1f} ms",
+            f"WAN jitter (avg): {avg_wan_jitter:.1f} ms",
+            f"WAN packet loss (worst-of): {wan_packet_loss:.1f}%",
             "",
             "Per-target snapshot:",
         ]
         for result in results:
             if result.latencies_ms:
-                avg_lat = float(statistics.mean(result.latencies_ms))
+                avg_lat = float(statistics.median(result.latencies_ms))
                 jit = _calculate_jitter(result.latencies_ms)
             else:
                 avg_lat = 0.0

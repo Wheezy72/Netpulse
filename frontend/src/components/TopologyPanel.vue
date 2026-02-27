@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import axios from "axios";
-import cytoscape, { Core as CytoscapeCore } from "cytoscape";
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { DataSet, Network } from "vis-network/standalone";
+import type { Edge, Node, Options } from "vis-network";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 
 type ReconTargetService = {
   port: number;
@@ -88,7 +89,29 @@ const hoveredNode = ref<TopologyNode | null>(null);
 const selectedNode = ref<TopologyNode | null>(null);
 const zones = ref<string[]>([]);
 const selectedZone = ref<string | null>(null);
-let cy: CytoscapeCore | null = null;
+
+const graphContainer = ref<HTMLElement | null>(null);
+
+type VisTopologyNode = Node & {
+  id: string;
+  label: string;
+  ip_address: string;
+  hostname?: string | null;
+  device_type?: string | null;
+  is_gateway: boolean;
+  zone?: string | null;
+  vulnerability_severity?: string | null;
+  vulnerability_count: number;
+  last_seen?: string | null;
+};
+
+type VisTopologyEdge = Edge & {
+  id: string;
+};
+
+let network: Network | null = null;
+let nodesDataSet: DataSet<VisTopologyNode> | null = null;
+let edgesDataSet: DataSet<VisTopologyEdge> | null = null;
 
 const isRunningAction = ref(false);
 const actionStatus = ref<string | null>(null);
@@ -204,144 +227,223 @@ async function loadTopology(): Promise<void> {
       { params }
     );
 
-    const elements = [
-      ...data.nodes.map((n) => ({
-        data: {
-          id: String(n.id),
-          label: n.label,
-          ip: n.ip_address,
-          hostname: n.hostname,
-          deviceType: n.device_type,
-          isGateway: n.is_gateway,
-          zone: n.zone,
-          vulnerabilitySeverity: n.vulnerability_severity,
-          vulnerabilityCount: n.vulnerability_count,
-          lastSeen: n.last_seen,
-        },
-      })),
-      ...data.edges.map((e, index) => ({
-        data: {
-          id: `e-${index}`,
-          source: String(e.source),
-          target: String(e.target),
-          kind: e.kind,
-        },
-      })),
-    ];
+    const visNodes: VisTopologyNode[] = data.nodes.map((n) => {
+      const isVulnerable =
+        n.vulnerability_severity === "high" || n.vulnerability_severity === "critical";
 
-    const container = document.getElementById("topology-graph") as HTMLElement | null;
-    if (!container) {
-      topologyError.value = "Topology container not found.";
-      return;
-    }
+      const base: VisTopologyNode = {
+        id: String(n.id),
+        label: n.label,
+        ip_address: n.ip_address,
+        hostname: n.hostname,
+        device_type: n.device_type,
+        is_gateway: n.is_gateway,
+        zone: n.zone,
+        vulnerability_severity: n.vulnerability_severity,
+        vulnerability_count: n.vulnerability_count,
+        last_seen: n.last_seen,
+        shape: n.is_gateway ? "hexagon" : "dot",
+        size: n.is_gateway ? 18 : 14,
+        borderWidth: 2,
+        color: {
+          background: "#0b1220",
+          border: "#2dd4bf",
+          highlight: {
+            background: "#111c33",
+            border: "#5eead4",
+          },
+          hover: {
+            background: "#111c33",
+            border: "#5eead4",
+          },
+        },
+        font: {
+          color: "#e0f7ff",
+          size: 10,
+          face: "monospace",
+        },
+      };
 
-    if (!cy) {
-      cy = cytoscape({
+      if (n.is_gateway) {
+        base.color = {
+          background: "#22c55e",
+          border: "#bbf7d0",
+          highlight: {
+            background: "#16a34a",
+            border: "#dcfce7",
+          },
+          hover: {
+            background: "#16a34a",
+            border: "#dcfce7",
+          },
+        };
+      }
+
+      if (isVulnerable) {
+        base.color = {
+          background: "#ef4444",
+          border: "#fecaca",
+          highlight: {
+            background: "#f87171",
+            border: "#fee2e2",
+          },
+          hover: {
+            background: "#f87171",
+            border: "#fee2e2",
+          },
+        };
+        base.shadow = {
+          enabled: true,
+          color: "#ef4444",
+          size: 18,
+          x: 0,
+          y: 0,
+        };
+      }
+
+      return base;
+    });
+
+    const visEdges: VisTopologyEdge[] = data.edges.map((e, index) => ({
+      id: `e-${index}`,
+      from: String(e.source),
+      to: String(e.target),
+    }));
+
+    if (!network) {
+      await nextTick();
+      const container = graphContainer.value;
+      if (!container) {
+        topologyError.value = "Topology container not found.";
+        return;
+      }
+
+      nodesDataSet = new DataSet<VisTopologyNode>();
+      edgesDataSet = new DataSet<VisTopologyEdge>();
+
+      const options: Options = {
+        autoResize: true,
+        physics: {
+          enabled: true,
+          solver: "barnesHut",
+          barnesHut: {
+            gravitationalConstant: -3000,
+            centralGravity: 0.25,
+            springLength: 160,
+            springConstant: 0.04,
+            damping: 0.15,
+            avoidOverlap: 0.2,
+          },
+          stabilization: {
+            iterations: 150,
+            updateInterval: 25,
+          },
+        },
+        interaction: {
+          hover: true,
+        },
+        nodes: {
+          borderWidth: 2,
+        },
+        edges: {
+          width: 1,
+          color: {
+            color: "#14b8a655",
+            highlight: "#2dd4bf",
+            hover: "#2dd4bf",
+          },
+          arrows: {
+            to: {
+              enabled: true,
+              scaleFactor: 0.6,
+            },
+          },
+          smooth: {
+            type: "dynamic",
+          },
+        },
+      };
+
+      network = new Network(
         container,
-        elements,
-        style: [
-          {
-            selector: "node",
-            style: {
-              "background-color": "#14b8a6",
-              "border-width": 2,
-              "border-color": "#2dd4bf",
-              "label": "data(label)",
-              "font-size": 8,
-              "text-outline-width": 1,
-              "text-outline-color": "#000000",
-              color: "#e0f7ff",
-              "overlay-opacity": 0,
-            },
-          },
-          {
-            selector: "node[?isGateway]",
-            style: {
-              "background-color": "#22c55e",
-              "border-color": "#bbf7d0",
-              shape: "hexagon",
-            },
-          },
-          {
-            selector:
-              "node[vulnerabilitySeverity = 'high'], node[vulnerabilitySeverity = 'critical']",
-            style: {
-              "background-color": "#ef4444",
-              "border-color": "#fecaca",
-              "shadow-blur": 20,
-              "shadow-color": "#ef4444",
-              "shadow-opacity": 0.9,
-            },
-          },
-          {
-            selector: "edge",
-            style: {
-              width: 1,
-              "line-color": "#14b8a655",
-              "target-arrow-color": "#14b8a6aa",
-              "target-arrow-shape": "triangle",
-              "curve-style": "bezier",
-            },
-          },
-        ],
-        layout: {
-          name: "cose",
-          animate: false,
+        {
+          nodes: nodesDataSet,
+          edges: edgesDataSet,
         },
-      });
+        options
+      );
 
-      cy.on("mouseover", "node", (event) => {
-        const data = event.target.data();
+      network.on("hoverNode", (params) => {
+        if (!nodesDataSet) return;
+        const node = nodesDataSet.get(params.node) as VisTopologyNode | null;
+        if (!node) return;
         hoveredNode.value = {
-          id: Number(data.id),
-          label: data.label,
-          ip_address: data.ip,
-          hostname: data.hostname,
-          device_type: data.deviceType,
-          is_gateway: Boolean(data.isGateway),
-          zone: data.zone,
-          vulnerability_severity: data.vulnerabilitySeverity,
-          vulnerability_count: Number(data.vulnerabilityCount ?? 0),
-          last_seen: data.lastSeen,
+          id: Number(node.id),
+          label: node.label,
+          ip_address: node.ip_address,
+          hostname: node.hostname,
+          device_type: node.device_type,
+          is_gateway: Boolean(node.is_gateway),
+          zone: node.zone,
+          vulnerability_severity: node.vulnerability_severity,
+          vulnerability_count: Number(node.vulnerability_count ?? 0),
+          last_seen: node.last_seen,
         };
       });
 
-      cy.on("mouseout", "node", () => {
+      network.on("blurNode", () => {
         hoveredNode.value = null;
       });
 
-      cy.on("tap", "node", async (event) => {
-        const data = event.target.data();
-        const tappedNode: TopologyNode = {
-          id: Number(data.id),
-          label: data.label,
-          ip_address: data.ip,
-          hostname: data.hostname,
-          device_type: data.deviceType,
-          is_gateway: Boolean(data.isGateway),
-          zone: data.zone,
-          vulnerability_severity: data.vulnerabilitySeverity,
-          vulnerability_count: Number(data.vulnerabilityCount ?? 0),
-          last_seen: data.lastSeen,
-        };
+      network.on("selectNode", (params) => {
+        void (async () => {
+          if (!nodesDataSet) return;
+          const nodeId = params.nodes?.[0];
+          if (!nodeId) return;
+          const node = nodesDataSet.get(nodeId) as VisTopologyNode | null;
+          if (!node) return;
 
-        selectedNode.value = tappedNode;
-        const detail = await loadDeviceDetail(tappedNode.id);
+          const tappedNode: TopologyNode = {
+            id: Number(node.id),
+            label: node.label,
+            ip_address: node.ip_address,
+            hostname: node.hostname,
+            device_type: node.device_type,
+            is_gateway: Boolean(node.is_gateway),
+            zone: node.zone,
+            vulnerability_severity: node.vulnerability_severity,
+            vulnerability_count: Number(node.vulnerability_count ?? 0),
+            last_seen: node.last_seen,
+          };
 
-        const mac = detail?.device.mac_address ?? null;
-        const type =
-          detail?.type_guess ??
-          detail?.device.device_type ??
-          tappedNode.device_type ??
-          null;
+          selectedNode.value = tappedNode;
+          selectedTarget.value = tappedNode.ip_address;
 
-        emit("node-selected", { ip: tappedNode.ip_address, mac, type });
+          const detail = await loadDeviceDetail(tappedNode.id);
+
+          const mac = detail?.device.mac_address ?? null;
+          const type =
+            detail?.type_guess ??
+            detail?.device.device_type ??
+            tappedNode.device_type ??
+            null;
+
+          emit("node-selected", { ip: tappedNode.ip_address, mac, type });
+        })();
       });
-    } else {
-      cy.elements().remove();
-      cy.add(elements);
-      cy.layout({ name: "cose", animate: false }).run();
     }
+
+    if (!nodesDataSet || !edgesDataSet) {
+      topologyError.value = "Topology graph is not initialized.";
+      return;
+    }
+
+    nodesDataSet.clear();
+    edgesDataSet.clear();
+    nodesDataSet.add(visNodes);
+    edgesDataSet.add(visEdges);
+
+    network?.stabilize();
   } catch {
     topologyError.value = "Failed to load topology.";
   } finally {
@@ -397,9 +499,11 @@ onBeforeUnmount(() => {
     logSocket.close();
     logSocket = null;
   }
-  if (cy) {
-    cy.destroy();
-    cy = null;
+  if (network) {
+    network.destroy();
+    network = null;
+    nodesDataSet = null;
+    edgesDataSet = null;
   }
 });
 </script>
@@ -435,19 +539,19 @@ onBeforeUnmount(() => {
 
     <div class="grid gap-3 lg:grid-rows-[minmax(0,2fr)_minmax(0,1.4fr)]">
       <div
-        id="topology-graph"
         class="relative h-52 w-full rounded-md border bg-black/40"
         style="border-color: var(--np-border)"
       >
+        <div ref="graphContainer" class="absolute inset-0"></div>
         <div
           v-if="topologyLoading"
-          class="absolute inset-0 flex items-center justify-center text-xs text-[var(--np-muted-text)]"
+          class="absolute inset-0 z-10 flex items-center justify-center text-xs text-[var(--np-muted-text)]"
         >
           Building network graph…
         </div>
         <div
           v-else-if="topologyError"
-          class="absolute inset-0 flex items-center justify-center text-xs text-rose-300"
+          class="absolute inset-0 z-10 flex items-center justify-center text-xs text-rose-300"
         >
           {{ topologyError }}
         </div>

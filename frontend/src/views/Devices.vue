@@ -8,6 +8,8 @@ const props = defineProps<{
   isAdmin?: boolean;
 }>();
 
+
+
 const isNightshade = computed(() => props.theme === "nightshade");
 const isAdmin = computed(() => !!props.isAdmin);
 
@@ -70,6 +72,7 @@ const selectedZone = ref<string | null>(null);
 const search = ref("");
 const loading = ref(false);
 const error = ref<string | null>(null);
+const actionNotice = ref<{ type: "success" | "error" | "warning" | "info"; message: string } | null>(null);
 
 const selectedDevice = ref<DeviceRow | null>(null);
 const deviceDetail = ref<DeviceDetail | null>(null);
@@ -81,6 +84,7 @@ const aiLoading = ref(false);
 const aiError = ref<string | null>(null);
 
 const blockedDevices = ref<Set<string>>(new Set());
+const kickLoadingIp = ref<string | null>(null);
 
 const snmpTarget = ref("");
 const snmpCommunity = ref("public");
@@ -249,6 +253,29 @@ async function unblockDevice(ip: string): Promise<void> {
   }
 }
 
+async function attemptKick(ip: string): Promise<void> {
+  actionNotice.value = null;
+  if (!isAdmin.value) {
+    actionNotice.value = { type: "warning", message: "Admin access required to perform this action." };
+    return;
+  }
+  kickLoadingIp.value = ip;
+  try {
+    const { data } = await axios.post<{ status: string; duration_s?: number }>(
+      "/api/device-actions/attempt-kick",
+      { ip }
+    );
+    const duration = data.duration_s != null ? ` (${data.duration_s}s)` : "";
+    actionNotice.value = { type: "info", message: `Kick attempt scheduled for ${ip}${duration}.` };
+  } catch (e: any) {
+    actionNotice.value = { type: "error", message: e.response?.data?.detail || "Failed to trigger kick attempt" };
+  } finally {
+    if (kickLoadingIp.value === ip) {
+      kickLoadingIp.value = null;
+    }
+  }
+}
+
 async function snmpPoll(): Promise<void> {
   if (!snmpTarget.value.trim()) return;
   snmpLoading.value = true;
@@ -403,7 +430,7 @@ onMounted(async () => {
         :class="isNightshade ? 'border-rose-400/30 bg-rose-500/5' : 'border-rose-500/20 bg-rose-500/5'"
       >
         <p class="text-[0.7rem] uppercase tracking-[0.16em] font-semibold text-rose-300">
-          Blocked Devices
+          Anomaly / Rogue Devices
         </p>
         <div class="flex flex-wrap gap-2">
           <div
@@ -523,8 +550,9 @@ onMounted(async () => {
                     <span
                       v-if="blockedDevices.has(d.ip_address)"
                       class="rounded px-2 py-0.5 text-[0.6rem] font-semibold uppercase border border-rose-400/30 bg-rose-500/10 text-rose-300"
+                      title="Manual router/AP isolation recommended — NetPulse cannot enforce this block."
                     >
-                      Blocked
+                      ⚠️ ANOMALY / ROGUE
                     </span>
                     <span v-else class="text-[0.65rem] text-[var(--np-muted-text)]">—</span>
                   </template>
@@ -547,7 +575,7 @@ onMounted(async () => {
             Select a device from the table to see its profile and recent activity.
           </div>
           <div v-else class="mt-2 space-y-2 text-[0.7rem]">
-            <div class="flex items-center justify-between">
+            <div class="flex items-start justify-between gap-3">
               <div>
                 <p class="font-mono text-[var(--np-text)]">
                   {{ selectedDevice.hostname || selectedDevice.ip_address }}
@@ -556,14 +584,57 @@ onMounted(async () => {
                   IP {{ selectedDevice.ip_address }} · Zone {{ selectedDevice.zone || "n/a" }}
                 </p>
               </div>
-              <span
-                v-if="selectedDevice.is_gateway"
-                class="rounded border px-2 py-0.5 text-[0.65rem]"
-                :class="isNightshade ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-200' : 'border-green-500/60 bg-green-500/20 text-green-200'"
-              >
-                Gateway
-              </span>
+              <div class="flex flex-col items-end gap-1">
+                <span
+                  v-if="blockedDevices.has(selectedDevice.ip_address)"
+                  class="rounded border px-2 py-0.5 text-[0.65rem] font-semibold uppercase"
+                  :class="isNightshade ? 'border-rose-400/60 bg-rose-500/20 text-rose-200' : 'border-rose-500/60 bg-rose-500/20 text-rose-200'"
+                  title="Manual router/AP isolation recommended — NetPulse cannot enforce this block."
+                >
+                  ⚠️ ANOMALY / ROGUE
+                </span>
+                <button
+                  v-if="isAdmin && blockedDevices.has(selectedDevice.ip_address)"
+                  type="button"
+                  @click="attemptKick(selectedDevice.ip_address)"
+                  :disabled="kickLoadingIp === selectedDevice.ip_address"
+                  class="rounded border px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-wide transition-colors disabled:opacity-50"
+                  :class="isNightshade ? 'border-rose-400/40 bg-black/60 text-rose-200 hover:bg-rose-500/10' : 'border-rose-500/30 bg-black/60 text-rose-200 hover:bg-rose-500/10'"
+                  title="Best-effort: attempts to disrupt the host on the local LAN via ARP poisoning. Requires same L2 segment and elevated privileges."
+                >
+                  {{ kickLoadingIp === selectedDevice.ip_address ? "Attempting..." : "Attempt to Kick (ARP Spoof)" }}
+                </button>
+                <p
+                  v-if="isAdmin && blockedDevices.has(selectedDevice.ip_address)"
+                  class="max-w-[16rem] text-right text-[0.6rem] text-[var(--np-muted-text)]"
+                >
+                  Manual router/AP isolation is recommended. Best-effort only; may fail depending on topology/permissions.
+                </p>
+                <span
+                  v-if="selectedDevice.is_gateway"
+                  class="rounded border px-2 py-0.5 text-[0.65rem]"
+                  :class="isNightshade ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-200' : 'border-green-500/60 bg-green-500/20 text-green-200'"
+                >
+                  Gateway
+                </span>
+              </div>
             </div>
+
+            <p
+              v-if="actionNotice"
+              class="text-[0.7rem]"
+              :class="
+                actionNotice.type === 'error'
+                  ? 'text-rose-300'
+                  : actionNotice.type === 'warning'
+                    ? 'text-amber-300'
+                    : isNightshade
+                      ? 'text-teal-200'
+                      : 'text-amber-200'
+              "
+            >
+              {{ actionNotice.message }}
+            </p>
 
             <div class="mt-1">
               <p v-if="deviceDetailLoading" class="text-[var(--np-muted-text)]">
