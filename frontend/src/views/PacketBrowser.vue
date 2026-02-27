@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from "axios";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RecycleScroller } from "vue-virtual-scroller";
 
 type Theme = "nightshade" | "sysadmin";
@@ -77,6 +77,8 @@ const pcaps = ref<PcapFile[]>([]);
 const pcapsLoading = ref(false);
 const pcapsError = ref<string | null>(null);
 
+
+
 const selectedPcapId = ref<number | null>(null);
 
 const packets = ref<PcapPacket[]>([]);
@@ -88,8 +90,16 @@ const packetsError = ref<string | null>(null);
 const zeekSummary = ref<ZeekSummary | null>(null);
 const zeekSummaryLoading = ref(false);
 const zeekSummaryError = ref<string | null>(null);
+const zeekIndexingStatus = ref<string | null>(null);
 
 const pageSize = 250;
+
+// Packet filters (server-side; applied to /api/pcaps/{id}/packets)
+const filterSrcIp = ref("");
+const filterDstIp = ref("");
+const filterProtocol = ref("");
+const filterSrcPort = ref("");
+const filterDstPort = ref("");
 
 const selectedPcap = computed(() => pcaps.value.find((c) => c.id === selectedPcapId.value) || null);
 
@@ -250,6 +260,27 @@ async function loadPackets(reset = false): Promise<void> {
       params.cursor = nextCursor.value;
     }
 
+    const srcIp = filterSrcIp.value.trim();
+    if (srcIp) params.src_ip = srcIp;
+
+    const dstIp = filterDstIp.value.trim();
+    if (dstIp) params.dst_ip = dstIp;
+
+    const proto = filterProtocol.value.trim();
+    if (proto) params.protocol = proto;
+
+    const srcPortRaw = filterSrcPort.value.trim();
+    if (srcPortRaw) {
+      const srcPort = Number.parseInt(srcPortRaw, 10);
+      if (!Number.isNaN(srcPort)) params.src_port = srcPort;
+    }
+
+    const dstPortRaw = filterDstPort.value.trim();
+    if (dstPortRaw) {
+      const dstPort = Number.parseInt(dstPortRaw, 10);
+      if (!Number.isNaN(dstPort)) params.dst_port = dstPort;
+    }
+
     const { data } = await axios.get<PacketQueryResponse>(`/api/pcaps/${pcapId}/packets`, {
       params,
     });
@@ -287,13 +318,17 @@ async function loadZeekSummary(reset = false): Promise<void> {
   if (!selectedPcapId.value) {
     zeekSummary.value = null;
     zeekSummaryError.value = null;
+    zeekIndexingStatus.value = null;
     zeekSummaryLoading.value = false;
     return;
   }
 
+  if (zeekSummaryLoading.value && !reset) return;
+
   if (reset) {
     zeekSummary.value = null;
     zeekSummaryError.value = null;
+    zeekIndexingStatus.value = null;
   }
 
   zeekSummaryLoading.value = true;
@@ -304,11 +339,14 @@ async function loadZeekSummary(reset = false): Promise<void> {
   try {
     const { data } = await axios.get(`/api/pcaps/${selectedPcapId.value}/zeek-summary`);
     if (requestId !== zeekSummaryRequestId) return;
+
+    zeekIndexingStatus.value = (data as any)?.indexing_status ?? null;
     zeekSummary.value = pickZeekSummary(data);
   } catch (e: any) {
     if (requestId !== zeekSummaryRequestId) return;
 
     zeekSummary.value = null;
+    zeekIndexingStatus.value = null;
     zeekSummaryError.value = getApiErrorMessage(e, "Failed to load Zeek summary");
   } finally {
     if (requestId === zeekSummaryRequestId) {
@@ -317,23 +355,63 @@ async function loadZeekSummary(reset = false): Promise<void> {
   }
 }
 
+let zeekPollTimer: number | null = null;
+function stopZeekPoll(): void {
+  if (zeekPollTimer != null) {
+    window.clearInterval(zeekPollTimer);
+    zeekPollTimer = null;
+  }
+}
+
+function startZeekPoll(): void {
+  stopZeekPoll();
+  zeekPollTimer = window.setInterval(() => {
+    if (!selectedPcapId.value) {
+      stopZeekPoll();
+      return;
+    }
+
+    if (zeekIndexingStatus.value !== "pending") {
+      stopZeekPoll();
+      return;
+    }
+
+    void loadZeekSummary(false);
+
+    // If packets are still empty while indexing is pending, keep trying.
+    if (packets.value.length === 0 && !packetsLoading.value) {
+      void loadPackets(true);
+    }
+  }, 5000);
+}
+
 function refreshPackets(): void {
-  packetsRequestId += 1;
   packets.value = [];
   nextCursor.value = null;
   hasMore.value = true;
-  loadPackets(true);
+  void loadPackets(true);
 }
 
-function refreshCurrentPcap(): void {
-  loadZeekSummary(true);
+function applyFilters(): void {
   refreshPackets();
 }
 
-function handleUpdate(_startIndex: number, endIndex: number): void {
-  if (!hasMore.value || packetsLoading.value) return;
-  if (endIndex >= packets.value.length - 40) {
-    loadPackets(false);
+function clearFilters(): void {
+  filterSrcIp.value = "";
+  filterDstIp.value = "";
+  filterProtocol.value = "";
+  filterSrcPort.value = "";
+  filterDstPort.value = "";
+  refreshPackets();
+}
+
+async function refreshCurrentPcap(): Promise<void> {
+  stopZeekPoll();
+  await loadZeekSummary(true);
+  refreshPackets();
+
+  if (zeekIndexingStatus.value === "pending") {
+    startZeekPoll();
   }
 }
 
@@ -341,16 +419,28 @@ watch(
   () => selectedPcapId.value,
   (value, oldValue) => {
     if (!value || value === oldValue) return;
-    refreshCurrentPcap();
+
+    // Filters are per-PCAP to avoid confusing carry-over.
+    filterSrcIp.value = "";
+    filterDstIp.value = "";
+    filterProtocol.value = "";
+    filterSrcPort.value = "";
+    filterDstPort.value = "";
+
+    void refreshCurrentPcap();
   }
 );
 
 onMounted(() => {
   loadPcaps().then(() => {
     if (selectedPcapId.value) {
-      refreshCurrentPcap();
+      void refreshCurrentPcap();
     }
   });
+});
+
+onBeforeUnmount(() => {
+  stopZeekPoll();
 });
 </script>
 
@@ -420,6 +510,107 @@ onMounted(() => {
               <span v-if="selectedPcap.index_error" class="font-mono text-rose-400">index_error: {{ selectedPcap.index_error }}</span>
             </div>
           </div>
+        </div>
+      </div>
+
+     
+
+      <div class="grid gap-3 rounded-md border p-3"
+        :class="isNightshade ? 'border-teal-400/20 bg-black/20' : 'border-slate-700 bg-slate-900/30'"
+      >
+        <div class="text-[0.7rem] font-semibold uppercase tracking-widest"
+          :class="isNightshade ? 'text-teal-200/80' : 'text-slate-400'"
+        >
+          Packet filters
+        </div>
+
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-5">
+          <label class="text-[0.65rem] uppercase tracking-widest" :class="isNightshade ? 'text-teal-100/60' : 'text-slate-400'">
+            Src IP
+            <input
+              v-model="filterSrcIp"
+              type="text"
+              placeholder="10.0.0.10"
+              class="mt-1 w-full rounded-md border bg-transparent px-2 py-1 text-xs outline-none"
+              :class="isNightshade ? 'border-teal-400/20 text-teal-100 focus:border-teal-400/50' : 'border-slate-700 text-slate-200 focus:border-amber-400/50'"
+            />
+          </label>
+
+          <label class="text-[0.65rem] uppercase tracking-widest" :class="isNightshade ? 'text-teal-100/60' : 'text-slate-400'">
+            Dst IP
+            <input
+              v-model="filterDstIp"
+              type="text"
+              placeholder="10.0.0.20"
+              class="mt-1 w-full rounded-md border bg-transparent px-2 py-1 text-xs outline-none"
+              :class="isNightshade ? 'border-teal-400/20 text-teal-100 focus:border-teal-400/50' : 'border-slate-700 text-slate-200 focus:border-amber-400/50'"
+            />
+          </label>
+
+          <label class="text-[0.65rem] uppercase tracking-widest" :class="isNightshade ? 'text-teal-100/60' : 'text-slate-400'">
+            Protocol
+            <input
+              v-model="filterProtocol"
+              type="text"
+              placeholder="TCP"
+              class="mt-1 w-full rounded-md border bg-transparent px-2 py-1 text-xs outline-none"
+              :class="isNightshade ? 'border-teal-400/20 text-teal-100 focus:border-teal-400/50' : 'border-slate-700 text-slate-200 focus:border-amber-400/50'"
+            />
+          </label>
+
+          <label class="text-[0.65rem] uppercase tracking-widest" :class="isNightshade ? 'text-teal-100/60' : 'text-slate-400'">
+            Src port
+            <input
+              v-model="filterSrcPort"
+              type="text"
+              inputmode="numeric"
+              placeholder="443"
+              class="mt-1 w-full rounded-md border bg-transparent px-2 py-1 text-xs outline-none"
+              :class="isNightshade ? 'border-teal-400/20 text-teal-100 focus:border-teal-400/50' : 'border-slate-700 text-slate-200 focus:border-amber-400/50'"
+            />
+          </label>
+
+          <label class="text-[0.65rem] uppercase tracking-widest" :class="isNightshade ? 'text-teal-100/60' : 'text-slate-400'">
+            Dst port
+            <input
+              v-model="filterDstPort"
+              type="text"
+              inputmode="numeric"
+              placeholder="53"
+              class="mt-1 w-full rounded-md border bg-transparent px-2 py-1 text-xs outline-none"
+              :class="isNightshade ? 'border-teal-400/20 text-teal-100 focus:border-teal-400/50' : 'border-slate-700 text-slate-200 focus:border-amber-400/50'"
+            />
+          </label>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            class="rounded-md border px-3 py-1.5 text-xs transition-colors"
+            :class="isNightshade
+              ? 'border-teal-400/30 bg-black/30 text-teal-200 hover:bg-teal-500/10'
+              : 'border-amber-500/30 bg-slate-800/50 text-slate-300 hover:bg-amber-500/10'"
+            :disabled="!selectedPcapId"
+            @click="applyFilters"
+          >
+            Apply
+          </button>
+          <button
+            type="button"
+            class="rounded-md border px-3 py-1.5 text-xs transition-colors"
+            :class="isNightshade
+              ? 'border-teal-400/20 bg-black/10 text-teal-100/70 hover:bg-teal-500/10'
+              : 'border-slate-700 bg-slate-900/30 text-slate-400 hover:bg-slate-800/40'"
+            :disabled="!selectedPcapId"
+            @click="clearFilters"
+          >
+            Clear
+          </button>
+          <span v-if="zeekIndexingStatus === 'pending'" class="text-xs"
+            :class="isNightshade ? 'text-teal-100/50' : 'text-slate-500'"
+          >
+            Indexing in progress — auto-refreshing every 5s.
+          </span>
         </div>
       </div>
 

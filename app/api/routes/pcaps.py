@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.api.deps import db_session, require_role
 from app.models.pcap_meta import PcapFile, PcapPacket
@@ -87,6 +88,20 @@ async def list_pcap_files(
 ) -> List[PcapFileResponse]:
     result = await db.execute(
         select(PcapFile)
+        .options(
+            load_only(
+                PcapFile.id,
+                PcapFile.filename,
+                PcapFile.interface,
+                PcapFile.bpf_filter,
+                PcapFile.file_size_bytes,
+                PcapFile.packet_count,
+                PcapFile.captured_started_at,
+                PcapFile.captured_finished_at,
+                PcapFile.indexed_at,
+                PcapFile.index_error,
+            )
+        )
         .order_by(PcapFile.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -209,6 +224,20 @@ async def get_pcap_zeek_summary(
     pcap_file = await db.get(PcapFile, pcap_file_id)
     if not pcap_file:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PCAP not found")
+
+    if pcap_file.index_error:
+        indexing_status = "error"
+    elif pcap_file.indexed_at:
+        indexing_status = "indexed"
+    else:
+        indexing_status = "pending"
+
+    return PcapZeekSummaryResponse(
+        pcap_file_id=pcap_file_id,
+        indexing_status=indexing_status,
+        zeek_summary=pcap_file.zeek_summary,
+    )
+ception(status_code=status.HTTP_404_NOT_FOUND, detail="PCAP not found")
 
     if pcap_file.index_error:
         indexing_status = "error"
