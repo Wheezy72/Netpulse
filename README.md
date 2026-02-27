@@ -25,9 +25,22 @@ A self-hosted network monitoring console for home labs and enterprise NOC/SOC te
 ```bash
 # Clone and run
 git clone <repo-url> && cd netpulse
-docker compose up -d
+docker compose up -d --build
 
 # That's it. Open http://localhost:8000
+```
+
+### Clean reset (recommended for QA)
+
+```bash
+docker compose down -v
+docker compose up -d --build
+```
+
+(Optional) shortcut:
+
+```bash
+bash scripts/docker_reset.sh
 ```
 
 **What you get:**
@@ -35,6 +48,12 @@ docker compose up -d
 - Backend API with nmap/packet capture
 - Frontend ready to go
 - All network scanning capabilities
+
+**Zeek is included in the app image.** Verify:
+
+```bash
+docker compose exec app zeek --version
+```
 
 <details>
 <summary><b>Docker Environment Variables</b></summary>
@@ -51,6 +70,8 @@ ENABLE_WHATSAPP_ALERTS=false
 ```
 
 </details>
+
+**Upgrades:** Non-destructive database upgrades are provided as SQL files in `migrations/` (apply them to an existing DB volume when updating).
 
 ---
 
