@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import axios from "axios";
-import { DataSet, Network } from "vis-network/standalone";
-import type { Edge, Node, Options } from "vis-network";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { Network, Options } from "vis-network/standalone/umd/vis-network.min.js";
+import { DataSet } from "vis-data/standalone/umd/vis-data.min.js";
+import { computed, onBeforeUnmount, onMounted, ref, nextTick } from "vue";
 
 type ReconTargetService = {
   port: number;
@@ -91,27 +91,9 @@ const zones = ref<string[]>([]);
 const selectedZone = ref<string | null>(null);
 
 const graphContainer = ref<HTMLElement | null>(null);
-
-type VisTopologyNode = Node & {
-  id: string;
-  label: string;
-  ip_address: string;
-  hostname?: string | null;
-  device_type?: string | null;
-  is_gateway: boolean;
-  zone?: string | null;
-  vulnerability_severity?: string | null;
-  vulnerability_count: number;
-  last_seen?: string | null;
-};
-
-type VisTopologyEdge = Edge & {
-  id: string;
-};
-
 let network: Network | null = null;
-let nodesDataSet: DataSet<VisTopologyNode> | null = null;
-let edgesDataSet: DataSet<VisTopologyEdge> | null = null;
+let visNodes: DataSet<any> | null = null;
+let visEdges: DataSet<any> | null = null;
 
 const isRunningAction = ref(false);
 const actionStatus = ref<string | null>(null);
@@ -134,8 +116,7 @@ function attachLogStream(jobId: number): void {
     logSocket = null;
   }
 
-  const apiBase =
-    (import.meta as any).env?.VITE_API_BASE_URL || window.location.origin;
+  const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || window.location.origin;
   const wsBase = apiBase.replace(/^http/, "ws");
   const url = `${wsBase}/api/ws/scripts/${jobId}?token=${encodeURIComponent(token)}`;
 
@@ -145,8 +126,7 @@ function attachLogStream(jobId: number): void {
     socket.onclose = () => {
       if (logSocket === socket) logSocket = null;
     };
-  } catch {
-  }
+  } catch {}
 }
 
 async function runPrebuiltScriptForDevice(
@@ -172,10 +152,7 @@ async function runPrebuiltScriptForDevice(
         ...extraParams,
       },
     };
-    const { data } = await axios.post<{ job_id: number }>(
-      "/api/scripts/prebuilt/run",
-      payload
-    );
+    const { data } = await axios.post<{ job_id: number }>("/api/scripts/prebuilt/run", payload);
     actionStatus.value = `Script queued (job #${data.job_id}).`;
     attachLogStream(data.job_id);
   } catch {
@@ -219,231 +196,99 @@ async function loadTopology(): Promise<void> {
 
   try {
     const params: Record<string, string> = {};
-    if (selectedZone.value) {
-      params.zone = selectedZone.value;
+    if (selectedZone.value) params.zone = selectedZone.value;
+    
+    const { data } = await axios.get<{ nodes: TopologyNode[]; edges: TopologyEdge[] }>("/api/devices/topology", { params });
+
+    await nextTick();
+    if (!graphContainer.value) {
+      topologyError.value = "Topology container not ready.";
+      return;
     }
-    const { data } = await axios.get<{ nodes: TopologyNode[]; edges: TopologyEdge[] }>(
-      "/api/devices/topology",
-      { params }
-    );
 
-    const visNodes: VisTopologyNode[] = data.nodes.map((n) => {
-      const isVulnerable =
-        n.vulnerability_severity === "high" || n.vulnerability_severity === "critical";
-
-      const base: VisTopologyNode = {
-        id: String(n.id),
-        label: n.label,
-        ip_address: n.ip_address,
-        hostname: n.hostname,
-        device_type: n.device_type,
-        is_gateway: n.is_gateway,
-        zone: n.zone,
-        vulnerability_severity: n.vulnerability_severity,
-        vulnerability_count: n.vulnerability_count,
-        last_seen: n.last_seen,
-        shape: n.is_gateway ? "hexagon" : "dot",
-        size: n.is_gateway ? 18 : 14,
-        borderWidth: 2,
-        color: {
-          background: "#0b1220",
-          border: "#2dd4bf",
-          highlight: {
-            background: "#111c33",
-            border: "#5eead4",
-          },
-          hover: {
-            background: "#111c33",
-            border: "#5eead4",
-          },
-        },
-        font: {
-          color: "#e0f7ff",
-          size: 10,
-          face: "monospace",
-        },
-      };
+    const mappedNodes = data.nodes.map((n) => {
+      let nodeColor = { border: "#14b8a6", background: "#0f172a", highlight: { border: "#5eead4", background: "#111c33" } };
+      let nodeShape = "dot";
+      let nodeShadow = false as any;
 
       if (n.is_gateway) {
-        base.color = {
-          background: "#22c55e",
-          border: "#bbf7d0",
-          highlight: {
-            background: "#16a34a",
-            border: "#dcfce7",
-          },
-          hover: {
-            background: "#16a34a",
-            border: "#dcfce7",
-          },
-        };
+        nodeShape = "diamond";
+        nodeColor.border = "#22c55e"; // Green for gateway
+        nodeColor.highlight.border = "#bbf7d0";
       }
 
-      if (isVulnerable) {
-        base.color = {
-          background: "#ef4444",
-          border: "#fecaca",
-          highlight: {
-            background: "#f87171",
-            border: "#fee2e2",
-          },
-          hover: {
-            background: "#f87171",
-            border: "#fee2e2",
-          },
-        };
-        base.shadow = {
-          enabled: true,
-          color: "#ef4444",
-          size: 18,
-          x: 0,
-          y: 0,
-        };
+      if (n.vulnerability_severity === "high" || n.vulnerability_severity === "critical") {
+        nodeColor.border = "#ef4444";
+        nodeColor.highlight.border = "#fecaca";
+        nodeShadow = { enabled: true, color: "#ef4444", size: 18, x: 0, y: 0 };
       }
 
-      return base;
+      return {
+        id: n.id,
+        label: n.hostname || n.ip_address,
+        shape: nodeShape,
+        color: nodeColor,
+        shadow: nodeShadow,
+        font: { color: "#e0f7ff", size: 12, face: "monospace" },
+        size: n.is_gateway ? 22 : 14,
+        borderWidth: 2,
+        raw: n
+      };
     });
 
-    const visEdges: VisTopologyEdge[] = data.edges.map((e, index) => ({
+    const mappedEdges = data.edges.map((e, index) => ({
       id: `e-${index}`,
-      from: String(e.source),
-      to: String(e.target),
+      from: e.source,
+      to: e.target,
+      color: { color: "#14b8a655", highlight: "#14b8a6aa" },
     }));
 
     if (!network) {
-      await nextTick();
-      const container = graphContainer.value;
-      if (!container) {
-        topologyError.value = "Topology container not found.";
-        return;
-      }
-
-      nodesDataSet = new DataSet<VisTopologyNode>();
-      edgesDataSet = new DataSet<VisTopologyEdge>();
+      visNodes = new DataSet(mappedNodes);
+      visEdges = new DataSet(mappedEdges);
 
       const options: Options = {
-        autoResize: true,
         physics: {
-          enabled: true,
           solver: "barnesHut",
-          barnesHut: {
-            gravitationalConstant: -3000,
-            centralGravity: 0.25,
-            springLength: 160,
-            springConstant: 0.04,
-            damping: 0.15,
-            avoidOverlap: 0.2,
-          },
-          stabilization: {
-            iterations: 150,
-            updateInterval: 25,
-          },
+          barnesHut: { gravitationalConstant: -2000, centralGravity: 0.3, springLength: 95, damping: 0.15 },
         },
-        interaction: {
-          hover: true,
-        },
-        nodes: {
-          borderWidth: 2,
-        },
-        edges: {
-          width: 1,
-          color: {
-            color: "#14b8a655",
-            highlight: "#2dd4bf",
-            hover: "#2dd4bf",
-          },
-          arrows: {
-            to: {
-              enabled: true,
-              scaleFactor: 0.6,
-            },
-          },
-          smooth: {
-            type: "dynamic",
-          },
-        },
+        nodes: { borderWidth: 2 },
+        edges: { width: 1, smooth: { type: "continuous" } },
+        interaction: { hover: true, tooltipDelay: 200 }
       };
 
-      network = new Network(
-        container,
-        {
-          nodes: nodesDataSet,
-          edges: edgesDataSet,
-        },
-        options
-      );
+      network = new Network(graphContainer.value, { nodes: visNodes, edges: visEdges }, options);
+
+      network.on("selectNode", async (params) => {
+        if (!visNodes) return;
+        const nodeId = params.nodes[0];
+        const tappedNode = visNodes.get(nodeId).raw as TopologyNode;
+        
+        selectedNode.value = tappedNode;
+        selectedTarget.value = tappedNode.ip_address; // Auto-fill Quick Recon
+
+        const detail = await loadDeviceDetail(tappedNode.id);
+        const mac = detail?.device.mac_address ?? null;
+        const type = detail?.type_guess ?? detail?.device.device_type ?? tappedNode.device_type ?? null;
+
+        emit("node-selected", { ip: tappedNode.ip_address, mac, type });
+      });
 
       network.on("hoverNode", (params) => {
-        if (!nodesDataSet) return;
-        const node = nodesDataSet.get(params.node) as VisTopologyNode | null;
-        if (!node) return;
-        hoveredNode.value = {
-          id: Number(node.id),
-          label: node.label,
-          ip_address: node.ip_address,
-          hostname: node.hostname,
-          device_type: node.device_type,
-          is_gateway: Boolean(node.is_gateway),
-          zone: node.zone,
-          vulnerability_severity: node.vulnerability_severity,
-          vulnerability_count: Number(node.vulnerability_count ?? 0),
-          last_seen: node.last_seen,
-        };
+        if (!visNodes) return;
+        hoveredNode.value = visNodes.get(params.node).raw as TopologyNode;
       });
 
       network.on("blurNode", () => {
         hoveredNode.value = null;
       });
 
-      network.on("selectNode", (params) => {
-        void (async () => {
-          if (!nodesDataSet) return;
-          const nodeId = params.nodes?.[0];
-          if (!nodeId) return;
-          const node = nodesDataSet.get(nodeId) as VisTopologyNode | null;
-          if (!node) return;
-
-          const tappedNode: TopologyNode = {
-            id: Number(node.id),
-            label: node.label,
-            ip_address: node.ip_address,
-            hostname: node.hostname,
-            device_type: node.device_type,
-            is_gateway: Boolean(node.is_gateway),
-            zone: node.zone,
-            vulnerability_severity: node.vulnerability_severity,
-            vulnerability_count: Number(node.vulnerability_count ?? 0),
-            last_seen: node.last_seen,
-          };
-
-          selectedNode.value = tappedNode;
-          selectedTarget.value = tappedNode.ip_address;
-
-          const detail = await loadDeviceDetail(tappedNode.id);
-
-          const mac = detail?.device.mac_address ?? null;
-          const type =
-            detail?.type_guess ??
-            detail?.device.device_type ??
-            tappedNode.device_type ??
-            null;
-
-          emit("node-selected", { ip: tappedNode.ip_address, mac, type });
-        })();
-      });
+    } else {
+      visNodes?.clear();
+      visEdges?.clear();
+      visNodes?.add(mappedNodes);
+      visEdges?.add(mappedEdges);
     }
-
-    if (!nodesDataSet || !edgesDataSet) {
-      topologyError.value = "Topology graph is not initialized.";
-      return;
-    }
-
-    nodesDataSet.clear();
-    edgesDataSet.clear();
-    nodesDataSet.add(visNodes);
-    edgesDataSet.add(visEdges);
-
-    network?.stabilize();
   } catch {
     topologyError.value = "Failed to load topology.";
   } finally {
@@ -458,8 +303,7 @@ async function loadZones(): Promise<void> {
     if (!selectedZone.value && zones.value.length) {
       selectedZone.value = zones.value[0];
     }
-  } catch {
-  }
+  } catch {}
 }
 
 async function loadDeviceDetail(deviceId: number): Promise<DeviceDetail | null> {
@@ -485,26 +329,13 @@ onMounted(() => {
   loadZones().then(() => {
     loadTopology();
   });
-
-  topologyInterval = window.setInterval(() => {
-    loadTopology();
-  }, 60000);
+  topologyInterval = window.setInterval(() => { loadTopology(); }, 60000);
 });
 
 onBeforeUnmount(() => {
-  if (topologyInterval !== undefined) {
-    clearInterval(topologyInterval);
-  }
-  if (logSocket) {
-    logSocket.close();
-    logSocket = null;
-  }
-  if (network) {
-    network.destroy();
-    network = null;
-    nodesDataSet = null;
-    edgesDataSet = null;
-  }
+  if (topologyInterval !== undefined) clearInterval(topologyInterval);
+  if (logSocket) { logSocket.close(); logSocket = null; }
+  if (network) { network.destroy(); network = null; }
 });
 </script>
 
@@ -526,33 +357,21 @@ onBeforeUnmount(() => {
           style="border-color: var(--np-border); color: var(--np-text)"
         >
           <option :value="null">All zones</option>
-          <option
-            v-for="z in zones"
-            :key="z"
-            :value="z"
-          >
-            {{ z }}
-          </option>
+          <option v-for="z in zones" :key="z" :value="z">{{ z }}</option>
         </select>
       </div>
     </header>
 
     <div class="grid gap-3 lg:grid-rows-[minmax(0,2fr)_minmax(0,1.4fr)]">
       <div
-        class="relative h-52 w-full rounded-md border bg-black/40"
+        ref="graphContainer"
+        class="relative min-h-[300px] w-full rounded-md border bg-black/40"
         style="border-color: var(--np-border)"
       >
-        <div ref="graphContainer" class="absolute inset-0"></div>
-        <div
-          v-if="topologyLoading"
-          class="absolute inset-0 z-10 flex items-center justify-center text-xs text-[var(--np-muted-text)]"
-        >
-          Building network graph…
+        <div v-if="topologyLoading" class="absolute inset-0 flex items-center justify-center text-xs text-[var(--np-muted-text)] pointer-events-none z-10">
+          Building physics graph…
         </div>
-        <div
-          v-else-if="topologyError"
-          class="absolute inset-0 z-10 flex items-center justify-center text-xs text-rose-300"
-        >
+        <div v-else-if="topologyError" class="absolute inset-0 flex items-center justify-center text-xs text-rose-300 pointer-events-none z-10">
           {{ topologyError }}
         </div>
       </div>
