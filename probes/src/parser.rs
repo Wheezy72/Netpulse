@@ -12,20 +12,13 @@ use pnet_packet::{
 use crate::event::PacketEvent;
 
 /// BPF deny-list that drops HL7 (2575), DICOM (104), and DICOM-TLS (2762)
-/// at the kernel level before the packet ever reaches userspace.
-///
-/// WHY a deny-list rather than an allow-list: the probe is a passive observer
-/// of general network traffic. Dropping only the medically sensitive ports lets
-/// all other traffic flow through while guaranteeing that active probing of
-/// medical-grade devices is physically impossible from this path.
+/// before packets reach userspace — prevents passive capture from touching
+/// medical-grade devices.
 pub const MEDICAL_PORT_BPF_DENY_FILTER: &str =
     "not (tcp port 2575 or tcp port 104 or tcp port 2762)";
 
 /// Parse a raw libpcap frame into a [`PacketEvent`].
-///
-/// Returns `None` only when the frame is so malformed that not even the
-/// Ethernet header is parseable — in practice this should never happen on a
-/// well-formed interface capture.
+/// Returns `None` if the frame is too short to contain an Ethernet header.
 pub fn parse_raw_frame_into_packet_event(raw_frame: &[u8]) -> Option<PacketEvent> {
     let ethernet_frame = EthernetPacket::new(raw_frame)?;
 

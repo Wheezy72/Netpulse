@@ -11,19 +11,10 @@ use event::PacketEvent;
 use parser::{parse_raw_frame_into_packet_event, MEDICAL_PORT_BPF_DENY_FILTER};
 use publisher::{connect_and_declare_exchange, log_publish_error, publish_packet_event};
 
-/// Default AMQP URL used when `RABBITMQ_URL` is not set in the environment.
 const DEFAULT_RABBITMQ_URL: &str = "amqp://netpulse:netpulse@localhost:5672/netpulse";
-
-/// Default network interface used when `PROBE_IFACE` is not set.
 const DEFAULT_CAPTURE_INTERFACE: &str = "eth0";
-
-/// Internal channel capacity. Back-pressure here means the capture thread
-/// briefly blocks rather than dropping frames silently.
 const PACKET_CHANNEL_BUFFER_SIZE: usize = 4096;
 
-/// Read an environment variable, returning the fallback value when the
-/// variable is unset or empty — identical semantics to the Go probe's
-/// `mustGetenv`.
 fn read_env_or_fallback(variable_name: &str, fallback_value: &str) -> String {
     match std::env::var(variable_name) {
         Ok(value) if !value.is_empty() => value,
@@ -70,24 +61,18 @@ async fn main() {
     let (packet_event_sender, mut packet_event_receiver) =
         mpsc::channel::<PacketEvent>(PACKET_CHANNEL_BUFFER_SIZE);
 
-    // The pcap API is inherently blocking, so capture runs in a dedicated
-    // OS thread managed by tokio's blocking thread-pool.
-    tokio::task::spawn_blocking(move || {
-        loop {
-            match packet_capture.next_packet() {
-                Ok(raw_frame) => {
-                    if let Some(event) = parse_raw_frame_into_packet_event(raw_frame.data) {
-                        // Dropping here (when the channel is full) is
-                        // intentional: back-pressure shedding is safer than
-                        // unbounded memory growth under burst traffic.
-                        let _ = packet_event_sender.blocking_send(event);
-                    }
+    // pcap is blocking; run it on a dedicated OS thread so it doesn't starve the async runtime.
+    tokio::task::spawn_blocking(move || loop {
+        match packet_capture.next_packet() {
+            Ok(raw_frame) => {
+                if let Some(event) = parse_raw_frame_into_packet_event(raw_frame.data) {
+                    let _ = packet_event_sender.blocking_send(event);
                 }
-                Err(pcap::Error::TimeoutExpired) => continue,
-                Err(err) => {
-                    error!(error = %err, "pcap capture error — exiting capture loop");
-                    break;
-                }
+            }
+            Err(pcap::Error::TimeoutExpired) => continue,
+            Err(err) => {
+                error!(error = %err, "pcap capture error — exiting capture loop");
+                break;
             }
         }
     });
@@ -101,7 +86,7 @@ async fn main() {
     loop {
         tokio::select! {
             _ = signal::ctrl_c() => {
-                info!("probe: received shutdown signal — draining channel and exiting");
+                info!("probe: received shutdown signal — exiting");
                 break;
             }
             Some(event) = packet_event_receiver.recv() => {

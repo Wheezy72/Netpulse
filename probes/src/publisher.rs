@@ -15,12 +15,8 @@ const AMQP_MAX_CONNECTION_ATTEMPTS: u32 = 10;
 const AMQP_INITIAL_BACKOFF_SECONDS: u64 = 2;
 const AMQP_MAX_BACKOFF_SECONDS: u64 = 30;
 
-/// Establish an AMQP connection and open a channel with the telemetry exchange declared.
-///
-/// Retries up to [`AMQP_MAX_CONNECTION_ATTEMPTS`] times with exponential backoff
-/// capped at [`AMQP_MAX_BACKOFF_SECONDS`]. This mirrors the Go probe's retry loop
-/// and is required because RabbitMQ may still be starting when the probe container
-/// comes up, even with `depends_on: condition: service_healthy`.
+/// Connect to RabbitMQ and declare the telemetry exchange.
+/// Retries up to [`AMQP_MAX_CONNECTION_ATTEMPTS`] times with capped exponential backoff.
 pub async fn connect_and_declare_exchange(
     amqp_url: &str,
 ) -> Result<(Connection, Channel), lapin::Error> {
@@ -62,7 +58,7 @@ async fn try_connect_and_declare(amqp_url: &str) -> Result<(Connection, Channel)
     Ok((connection, channel))
 }
 
-/// Serialise a [`PacketEvent`] and publish it to the telemetry exchange.
+/// Serialise a [`PacketEvent`] to JSON and publish it to the telemetry exchange.
 pub async fn publish_packet_event(
     channel: &Channel,
     event: &PacketEvent,
@@ -83,12 +79,7 @@ pub async fn publish_packet_event(
     Ok(())
 }
 
-/// Log a publish error without panicking.
-///
-/// WHY not propagate: a single failed publish is not fatal. The probe should
-/// keep capturing packets even if RabbitMQ drops a message; the alternative
-/// (crashing on every publish failure) would cause the container to restart-
-/// loop and lose far more telemetry than a single dropped event.
+/// Log a publish failure without panicking — a dropped message is less harmful than a crash loop.
 pub fn log_publish_error(error: &dyn std::error::Error) {
     error!(error = %error, "failed to publish packet event to RabbitMQ");
 }

@@ -46,12 +46,10 @@ def _reset_token_key(token: str) -> str:
 
 
 async def _enforce_login_rate_limit(request: Request) -> None:
-    """Reject the request if the client IP has exceeded the login attempt ceiling.
+    """Block the request if the client IP has exceeded the login attempt ceiling.
 
-    WHY Redis sorted set: each attempt timestamp is stored as a member with its
-    Unix epoch as the score. A single ZREMRANGEBYSCORE + ZCARD pipeline gives an
-    atomic sliding-window count without a race condition, and the key expires
-    automatically when the window elapses — no background cleanup task needed.
+    Uses a Redis sorted-set sliding window: timestamps are members scored by their
+    Unix epoch, so ZREMRANGEBYSCORE + ZCARD runs atomically in a single pipeline.
     """
     client_ip = request.client.host if request.client else "unknown"
     redis_client = _build_redis_client()
@@ -82,12 +80,7 @@ async def _store_password_reset_token_in_redis(token: str, user_email: str) -> N
 
 
 async def _consume_password_reset_token_from_redis(token: str) -> str | None:
-    """Return the associated email and atomically delete the token.
-
-    WHY DELETE on read: reset tokens are single-use by design. Deleting
-    immediately after the email is retrieved prevents replay attacks even
-    if the caller later raises an exception before the password is updated.
-    """
+    """Return the email for the token and delete it (tokens are single-use)."""
     redis_client = _build_redis_client()
     reset_token_key = _reset_token_key(token)
     token_data = await redis_client.hgetall(reset_token_key)

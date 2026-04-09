@@ -2,13 +2,8 @@ use serde::{Deserialize, Serialize};
 
 /// JSON payload published to RabbitMQ for every captured packet.
 ///
-/// Field names match the original Go probe schema exactly so that the Python
-/// consumer (which deserialises this JSON) requires no changes.
-///
-/// Optional fields use `skip_serializing_if` rather than `Option` with
-/// `serde(skip_serializing_if = "Option::is_none")` so that the JSON output is
-/// identical to the Go `omitempty` behaviour: absent when the underlying value
-/// is the zero/empty string or zero integer.
+/// Field names use short JSON keys (`ts`, `src_mac`, etc.) to match the schema
+/// expected by the Python consumer. Optional fields are omitted when zero/empty.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PacketEvent {
     #[serde(rename = "ts")]
@@ -35,8 +30,7 @@ pub struct PacketEvent {
     #[serde(rename = "dst_port", default, skip_serializing_if = "is_zero_u16")]
     pub destination_port: u16,
 
-    /// Always serialised (no skip) — mirrors the Go probe's `payload_len`
-    /// field which has no `omitempty` tag.
+    /// Always present in JSON even when zero.
     #[serde(rename = "payload_len")]
     pub payload_length_bytes: usize,
 }
