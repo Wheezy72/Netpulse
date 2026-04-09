@@ -1,7 +1,7 @@
 # =============================================================================
 # Stage 1: builder – compile Python wheels and install build-time tools.
 # =============================================================================
-FROM python:3.11-slim AS builder
+FROM python:3.14-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -26,7 +26,7 @@ RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
 # =============================================================================
 # Stage 2: runtime – minimal Debian base, no compilers, no source code.
 # =============================================================================
-FROM python:3.11-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
