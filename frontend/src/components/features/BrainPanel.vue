@@ -192,7 +192,7 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <div class="flex gap-1 mb-3 border-b" style="border-color: var(--np-border)">
+    <div class="flex gap-1 mb-3 border-b border-amber-500/15 dark:border-teal-500/20">
       <button
         v-for="tab in (['console', 'ai-generate', 'scripts'] as const)"
         :key="tab"
@@ -212,8 +212,7 @@ onBeforeUnmount(() => {
     <div v-if="activeTab === 'console'" class="np-fade-in">
       <div
         id="brain-terminal"
-        class="relative h-48 rounded-lg border bg-black/90 overflow-auto"
-        style="border-color: var(--np-border)"
+        class="relative h-48 rounded-lg border bg-black/90 overflow-auto border-amber-500/15 dark:border-teal-500/20"
       >
         <div
           v-if="brainLogs.length === 0"
@@ -243,8 +242,8 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else-if="activeTab === 'ai-generate'" class="np-fade-in space-y-3">
-      <div class="rounded-lg border p-4" style="border-color: var(--np-border); background: var(--np-surface)">
-        <h3 class="text-sm font-medium mb-3" style="color: var(--np-accent-primary)">
+      <div class="rounded-lg border p-4 border-amber-500/15 dark:border-teal-500/20 bg-gray-900 dark:bg-[#0a0f1e]">
+        <h3 class="text-sm font-medium mb-3 text-amber-500 dark:text-teal-500">
           Generate a Script
         </h3>
         <p class="text-[0.7rem] text-[var(--np-muted-text)] mb-3">
@@ -282,15 +281,15 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div v-if="aiExplanation && !showEditor" class="rounded-lg border p-3" style="border-color: var(--np-border); background: var(--np-surface)">
+      <div v-if="aiExplanation && !showEditor" class="rounded-lg border p-3 border-amber-500/15 dark:border-teal-500/20 bg-gray-900 dark:bg-[#0a0f1e]">
         <p class="text-xs text-[var(--np-muted-text)]">{{ aiExplanation }}</p>
       </div>
 
-      <div v-if="showEditor" class="rounded-lg border overflow-hidden np-slide-up" style="border-color: var(--np-border)">
-        <div class="flex items-center justify-between px-3 py-2" style="background: var(--np-surface)">
+      <div v-if="showEditor" class="rounded-lg border overflow-hidden np-slide-up border-amber-500/15 dark:border-teal-500/20">
+        <div class="flex items-center justify-between px-3 py-2 bg-gray-900 dark:bg-[#0a0f1e]">
           <div class="flex items-center gap-2">
-            <span class="text-xs font-mono" style="color: var(--np-accent-primary)">{{ generatedFilename }}</span>
-            <span class="text-[0.6rem] px-1.5 py-0.5 rounded" style="background: var(--np-accent-primary); color: var(--np-bg)">Generated</span>
+            <span class="text-xs font-mono text-amber-500 dark:text-teal-500">{{ generatedFilename }}</span>
+            <span class="text-[0.6rem] px-1.5 py-0.5 rounded bg-amber-500 dark:bg-teal-500 text-[#0a0f1a] dark:text-[#030712]">Generated</span>
           </div>
           <div class="flex items-center gap-2">
             <button

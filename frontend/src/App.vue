@@ -118,8 +118,7 @@ onMounted(async () => {
 
 <template>
   <div
-    class="min-h-screen flex"
-    :style="{ backgroundColor: 'var(--np-bg)', color: 'var(--np-text)' }"
+    class="min-h-screen flex bg-[#0a0f1a] dark:bg-[#030712] text-slate-100 dark:text-sky-100"
   >
     <!-- Command palette (global) -->
     <CommandPalette />
@@ -174,7 +173,7 @@ onMounted(async () => {
         ]"
       >
         <!-- Logo -->
-        <div class="flex items-center gap-3 px-3 py-4 border-b" :style="{ borderColor: 'var(--np-border)' }">
+        <div class="flex items-center gap-3 px-3 py-4 border-b border-amber-500/15 dark:border-teal-500/20">
           <div
             class="h-9 w-9 rounded-lg flex items-center justify-center border shrink-0"
             :class="isNightshade ? 'border-teal-400/60 bg-slate-900/80' : 'border-amber-500/50 bg-slate-800/50'"
@@ -196,8 +195,7 @@ onMounted(async () => {
         <button
           type="button"
           @click="ui.toggleSidebar()"
-          class="hidden md:flex items-center justify-center w-full py-2 text-[var(--np-muted-text)] hover:text-[var(--np-text)] transition-colors border-b"
-          :style="{ borderColor: 'var(--np-border)' }"
+          class="hidden md:flex items-center justify-center w-full py-2 text-[var(--np-muted-text)] hover:text-[var(--np-text)] transition-colors border-b border-amber-500/15 dark:border-teal-500/20"
         >
           <svg
             class="w-4 h-4 transition-transform duration-300"
@@ -213,8 +211,7 @@ onMounted(async () => {
           v-if="ui.sidebarExpanded"
           type="button"
           @click="ui.openCommandPalette()"
-          class="mx-2 mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs transition-colors hover:border-[var(--np-accent-primary)]"
-          :style="{ borderColor: 'var(--np-border)', color: 'var(--np-muted-text)' }"
+          class="mx-2 mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs transition-colors hover:border-[var(--np-accent-primary)] border-amber-500/15 dark:border-teal-500/20 text-slate-400 dark:text-teal-300"
           title="Open command palette"
         >
           <span class="flex-1 text-left">Search commands…</span>
@@ -267,7 +264,7 @@ onMounted(async () => {
         </nav>
 
         <!-- Footer: theme toggle + user info + logout -->
-        <div class="border-t px-2 py-3 space-y-2" :style="{ borderColor: 'var(--np-border)' }">
+        <div class="border-t px-2 py-3 space-y-2 border-amber-500/15 dark:border-teal-500/20">
           <button
             type="button"
             @click="toggleTheme"

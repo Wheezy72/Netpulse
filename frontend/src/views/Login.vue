@@ -303,8 +303,7 @@ async function handleSubmit(): Promise<void> {
 
 <template>
   <div
-    class="min-h-screen flex items-center justify-center relative overflow-hidden"
-    :style="{ backgroundColor: 'var(--np-bg)' }"
+    class="min-h-screen flex items-center justify-center relative overflow-hidden bg-[#0a0f1a] dark:bg-[#030712]"
   >
     <canvas
       ref="canvasRef"

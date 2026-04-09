@@ -72,30 +72,24 @@ function execute(idx = selectedIdx.value) {
       >
         <div
           ref="paletteRef"
-          class="w-full max-w-lg rounded-xl border shadow-2xl overflow-hidden"
-          style="
-            background: var(--np-surface);
-            border-color: var(--np-border);
-          "
+          class="w-full max-w-lg rounded-xl border shadow-2xl overflow-hidden bg-gray-900 dark:bg-[#0a0f1e] border-amber-500/15 dark:border-teal-500/20"
         >
           <!-- Search input -->
-          <div class="flex items-center gap-3 px-4 py-3 border-b" style="border-color: var(--np-border)">
-            <span style="color: var(--np-muted-text)">⌘</span>
+          <div class="flex items-center gap-3 px-4 py-3 border-b border-amber-500/15 dark:border-teal-500/20">
+            <span class="text-slate-400 dark:text-teal-300">⌘</span>
             <input
               autofocus
               v-model="query"
               type="text"
               placeholder="Search commands, navigate views…"
-              class="flex-1 bg-transparent outline-none text-sm"
-              style="color: var(--np-text)"
+              class="flex-1 bg-transparent outline-none text-sm text-slate-100 dark:text-sky-100"
               @keydown.up.prevent="selectUp"
               @keydown.down.prevent="selectDown"
               @keydown.enter.prevent="execute()"
               @keydown.escape="ui.closeCommandPalette()"
             />
             <kbd
-              class="text-xs px-1.5 py-0.5 rounded border"
-              style="border-color: var(--np-border); color: var(--np-muted-text)"
+              class="text-xs px-1.5 py-0.5 rounded border border-amber-500/15 dark:border-teal-500/20 text-slate-400 dark:text-teal-300"
             >Esc</kbd>
           </div>
 
@@ -103,8 +97,7 @@ function execute(idx = selectedIdx.value) {
           <ul class="max-h-80 overflow-y-auto py-1" role="listbox">
             <li
               v-if="filtered.length === 0"
-              class="px-4 py-3 text-sm"
-              style="color: var(--np-muted-text)"
+              class="px-4 py-3 text-sm text-slate-400 dark:text-teal-300"
             >
               No commands found
             </li>
@@ -113,23 +106,19 @@ function execute(idx = selectedIdx.value) {
               :key="cmd.label"
               role="option"
               :aria-selected="idx === selectedIdx"
-              class="flex items-center gap-3 px-4 py-2.5 cursor-pointer text-sm transition-colors"
-              :style="{
-                background: idx === selectedIdx ? 'rgba(var(--np-accent-teal, 20 184 166) / 0.12)' : 'transparent',
-                color: 'var(--np-text)',
-              }"
+              class="flex items-center gap-3 px-4 py-2.5 cursor-pointer text-sm transition-colors text-slate-100 dark:text-sky-100"
+              :class="idx === selectedIdx ? 'bg-amber-500/10 dark:bg-teal-500/10' : ''"
               @mouseenter="selectedIdx = idx"
               @click="execute(idx)"
             >
-              <span style="color: var(--np-accent-primary)">{{ cmd.icon }}</span>
+              <span class="text-amber-500 dark:text-teal-500">{{ cmd.icon }}</span>
               {{ cmd.label }}
             </li>
           </ul>
 
           <!-- Footer hint -->
           <div
-            class="px-4 py-2 text-xs flex gap-4 border-t"
-            style="color: var(--np-muted-text); border-color: var(--np-border)"
+            class="px-4 py-2 text-xs flex gap-4 border-t text-slate-400 dark:text-teal-300 border-amber-500/15 dark:border-teal-500/20"
           >
             <span><kbd>↑↓</kbd> navigate</span>
             <span><kbd>↵</kbd> select</span>

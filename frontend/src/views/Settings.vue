@@ -460,7 +460,7 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-4 np-fade-in">
-    <div class="flex gap-1 flex-wrap border-b pb-0" style="border-color: var(--np-border)">
+    <div class="flex gap-1 flex-wrap border-b pb-0 border-amber-500/15 dark:border-teal-500/20">
       <button
         v-for="tab in [
           { key: 'general', label: 'General' },

@@ -388,8 +388,7 @@ onBeforeUnmount(() => {
     <div class="grid gap-4 md:grid-cols-4">
       <div class="md:col-span-3">
         <div
-          class="relative h-48 w-full rounded-md border bg-black/40"
-          style="border-color: var(--np-border)"
+          class="relative h-48 w-full rounded-md border bg-black/40 border-amber-500/15 dark:border-teal-500/20"
         >
           <v-chart
             v-if="!pulseLoading && internetHealthPoints.length"
@@ -431,7 +430,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div v-if="liveLatency !== null" class="rounded-md border bg-black/40 p-2" style="border-color: var(--np-border)">
+        <div v-if="liveLatency !== null" class="rounded-md border bg-black/40 p-2 border-amber-500/15 dark:border-teal-500/20">
           <div class="flex items-center gap-1 mb-2">
             <span class="w-2 h-2 rounded-full animate-pulse" :class="isSysAdmin ? 'bg-green-500' : 'bg-emerald-400'"></span>
             <span class="text-[0.6rem] uppercase tracking-widest text-[var(--np-muted-text)]">Live</span>
@@ -456,8 +455,7 @@ onBeforeUnmount(() => {
           <div
             v-for="t in pulseTargets"
             :key="t.target"
-            class="rounded-md border bg-black/40 px-2 py-1.5"
-            style="border-color: var(--np-border)"
+            class="rounded-md border bg-black/40 px-2 py-1.5 border-amber-500/15 dark:border-teal-500/20"
           >
             <div class="flex items-center justify-between">
               <span class="font-mono text-[var(--np-text)] text-[0.7rem]">

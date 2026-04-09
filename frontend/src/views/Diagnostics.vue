@@ -283,8 +283,8 @@ onBeforeUnmount(() => {
     <header class="flex items-center justify-between">
       <div>
         <h1
-          class="text-xl font-bold tracking-wide"
-          :style="{ color: 'var(--np-accent-primary)', fontFamily: isNightshade ? '\'Orbitron\', sans-serif' : '\'Inter\', system-ui, sans-serif' }"
+          class="text-xl font-bold tracking-wide text-amber-500 dark:text-teal-500"
+          :style="{ fontFamily: isNightshade ? '\'Orbitron\', sans-serif' : '\'Inter\', system-ui, sans-serif' }"
         >
           Diagnostics
         </h1>
@@ -295,8 +295,7 @@ onBeforeUnmount(() => {
       <button
         type="button"
         @click="refresh"
-        class="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition-colors"
-        style="border-color: var(--np-border); color: var(--np-muted-text)"
+        class="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition-colors border-amber-500/15 dark:border-teal-500/20 text-slate-400 dark:text-teal-300"
         :class="healthLoading ? 'opacity-50 cursor-not-allowed' : 'hover:text-[var(--np-text)] hover:bg-white/5'"
         :disabled="healthLoading"
       >
@@ -377,10 +376,10 @@ onBeforeUnmount(() => {
       <!-- Path Diagnosis -->
       <div class="np-panel p-4 space-y-3">
         <header class="flex items-center gap-2">
-          <svg class="w-4 h-4" style="color: var(--np-accent-primary)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-4 h-4 text-amber-500 dark:text-teal-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
           </svg>
-          <span class="text-sm font-semibold" style="color: var(--np-accent-primary)">Path Analysis — Where Is the Problem?</span>
+          <span class="text-sm font-semibold text-amber-500 dark:text-teal-500">Path Analysis — Where Is the Problem?</span>
         </header>
 
         <!-- Hop chain -->
@@ -452,8 +451,8 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- TCP Probe -->
-        <div class="border-t pt-3 space-y-2" style="border-color: var(--np-border)">
-          <h3 class="text-[0.7rem] uppercase tracking-widest" style="color: var(--np-accent-primary)">
+        <div class="border-t pt-3 space-y-2 border-amber-500/15 dark:border-teal-500/20">
+          <h3 class="text-[0.7rem] uppercase tracking-widest text-amber-500 dark:text-teal-500">
             TCP Connection Probe
           </h3>
           <p class="text-[0.65rem] text-[var(--np-muted-text)]">
@@ -464,18 +463,15 @@ onBeforeUnmount(() => {
               v-model="tcpHost"
               type="text"
               placeholder="host or IP"
-              class="flex-1 rounded-md border bg-black/60 px-2 py-1 text-[0.75rem] focus:outline-none focus:ring-1"
-              style="border-color: var(--np-border); color: var(--np-text)"
+              class="flex-1 rounded-md border bg-black/60 px-2 py-1 text-[0.75rem] focus:outline-none focus:ring-1 border-amber-500/15 dark:border-teal-500/20 text-slate-100 dark:text-sky-100"
               @keyup.enter="runTcpTest"
-            />
             <input
               v-model.number="tcpPort"
               type="number"
               min="1"
               max="65535"
               placeholder="port"
-              class="w-20 rounded-md border bg-black/60 px-2 py-1 text-[0.75rem] focus:outline-none focus:ring-1"
-              style="border-color: var(--np-border); color: var(--np-text)"
+              class="w-20 rounded-md border bg-black/60 px-2 py-1 text-[0.75rem] focus:outline-none focus:ring-1 border-amber-500/15 dark:border-teal-500/20 text-slate-100 dark:text-sky-100"
             />
             <button
               type="button"
@@ -510,10 +506,10 @@ onBeforeUnmount(() => {
       <!-- Bottlenecks -->
       <div class="np-panel p-4 space-y-3">
         <header class="flex items-center gap-2">
-          <svg class="w-4 h-4" style="color: var(--np-accent-primary)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-4 h-4 text-amber-500 dark:text-teal-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
-          <span class="text-sm font-semibold" style="color: var(--np-accent-primary)">Interface Bottlenecks</span>
+          <span class="text-sm font-semibold text-amber-500 dark:text-teal-500">Interface Bottlenecks</span>
           <span class="text-[0.6rem] text-[var(--np-muted-text)] ml-1">(SNMP-based, last 5 min)</span>
         </header>
 
@@ -558,8 +554,8 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Interpretation guide -->
-        <div class="border-t pt-3 space-y-2" style="border-color: var(--np-border)">
-          <h3 class="text-[0.7rem] uppercase tracking-widest" style="color: var(--np-accent-primary)">
+        <div class="border-t pt-3 space-y-2 border-amber-500/15 dark:border-teal-500/20">
+          <h3 class="text-[0.7rem] uppercase tracking-widest text-amber-500 dark:text-teal-500">
             How to Read This
           </h3>
           <dl class="space-y-2 text-[0.7rem] text-[var(--np-muted-text)]">

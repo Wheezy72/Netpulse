@@ -426,13 +426,11 @@ onMounted(async () => {
           v-model="search"
           type="text"
           placeholder="Search IP, Hostname, Type..."
-          class="flex-1 rounded-md border bg-black/40 px-3 py-1.5 text-xs focus:outline-none focus:ring-1"
-          style="border-color: var(--np-border); color: var(--np-text)"
+          class="flex-1 rounded-md border bg-black/40 px-3 py-1.5 text-xs focus:outline-none focus:ring-1 border-amber-500/15 dark:border-teal-500/20 text-slate-100 dark:text-sky-100"
         />
         <select
           v-model="selectedZone"
-          class="rounded-md border bg-black/40 px-3 py-1.5 text-xs focus:outline-none focus:ring-1"
-          style="border-color: var(--np-border); color: var(--np-text)"
+          class="rounded-md border bg-black/40 px-3 py-1.5 text-xs focus:outline-none focus:ring-1 border-amber-500/15 dark:border-teal-500/20 text-slate-100 dark:text-sky-100"
         >
           <option :value="null">All Zones</option>
           <option v-for="z in zones" :key="z" :value="z">{{ z }}</option>
@@ -451,7 +449,7 @@ onMounted(async () => {
 
       <div v-if="loading" class="text-xs text-[var(--np-muted-text)]">Loading inventory...</div>
       <div v-else-if="error" class="text-xs text-rose-300">{{ error }}</div>
-      <div v-else class="overflow-x-auto rounded-md border" style="border-color: var(--np-border)">
+      <div v-else class="overflow-x-auto rounded-md border border-amber-500/15 dark:border-teal-500/20">
         <table class="w-full text-left text-xs">
           <thead class="bg-black/40 text-[0.65rem] uppercase tracking-wider text-[var(--np-muted-text)]">
             <tr>
@@ -461,7 +459,7 @@ onMounted(async () => {
               <th class="px-3 py-2">Status / Action</th>
             </tr>
           </thead>
-          <tbody class="divide-y" style="border-color: var(--np-border)">
+          <tbody class="divide-y border-amber-500/15 dark:border-teal-500/20">
             <tr
               v-for="d in filteredDevices"
               :key="d.id"
@@ -473,7 +471,7 @@ onMounted(async () => {
                 <div class="text-[0.65rem] text-[var(--np-muted-text)]">{{ d.hostname || d.mac_address || 'Unknown' }}</div>
               </td>
               <td class="px-3 py-2 hidden sm:table-cell">
-                <span class="rounded bg-black/40 px-1.5 py-0.5" style="border: 1px solid var(--np-border)">
+                <span class="rounded bg-black/40 px-1.5 py-0.5 border border-amber-500/15 dark:border-teal-500/20">
                   {{ d.is_gateway ? 'Gateway' : (d.device_type || 'Unknown') }}
                 </span>
               </td>

@@ -17,7 +17,7 @@ defineEmits<{
   <div class="space-y-4">
     <header class="flex items-center justify-between">
       <div>
-        <h1 class="text-xl font-bold tracking-wide" style="color: var(--np-accent-primary)">
+        <h1 class="text-xl font-bold tracking-wide text-amber-500 dark:text-teal-500">
           Automation
         </h1>
         <p class="text-xs text-[var(--np-muted-text)]">
