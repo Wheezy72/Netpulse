@@ -201,7 +201,7 @@ onBeforeUnmount(() => {
 });
 
 function statusColor(status: string): string {
-  if (status === "critical" || status === "critical") return "text-rose-400";
+  if (status === "critical") return "text-rose-400";
   if (status === "warning" || status === "degraded") return "text-amber-400";
   return "text-emerald-400";
 }
@@ -232,7 +232,7 @@ function severityBadge(severity: string): string {
           Diagnostics
         </h1>
         <p class="text-xs text-[var(--np-muted-text)]">
-          Network health · Path analysis · Issue localisation
+          Network health · Path analysis · Issue localization
         </p>
       </div>
       <button
