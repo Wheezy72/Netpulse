@@ -1,21 +1,39 @@
-# Build stage: compile the Go binary.
-FROM golang:1.22-alpine AS builder
+# =============================================================================
+# Stage 1: builder — compile the Rust binary against a musl target so the
+# resulting binary can run on a minimal Debian slim runtime without glibc
+# compatibility issues. libpcap-dev is the only build-time C dependency.
+# =============================================================================
+FROM rust:1.78-slim AS builder
 
-RUN apk add --no-cache gcc musl-dev libpcap-dev
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       libpcap-dev \
+       pkg-config \
+    && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /src
-COPY go.mod go.sum* ./
-RUN go mod download
+WORKDIR /build
 
-COPY . .
-RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o /probe .
+# Cache dependency compilation separately from application source so that
+# Docker layer caching skips the (slow) dependency build when only src/ changes.
+COPY Cargo.toml ./
+RUN mkdir -p src && echo 'fn main() {}' > src/main.rs && cargo build --release 2>/dev/null; rm -rf src
+
+COPY src ./src
+RUN cargo build --release
 
 
-# Runtime stage: minimal Alpine with libpcap only.
-FROM alpine:3.19
+# =============================================================================
+# Stage 2: runtime — Debian slim with libpcap only. No compiler, no source.
+# =============================================================================
+FROM debian:bookworm-slim AS runtime
 
-RUN apk add --no-cache libpcap ca-certificates
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       libpcap0.8 \
+       ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /probe /usr/local/bin/probe
+COPY --from=builder /build/target/release/probe /usr/local/bin/probe
 
 ENTRYPOINT ["/usr/local/bin/probe"]
+

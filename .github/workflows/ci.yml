@@ -60,30 +60,35 @@ jobs:
         run: pytest tests/ -v
 
   # ---------------------------------------------------------------------------
-  # Go probe: vet + unit tests
+  # Rust probe: fmt check, clippy, unit tests (no network / pcap required)
   # ---------------------------------------------------------------------------
-  lint-test-go:
-    name: Vet + Test Go (probe)
+  lint-test-rust:
+    name: Fmt + Clippy + Test (Rust probe)
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - name: Install Rust toolchain with clippy and rustfmt
+        uses: dtolnay/rust-toolchain@stable
         with:
-          go-version: "1.22"
+          components: clippy, rustfmt
 
-      - name: Install libpcap (required by gopacket/pcap)
+      - name: Install libpcap (required by the pcap crate at compile time)
         run: sudo apt-get update && sudo apt-get install -y libpcap-dev
 
-      - name: go vet
+      - name: cargo fmt --check
         working-directory: probes
-        run: go vet ./...
+        run: cargo fmt --all -- --check
 
-      - name: go test
+      - name: cargo clippy
         working-directory: probes
-        run: go test -v ./...
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo test
+        working-directory: probes
+        run: cargo test
 
   # ---------------------------------------------------------------------------
   # Docker build smoke test — proves all Dockerfiles build cleanly.

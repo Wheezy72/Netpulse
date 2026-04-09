@@ -210,7 +210,7 @@ services:
       - app_data:/app/data
 
   # ---------------------------------------------------------------------------
-  # Data-plane probe (Go) – passive packet capture, HL7/DICOM BPF drop, telemetry fan-out
+  # Data-plane probe (Rust) – passive packet capture, HL7/DICOM BPF drop, telemetry fan-out
   # ---------------------------------------------------------------------------
   probe:
     build:

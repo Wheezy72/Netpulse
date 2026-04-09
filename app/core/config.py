@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # Redis / Celery
     redis_url: str = "redis://redis:6379/0"
 
-    # RabbitMQ – used by the Go data-plane probe for telemetry fan-out.
+    # RabbitMQ – used by the Rust data-plane probe for telemetry fan-out.
     rabbitmq_url: str = "amqp://netpulse:netpulse@rabbitmq:5672/netpulse"
 
     # InfluxDB – time-series storage for probe telemetry and bandwidth metrics.
