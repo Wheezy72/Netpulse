@@ -147,7 +147,7 @@ async def detect_bottlenecks(db: AsyncSession) -> List[Dict[str, Any]]:
 def _get_recommendation(issues: List[str], device: Device) -> str:
     """Generate a recommendation based on detected issues."""
     recommendations = []
-    
+
     for issue in issues:
         if "latency" in issue.lower():
             recommendations.append("Check for congestion on network path")
@@ -161,7 +161,7 @@ def _get_recommendation(issues: List[str], device: Device) -> str:
         if any(k in issue.lower() for k in ["bandwidth", "interface traffic", "traffic"]):
             recommendations.append("Identify top bandwidth consumers")
             recommendations.append("Implement QoS policies or rate limits")
-    
+
     return "; ".join(recommendations[:2]) if recommendations else "Monitor and investigate further"
 
 
@@ -171,7 +171,7 @@ async def get_nmap_recommendations(
     db: Optional[AsyncSession] = None,
 ) -> Dict[str, Any]:
     """Get intelligent nmap scan recommendations based on target characteristics.
-    
+
     Args:
         target_ip: The IP address to scan
         target_type: Optional hint about target type (router, server, iot, etc.)
@@ -183,14 +183,14 @@ async def get_nmap_recommendations(
             select(Device).where(Device.ip_address == target_ip)
         )
         device_info = result.scalar_one_or_none()
-    
+
     recommendations = []
-    
+
     if device_info:
         known_type = getattr(device_info, 'device_type', None)
         if known_type:
             target_type = known_type
-    
+
     recommendations.append({
         "scan_type": "Discovery",
         "command": f"nmap -sn {target_ip}",
@@ -198,7 +198,7 @@ async def get_nmap_recommendations(
         "time_estimate": "< 1 second",
         "risk": "low",
     })
-    
+
     recommendations.append({
         "scan_type": "Quick Port Scan",
         "command": f"nmap -T4 -F {target_ip}",
@@ -206,10 +206,10 @@ async def get_nmap_recommendations(
         "time_estimate": "5-10 seconds",
         "risk": "low",
     })
-    
+
     if target_type:
         type_lower = target_type.lower()
-        
+
         if type_lower in ["router", "switch", "firewall", "network"]:
             recommendations.append({
                 "scan_type": "Network Device Scan",
@@ -218,7 +218,7 @@ async def get_nmap_recommendations(
                 "time_estimate": "30-60 seconds",
                 "risk": "low",
             })
-        
+
         elif type_lower in ["server", "linux", "windows"]:
             recommendations.append({
                 "scan_type": "Server Audit",
@@ -234,7 +234,7 @@ async def get_nmap_recommendations(
                 "time_estimate": "2-5 minutes",
                 "risk": "medium",
             })
-        
+
         elif type_lower in ["web", "http", "webserver"]:
             recommendations.append({
                 "scan_type": "Web Server Scan",
@@ -243,7 +243,7 @@ async def get_nmap_recommendations(
                 "time_estimate": "1-3 minutes",
                 "risk": "low",
             })
-        
+
         elif type_lower in ["database", "db", "mysql", "postgres"]:
             recommendations.append({
                 "scan_type": "Database Scan",
@@ -252,7 +252,7 @@ async def get_nmap_recommendations(
                 "time_estimate": "30-60 seconds",
                 "risk": "low",
             })
-        
+
         elif type_lower in ["iot", "camera", "smart"]:
             recommendations.append({
                 "scan_type": "IoT Device Scan",
@@ -261,7 +261,7 @@ async def get_nmap_recommendations(
                 "time_estimate": "30-60 seconds",
                 "risk": "low",
             })
-    
+
     recommendations.append({
         "scan_type": "Comprehensive Audit",
         "command": f"nmap -sS -sV -O -A -p- {target_ip}",
@@ -269,7 +269,7 @@ async def get_nmap_recommendations(
         "time_estimate": "15-30 minutes",
         "risk": "high",
     })
-    
+
     return {
         "target": target_ip,
         "detected_type": target_type,
@@ -282,7 +282,7 @@ async def get_network_health_summary(db: AsyncSession) -> Dict[str, Any]:
     """Get overall network health summary."""
     result = await db.execute(select(Device))
     devices = result.scalars().all()
-    
+
     total_devices = len(devices)
 
     now = datetime.utcnow()
@@ -293,11 +293,11 @@ async def get_network_health_summary(db: AsyncSession) -> Dict[str, Any]:
         if d.last_seen is not None and (now - d.last_seen) <= online_window
     )
     offline_devices = total_devices - online_devices
-    
+
     bottlenecks = await detect_bottlenecks(db)
     critical_issues = sum(1 for b in bottlenecks if b["severity"] == "critical")
     warning_issues = sum(1 for b in bottlenecks if b["severity"] == "warning")
-    
+
     if critical_issues > 0:
         health_status = "critical"
         health_score = max(0, 100 - (critical_issues * 20) - (warning_issues * 5))
@@ -310,7 +310,7 @@ async def get_network_health_summary(db: AsyncSession) -> Dict[str, Any]:
     else:
         health_status = "healthy"
         health_score = 100
-    
+
     return {
         "status": health_status,
         "health_score": health_score,

@@ -58,7 +58,7 @@ class IPReputationResult:
     is_tor: bool
     usage_type: Optional[str]
     risk_level: str
-    
+
     @classmethod
     def from_api_response(cls, data: dict[str, Any]) -> "IPReputationResult":
         last_reported = None
@@ -69,7 +69,7 @@ class IPReputationResult:
                 )
             except (ValueError, TypeError):
                 pass
-        
+
         score = data.get("abuseConfidenceScore", 0)
         if score >= 75:
             risk_level = "critical"
@@ -81,7 +81,7 @@ class IPReputationResult:
             risk_level = "low"
         else:
             risk_level = "clean"
-        
+
         return cls(
             ip_address=data.get("ipAddress", ""),
             is_public=data.get("isPublic", True),
@@ -96,7 +96,7 @@ class IPReputationResult:
             usage_type=data.get("usageType"),
             risk_level=risk_level,
         )
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "ip_address": self.ip_address,
@@ -116,16 +116,16 @@ class IPReputationResult:
 
 class AbuseIPDBService:
     BASE_URL = "https://api.abuseipdb.com/api/v2"
-    
+
     def __init__(self, api_token: Optional[str] = None):
         # Prefer explicit token, otherwise load from application settings/environment.
         self.api_token = api_token or settings.abuseipdb_api_key
         self._client: Optional[httpx.AsyncClient] = None
-    
+
     @property
     def is_configured(self) -> bool:
         return bool(self.api_token)
-    
+
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
@@ -137,12 +137,12 @@ class AbuseIPDBService:
                 timeout=30.0,
             )
         return self._client
-    
+
     async def close(self) -> None:
         if self._client and not self._client.is_closed:
             await self._client.aclose()
             self._client = None
-    
+
     async def check_ip(
         self,
         ip_address: str,
@@ -156,9 +156,9 @@ class AbuseIPDBService:
             if raise_on_error:
                 raise AbuseIPDBError("API key not configured")
             return None
-        
+
         last_error: Optional[Exception] = None
-        
+
         for attempt in range(max_retries + 1):
             try:
                 client = await self._get_client()
@@ -170,13 +170,13 @@ class AbuseIPDBService:
                         "verbose": str(verbose).lower(),
                     },
                 )
-                
+
                 if response.status_code == 200:
                     data = response.json()
                     if "data" in data:
                         return IPReputationResult.from_api_response(data["data"])
                     return None
-                    
+
                 elif response.status_code == 429:
                     retry_after = response.headers.get("Retry-After")
                     retry_seconds = int(retry_after) if retry_after and retry_after.isdigit() else None
@@ -184,13 +184,13 @@ class AbuseIPDBService:
                     if raise_on_error:
                         raise AbuseIPDBRateLimitExceeded(retry_seconds)
                     return None
-                    
+
                 elif response.status_code == 401:
                     logger.error("AbuseIPDB API key is invalid")
                     if raise_on_error:
                         raise InvalidAPIKey("Invalid API key")
                     return None
-                    
+
                 elif response.status_code >= 500:
                     logger.warning(f"AbuseIPDB server error ({response.status_code}), attempt {attempt + 1}/{max_retries + 1}")
                     last_error = APIError(response.status_code, "Server error")
@@ -200,13 +200,13 @@ class AbuseIPDBService:
                     if raise_on_error:
                         raise last_error
                     return None
-                    
+
                 else:
                     logger.error(f"AbuseIPDB API error: {response.status_code}")
                     if raise_on_error:
                         raise APIError(response.status_code, f"Unexpected status code")
                     return None
-                    
+
             except httpx.TimeoutException as e:
                 logger.warning(f"AbuseIPDB request timeout, attempt {attempt + 1}/{max_retries + 1}")
                 last_error = e
@@ -216,15 +216,15 @@ class AbuseIPDBService:
                 if raise_on_error:
                     raise AbuseIPDBError(f"Request timeout after {max_retries + 1} attempts")
                 return None
-                
+
             except httpx.HTTPError as e:
                 logger.error(f"AbuseIPDB request failed: {e}")
                 if raise_on_error:
                     raise AbuseIPDBError(str(e))
                 return None
-        
+
         return None
-    
+
     async def check_bulk(
         self,
         ip_addresses: list[str],
@@ -233,20 +233,20 @@ class AbuseIPDBService:
         if not self.is_configured:
             logger.warning("AbuseIPDB API key not configured")
             return []
-        
+
         if len(ip_addresses) > 100:
             ip_addresses = ip_addresses[:100]
             logger.warning("Truncating bulk check to 100 IPs (API limit)")
-        
+
         results = []
         tasks = [self.check_ip(ip, max_age_in_days, verbose=False) for ip in ip_addresses]
-        
+
         for result in await asyncio.gather(*tasks, return_exceptions=True):
             if isinstance(result, IPReputationResult):
                 results.append(result)
-        
+
         return results
-    
+
     async def report_ip(
         self,
         ip_address: str,
@@ -256,7 +256,7 @@ class AbuseIPDBService:
         if not self.is_configured:
             logger.warning("AbuseIPDB API key not configured")
             return False
-        
+
         try:
             client = await self._get_client()
             data = {
@@ -265,9 +265,9 @@ class AbuseIPDBService:
             }
             if comment:
                 data["comment"] = comment[:1024]
-            
+
             response = await client.post("/report", data=data)
-            
+
             if response.status_code == 200:
                 logger.info(f"Successfully reported IP {ip_address} to AbuseIPDB")
                 return True
@@ -277,7 +277,7 @@ class AbuseIPDBService:
         except httpx.HTTPError as e:
             logger.error(f"AbuseIPDB report failed: {e}")
             return False
-    
+
     async def get_blacklist(
         self,
         confidence_minimum: int = 90,
@@ -286,7 +286,7 @@ class AbuseIPDBService:
         if not self.is_configured:
             logger.warning("AbuseIPDB API key not configured")
             return []
-        
+
         try:
             client = await self._get_client()
             response = await client.get(
@@ -296,7 +296,7 @@ class AbuseIPDBService:
                     "limit": min(limit, 10000),
                 },
             )
-            
+
             if response.status_code == 200:
                 data = response.json()
                 return [item["ipAddress"] for item in data.get("data", [])]

@@ -917,7 +917,7 @@ def _call_external_ai(
         ai_response = " ".join(b.get("text", "") for b in content_blocks if b.get("type") == "text")
         return ai_response, ["Tell me more", "What else should I know?", "Can you give an example?"]
 
-    
+
 
     elif config.provider == "ollama":
         base_url = config.custom_base_url or "http://localhost:11434"

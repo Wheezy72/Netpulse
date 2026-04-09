@@ -279,23 +279,23 @@ async def parse_pcap_headers(
     max_packets: int = 1000,
 ) -> int:
     """Parse packet headers from a PCAP file and store in database.
-    
+
     Args:
         db: Database session
         capture_id: ID of the PacketCapture record
         max_packets: Maximum number of packet headers to store
-        
+
     Returns:
         Number of headers parsed and stored
     """
     capture = await db.get(PacketCapture, capture_id)
     if not capture:
         raise ValueError(f"Capture {capture_id} not found")
-    
+
     filepath = Path(capture.filepath)
     if not filepath.exists():
         return 0
-    
+
     def _parse_sync() -> list[dict]:
         try:
             from scapy.all import IP, IPv6, PcapReader, TCP, UDP
@@ -341,10 +341,10 @@ async def parse_pcap_headers(
             return headers
         except Exception:
             return []
-    
+
     loop = asyncio.get_event_loop()
     headers_data = await loop.run_in_executor(None, _parse_sync)
-    
+
     for hdr in headers_data:
         packet_header = PacketHeader(
             capture_id=capture_id,
@@ -357,7 +357,7 @@ async def parse_pcap_headers(
             length=hdr.get("length", 0),
         )
         db.add(packet_header)
-    
+
     await db.commit()
     return len(headers_data)
 
@@ -365,11 +365,11 @@ async def parse_pcap_headers(
 async def get_capture_stats(db: AsyncSession, capture_id: int) -> dict:
     """Get statistics for a packet capture."""
     from sqlalchemy import func, select
-    
+
     capture = await db.get(PacketCapture, capture_id)
     if not capture:
         return {}
-    
+
     result = await db.execute(
         select(
             func.count(PacketHeader.id).label("header_count"),
@@ -378,7 +378,7 @@ async def get_capture_stats(db: AsyncSession, capture_id: int) -> dict:
         ).where(PacketHeader.capture_id == capture_id)
     )
     row = result.first()
-    
+
     return {
         "capture_id": capture_id,
         "filename": capture.filename,

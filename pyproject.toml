@@ -24,3 +24,26 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.46",
     "uvicorn[standard]>=0.40.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# E/W — pycodestyle style errors and warnings
+# F   — pyflakes (real logical errors)
+select = ["E", "F", "W"]
+ignore = [
+    # ── Pre-existing patterns in the codebase (do not remove until cleaned up) ──
+    "E402",  # Module-level import not at top of file (deps.py uses module-docstring-first pattern)
+    "E501",  # Line too long (not enforced yet)
+    "F401",  # Imported but unused (many are intentional re-exports / conditional imports)
+    "F821",  # Undefined name (SQLAlchemy TYPE_CHECKING forward references not visible to ruff)
+    "F841",  # Local variable assigned but never used
+    "F541",  # f-string without any placeholders
+    "E712",  # Avoid equality comparisons to True/False (SQLAlchemy uses == True for ORM queries)
+]
