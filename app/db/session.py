@@ -12,6 +12,11 @@ engine: AsyncEngine = create_async_engine(
     settings.database_url,
     echo=False,
     future=True,
+    # Connection pool settings – sized for a PgBouncer session-mode frontend.
+    pool_size=20,
+    max_overflow=10,
+    pool_pre_ping=True,       # detect stale connections before using them
+    pool_recycle=1800,         # recycle connections every 30 min
 )
 
 

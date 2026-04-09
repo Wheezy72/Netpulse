@@ -29,6 +29,44 @@ from app.services.snmp_poller import poll_network_metrics as poll_network_metric
 logger = get_task_logger(__name__)
 
 
+@celery_app.task(name="app.tasks.write_audit_log")
+def write_audit_log(
+    user_id: int,
+    method: str,
+    path: str,
+    ip_address: str | None = None,
+    details: dict | None = None,
+) -> None:
+    """Persist an admin audit log entry asynchronously.
+
+    Fired by require_admin in app/api/deps.py so the HTTP response is never
+    blocked by a database write.
+    """
+    from app.models.audit_log import AuditLog
+
+    async def _run() -> None:
+        engine, factory = _create_session_factory()
+        try:
+            async with factory() as session:
+                session.add(
+                    AuditLog(
+                        user_id=user_id,
+                        method=method,
+                        path=path,
+                        action=f"{method} {path}",
+                        ip_address=ip_address,
+                        details=details or {},
+                    )
+                )
+                await session.commit()
+        except Exception as exc:
+            logger.warning("write_audit_log failed: %s", exc)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def _create_session_factory():
     """Create a fresh async engine and session factory for a Celery task.
 
