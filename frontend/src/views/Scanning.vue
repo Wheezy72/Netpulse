@@ -2,7 +2,7 @@
 import axios from "axios";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
-import LiveTerminal from "../components/LiveTerminal.vue";
+import LiveTerminal from "../components/features/LiveTerminal.vue";
 
 type Theme = "nightshade" | "sysadmin";
 

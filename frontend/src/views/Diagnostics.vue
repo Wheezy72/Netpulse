@@ -275,6 +275,7 @@ function stopMtr() {
 onBeforeUnmount(() => {
   stopMtr();
 });
+</script>
 
 <template>
   <div class="space-y-5">

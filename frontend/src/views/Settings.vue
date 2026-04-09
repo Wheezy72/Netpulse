@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, onMounted, ref, watch } from "vue";
-import ToggleSwitch from "../components/ToggleSwitch.vue";
+import ToggleSwitch from "../components/ui/ToggleSwitch.vue";
 
 type Theme = "nightshade" | "sysadmin";
 type InfoMode = "full" | "compact";

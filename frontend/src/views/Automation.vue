@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import BrainPanel from "../components/BrainPanel.vue";
+import BrainPanel from "../components/features/BrainPanel.vue";
 
 type Theme = "nightshade" | "sysadmin";
 

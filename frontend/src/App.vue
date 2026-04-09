@@ -11,9 +11,9 @@ import { onMounted, computed, ref, watch } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useMagicKeys } from "@vueuse/core";
 
-import CommandPalette from "./components/CommandPalette.vue";
-import ChatBot from "./components/ChatBot.vue";
-import Toast from "./components/Toast.vue";
+import CommandPalette from "./components/features/CommandPalette.vue";
+import ChatBot from "./components/features/ChatBot.vue";
+import Toast from "./components/ui/Toast.vue";
 
 import { useAuthStore } from "./stores/auth";
 import { useUiStore } from "./stores/ui";

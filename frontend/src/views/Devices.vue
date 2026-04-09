@@ -2,7 +2,7 @@
 import axios from "axios";
 import { computed, onMounted, ref } from "vue";
 import Uptime from "./Uptime.vue";
-import DeviceDrawer from "../components/DeviceDrawer.vue";
+import DeviceDrawer from "../components/features/DeviceDrawer.vue";
 import { resolveOui } from "../utils/oui";
 
 const props = defineProps<{
