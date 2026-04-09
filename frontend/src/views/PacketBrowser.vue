@@ -2,6 +2,8 @@
 import axios from "axios";
 import { computed, onMounted, ref, watch } from "vue";
 import { RecycleScroller } from "vue-virtual-scroller";
+import { Splitpanes, Pane } from "splitpanes";
+import "splitpanes/dist/splitpanes.css";
 
 type Theme = "nightshade" | "sysadmin";
 
@@ -12,6 +14,29 @@ interface Props {
 const props = defineProps<Props>();
 
 const isNightshade = computed(() => props.theme === "nightshade");
+
+// Selected packet for the raw hex view in the bottom pane.
+const selectedPacket = ref<PcapPacket | null>(null);
+
+function selectPacket(pkt: PcapPacket) {
+  selectedPacket.value = pkt;
+}
+
+// Minimal hex display: converts packet metadata into a human-readable summary.
+function buildHexView(pkt: PcapPacket | null): string {
+  if (!pkt) return "No packet selected.";
+  const lines: string[] = [
+    `Packet #${pkt.packet_index} — ${pkt.timestamp}`,
+    `Protocol : ${pkt.protocol ?? "unknown"}`,
+    `Source   : ${pkt.src_ip ?? "—"}:${pkt.src_port ?? "*"}`,
+    `Dest     : ${pkt.dst_ip ?? "—"}:${pkt.dst_port ?? "*"}`,
+    `Length   : ${pkt.length} bytes`,
+    "",
+    "── Raw data not available in browser mode ──",
+    "  (Mount the pcap and use Zeek/tshark to inspect payloads.)",
+  ];
+  return lines.join("\n");
+}
 
 type PcapFile = {
   id: number;
@@ -603,83 +628,98 @@ onMounted(() => {
         </div>
       </section>
 
-      <div
-        v-if="packetsError"
-        class="rounded-md border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-400"
+      <!-- Vertical split-pane: top = Zeek session grid, bottom = raw packet view -->
+      <Splitpanes
+        horizontal
+        class="rounded-lg overflow-hidden border"
+        :class="isNightshade ? 'border-teal-400/30' : 'border-slate-700'"
+        style="height: 520px;"
       >
-        {{ packetsError }}
-      </div>
-
-      <div
-        class="overflow-hidden rounded-lg border"
-        :class="isNightshade ? 'border-teal-400/30 bg-black/40' : 'border-slate-700 bg-slate-900/50'"
-      >
-        <div class="grid grid-cols-[10.25rem_3.5rem_11rem_11rem_6rem_5rem] gap-0 border-b px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-wider"
-          :class="isNightshade ? 'border-teal-400/20 text-teal-300/80' : 'border-slate-700 text-slate-400'"
-        >
-          <div>Timestamp</div>
-          <div>#</div>
-          <div>Source</div>
-          <div>Destination</div>
-          <div>Protocol</div>
-          <div>Len</div>
-        </div>
-
-        <div v-if="!selectedPcapId" class="p-8 text-center text-sm" :class="isNightshade ? 'text-teal-100/50' : 'text-slate-500'">
-          Select a pcap file.
-        </div>
-
-        <div v-else-if="packets.length === 0 && packetsLoading" class="p-10 flex flex-col items-center justify-center gap-3">
-          <div class="np-spinner"></div>
-          <div class="text-sm" :class="isNightshade ? 'text-teal-100/60' : 'text-slate-400'">Loading packets…</div>
-        </div>
-
-        <div v-else-if="packets.length === 0" class="p-8 text-center text-sm" :class="isNightshade ? 'text-teal-100/50' : 'text-slate-500'">
-          No packets found for this pcap. If you just captured it, wait for indexing to finish.
-        </div>
-
-        <RecycleScroller
-          v-else
-          class="np-packet-scroller"
-          :items="packets"
-          :item-size="40"
-          key-field="id"
-          :buffer="600"
-          :emit-update="true"
-          @update="handleUpdate"
-        >
-          <template #default="{ item }">
+        <!-- Top pane: packet list (Zeek sessions / indexed packets) -->
+        <Pane min-size="20">
+          <div class="h-full flex flex-col overflow-hidden">
             <div
-              class="grid grid-cols-[10.25rem_3.5rem_11rem_11rem_6rem_5rem] px-3 h-10 items-center border-b font-mono text-xs transition-colors"
-              :class="isNightshade
-                ? 'border-teal-400/10 hover:bg-teal-500/5'
-                : 'border-slate-700/50 hover:bg-slate-700/30'"
-              :style="{ borderColor: 'var(--np-border)' }"
-            >
-              <div class="truncate text-[var(--np-text)]" :title="item.timestamp">{{ formatTimestamp(item.timestamp) }}</div>
-              <div class="text-[var(--np-muted-text)]">{{ item.packet_index }}</div>
-              <div class="truncate text-[var(--np-text)]" :title="formatEndpoint(item.src_ip, item.src_port)">{{ formatEndpoint(item.src_ip, item.src_port) }}</div>
-              <div class="truncate text-[var(--np-text)]" :title="formatEndpoint(item.dst_ip, item.dst_port)">{{ formatEndpoint(item.dst_ip, item.dst_port) }}</div>
-              <div>
-                <span
-                  class="px-1.5 py-0.5 rounded text-[0.6rem] font-semibold uppercase"
-                  :class="isNightshade
-                    ? 'bg-teal-500/20 text-teal-300'
-                    : 'bg-amber-500/20 text-amber-300'"
-                >{{ item.protocol || '—' }}</span>
-              </div>
-              <div class="text-[var(--np-muted-text)]">{{ item.length }}</div>
-            </div>
-          </template>
-        </RecycleScroller>
-      </div>
+              v-if="packetsError"
+              class="px-4 py-3 text-sm text-rose-400"
+            >{{ packetsError }}</div>
 
-      <div class="flex items-center justify-between text-xs" :class="isNightshade ? 'text-teal-100/40' : 'text-slate-500'">
-        <span class="font-mono">loaded: {{ packets.length }}</span>
-        <span v-if="packetsLoading" class="font-mono">loading…</span>
-        <span v-else-if="hasMore" class="font-mono">scroll to load more</span>
-        <span v-else class="font-mono">end of capture</span>
-      </div>
+            <div
+              class="grid grid-cols-[10.25rem_3.5rem_11rem_11rem_6rem_5rem] border-b px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-wider shrink-0"
+              :class="isNightshade ? 'border-teal-400/20 text-teal-300/80 bg-black/30' : 'border-slate-700 text-slate-400 bg-slate-900/40'"
+            >
+              <div>Timestamp</div>
+              <div>#</div>
+              <div>Source</div>
+              <div>Destination</div>
+              <div>Protocol</div>
+              <div>Len</div>
+            </div>
+
+            <div v-if="!selectedPcapId" class="flex-1 flex items-center justify-center text-sm" :class="isNightshade ? 'text-teal-100/50' : 'text-slate-500'">
+              Select a pcap file.
+            </div>
+            <div v-else-if="packets.length === 0 && packetsLoading" class="flex-1 flex flex-col items-center justify-center gap-3">
+              <div class="np-spinner"></div>
+              <div class="text-sm" :class="isNightshade ? 'text-teal-100/60' : 'text-slate-400'">Loading packets…</div>
+            </div>
+            <div v-else-if="packets.length === 0" class="flex-1 flex items-center justify-center text-sm" :class="isNightshade ? 'text-teal-100/50' : 'text-slate-500'">
+              No packets. Waiting for indexing.
+            </div>
+
+            <RecycleScroller
+              v-else
+              class="flex-1"
+              :items="packets"
+              :item-size="40"
+              key-field="id"
+              :buffer="600"
+              :emit-update="true"
+              @update="handleUpdate"
+            >
+              <template #default="{ item }">
+                <div
+                  class="grid grid-cols-[10.25rem_3.5rem_11rem_11rem_6rem_5rem] px-3 h-10 items-center border-b font-mono text-xs transition-colors cursor-pointer"
+                  :class="[
+                    isNightshade ? 'border-teal-400/10 hover:bg-teal-500/5' : 'border-slate-700/50 hover:bg-slate-700/30',
+                    selectedPacket?.id === item.id ? (isNightshade ? 'bg-teal-500/10' : 'bg-amber-500/10') : '',
+                  ]"
+                  @click="selectPacket(item)"
+                >
+                  <div class="truncate text-[var(--np-text)]">{{ formatTimestamp(item.timestamp) }}</div>
+                  <div class="text-[var(--np-muted-text)]">{{ item.packet_index }}</div>
+                  <div class="truncate text-[var(--np-text)]">{{ formatEndpoint(item.src_ip, item.src_port) }}</div>
+                  <div class="truncate text-[var(--np-text)]">{{ formatEndpoint(item.dst_ip, item.dst_port) }}</div>
+                  <div>
+                    <span class="px-1.5 py-0.5 rounded text-[0.6rem] font-semibold uppercase"
+                      :class="isNightshade ? 'bg-teal-500/20 text-teal-300' : 'bg-amber-500/20 text-amber-300'"
+                    >{{ item.protocol || '—' }}</span>
+                  </div>
+                  <div class="text-[var(--np-muted-text)]">{{ item.length }}</div>
+                </div>
+              </template>
+            </RecycleScroller>
+
+            <div class="shrink-0 px-3 py-1.5 text-[0.65rem] flex gap-4 border-t" :class="isNightshade ? 'border-teal-400/10 text-teal-100/40' : 'border-slate-700 text-slate-500'">
+              <span class="font-mono">loaded: {{ packets.length }}</span>
+              <span v-if="packetsLoading" class="font-mono">loading…</span>
+              <span v-else-if="hasMore" class="font-mono">scroll to load more</span>
+            </div>
+          </div>
+        </Pane>
+
+        <!-- Bottom pane: raw hex / payload viewer -->
+        <Pane min-size="15">
+          <div
+            class="h-full p-4 font-mono text-xs overflow-auto whitespace-pre"
+            :class="isNightshade ? 'bg-black/60 text-teal-200/80' : 'bg-slate-950 text-slate-300'"
+          >
+            <div class="mb-2 text-[0.6rem] uppercase tracking-widest" :class="isNightshade ? 'text-teal-400/60' : 'text-slate-500'">
+              ── Payload Viewer ──
+            </div>
+            {{ buildHexView(selectedPacket) }}
+          </div>
+        </Pane>
+      </Splitpanes>
     </div>
   </div>
 </template>
