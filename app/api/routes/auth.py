@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import logging
 import secrets
-import time
-from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Dict
 
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
@@ -26,18 +25,76 @@ logger = logging.getLogger("netpulse.auth")
 
 router = APIRouter()
 
-login_attempts: dict[str, list[float]] = defaultdict(list)
+_RATE_LIMIT_KEY_PREFIX = "np:login_attempts:"
+_RATE_LIMIT_MAX_ATTEMPTS = 5
+_RATE_LIMIT_WINDOW_SECONDS = 300
+
+_RESET_TOKEN_KEY_PREFIX = "np:reset_token:"
+_RESET_TOKEN_TTL_SECONDS = 3600
 
 
-async def check_rate_limit(request: Request, max_attempts: int = 5, window_seconds: int = 300):
+def _build_redis_client() -> aioredis.Redis:
+    return aioredis.from_url(settings.redis_url, encoding="utf-8", decode_responses=True)
+
+
+def _rate_limit_key_for_ip(client_ip: str) -> str:
+    return f"{_RATE_LIMIT_KEY_PREFIX}{client_ip}"
+
+
+def _reset_token_key(token: str) -> str:
+    return f"{_RESET_TOKEN_KEY_PREFIX}{token}"
+
+
+async def _enforce_login_rate_limit(request: Request) -> None:
+    """Reject the request if the client IP has exceeded the login attempt ceiling.
+
+    WHY Redis sorted set: each attempt timestamp is stored as a member with its
+    Unix epoch as the score. A single ZREMRANGEBYSCORE + ZCARD pipeline gives an
+    atomic sliding-window count without a race condition, and the key expires
+    automatically when the window elapses — no background cleanup task needed.
+    """
     client_ip = request.client.host if request.client else "unknown"
-    now = time.time()
-    login_attempts[client_ip] = [t for t in login_attempts[client_ip] if now - t < window_seconds]
-    if len(login_attempts[client_ip]) >= max_attempts:
-        raise HTTPException(status_code=429, detail="Too many login attempts. Please try again later.")
-    login_attempts[client_ip].append(now)
+    redis_client = _build_redis_client()
+    rate_limit_key = _rate_limit_key_for_ip(client_ip)
+    current_unix_time = datetime.utcnow().timestamp()
+    window_start_time = current_unix_time - _RATE_LIMIT_WINDOW_SECONDS
 
-_reset_tokens: Dict[str, Dict[str, Any]] = {}
+    async with redis_client.pipeline(transaction=True) as pipeline:
+        pipeline.zremrangebyscore(rate_limit_key, "-inf", window_start_time)
+        pipeline.zcard(rate_limit_key)
+        pipeline.zadd(rate_limit_key, {str(current_unix_time): current_unix_time})
+        pipeline.expire(rate_limit_key, _RATE_LIMIT_WINDOW_SECONDS)
+        results = await pipeline.execute()
+
+    attempt_count_before_this_request = results[1]
+    if attempt_count_before_this_request >= _RATE_LIMIT_MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Please try again later.",
+        )
+
+
+async def _store_password_reset_token_in_redis(token: str, user_email: str) -> None:
+    redis_client = _build_redis_client()
+    reset_token_key = _reset_token_key(token)
+    await redis_client.hset(reset_token_key, mapping={"email": user_email})
+    await redis_client.expire(reset_token_key, _RESET_TOKEN_TTL_SECONDS)
+
+
+async def _consume_password_reset_token_from_redis(token: str) -> str | None:
+    """Return the associated email and atomically delete the token.
+
+    WHY DELETE on read: reset tokens are single-use by design. Deleting
+    immediately after the email is retrieved prevents replay attacks even
+    if the caller later raises an exception before the password is updated.
+    """
+    redis_client = _build_redis_client()
+    reset_token_key = _reset_token_key(token)
+    token_data = await redis_client.hgetall(reset_token_key)
+    if not token_data:
+        return None
+    await redis_client.delete(reset_token_key)
+    return token_data.get("email")
 
 
 class TokenResponse(BaseModel):
@@ -63,12 +120,11 @@ class UserMeResponse(BaseModel):
     role: UserRole
 
 
-
 @router.post(
     "/login",
     response_model=TokenResponse,
     summary="Obtain an access token via email and password",
-    dependencies=[Depends(check_rate_limit)],
+    dependencies=[Depends(_enforce_login_rate_limit)],
 )
 async def login(
     payload: LoginRequest,
@@ -114,10 +170,10 @@ async def read_current_user(
     user: User = Depends(get_current_user),
 ) -> UserMeResponse:
     return UserMeResponse(
-      id=user.id,
-      email=user.email,
-      full_name=user.full_name,
-      role=user.role,
+        id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        role=user.role,
     )
 
 
@@ -140,7 +196,6 @@ async def create_user(
         open signups entirely; additional users must be created by an admin
         through a controlled path (e.g. internal tooling or SSO provisioning).
     """
-    # Check whether any user exists yet
     existing_any = await db.execute(select(User).limit(1))
     first_user = existing_any.scalar_one_or_none()
 
@@ -151,7 +206,6 @@ async def create_user(
             detail="User with this email already exists",
         )
 
-    # If at least one user exists and open signup is disabled, reject.
     if first_user and not settings.allow_open_signup:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -195,10 +249,7 @@ async def forgot_password(
         return {"message": "If an account with that email exists, a reset link has been generated."}
 
     token = secrets.token_urlsafe(32)
-    _reset_tokens[token] = {
-        "email": user.email,
-        "expires": datetime.utcnow() + timedelta(hours=1),
-    }
+    await _store_password_reset_token_in_redis(token=token, user_email=user.email)
 
     logger.warning(
         "PASSWORD RESET TOKEN for %s: %s  (valid 1 hour)",
@@ -217,27 +268,20 @@ async def reset_password(
     payload: ResetPasswordRequest,
     db: AsyncSession = Depends(db_session),
 ) -> Dict[str, str]:
-    token_data = _reset_tokens.get(payload.token)
-    if not token_data:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset token.",
-        )
-
-    if datetime.utcnow() > token_data["expires"]:
-        _reset_tokens.pop(payload.token, None)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Reset token has expired. Please request a new one.",
-        )
-
     if len(payload.new_password) < 6:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Password must be at least 6 characters.",
         )
 
-    result = await db.execute(select(User).where(User.email == token_data["email"]))
+    associated_email = await _consume_password_reset_token_from_redis(payload.token)
+    if associated_email is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token.",
+        )
+
+    result = await db.execute(select(User).where(User.email == associated_email))
     user = result.scalar_one_or_none()
 
     if not user:
@@ -249,6 +293,5 @@ async def reset_password(
     user.hashed_password = get_password_hash(payload.new_password)
     await db.commit()
 
-    _reset_tokens.pop(payload.token, None)
-
     return {"message": "Password has been reset successfully. You can now sign in."}
+

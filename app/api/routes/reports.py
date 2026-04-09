@@ -70,8 +70,7 @@ def _generate_pdf_content(
             TableStyle,
             HRFlowable,
         )
-        from reportlab.graphics.shapes import Drawing, Rect, String
-        from reportlab.graphics import renderPDF
+        from reportlab.graphics.shapes import String
 
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)

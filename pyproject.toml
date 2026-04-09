@@ -25,9 +25,16 @@ dependencies = [
     "uvicorn[standard]>=0.40.0",
 ]
 
+[project.optional-dependencies]
+dev = ["vulture>=2.14", "ruff>=0.11.0", "pytest>=8.0.0", "pytest-asyncio>=0.25.0"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.vulture]
+min_confidence = 80
+paths = ["app", "vulture_whitelist.py"]
 
 [tool.ruff]
 line-length = 120
@@ -47,3 +54,4 @@ ignore = [
     "F541",  # f-string without any placeholders
     "E712",  # Avoid equality comparisons to True/False (SQLAlchemy uses == True for ORM queries)
 ]
+

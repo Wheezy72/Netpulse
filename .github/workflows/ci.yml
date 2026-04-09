@@ -32,6 +32,12 @@ jobs:
       - name: Run ruff
         run: ruff check app/
 
+      - name: Install vulture
+        run: pip install vulture
+
+      - name: Run vulture (dead-code detection)
+        run: vulture app/ vulture_whitelist.py --min-confidence 80
+
   # ---------------------------------------------------------------------------
   # Python unit tests (no DB / Redis required)
   # ---------------------------------------------------------------------------
