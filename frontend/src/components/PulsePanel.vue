@@ -40,6 +40,103 @@ const latestInternetHealth = computed(() => {
   return internetHealthPoints.value[internetHealthPoints.value.length - 1].value;
 });
 
+type DiagnosisResult = {
+  level: "ok" | "warning" | "critical";
+  where: string;
+  detail: string;
+  icon: string;
+};
+
+const pathDiagnosis = computed((): DiagnosisResult | null => {
+  if (!pulseTargets.value.length) return null;
+
+  const gateway = pulseTargets.value.find((t) => t.label === "Gateway");
+  const isp = pulseTargets.value.find((t) => t.label === "ISP Edge");
+  const cloudflare = pulseTargets.value.find((t) => t.label === "Cloudflare");
+
+  const gwLat = gateway?.latency_ms ?? null;
+  const gwLoss = gateway?.packet_loss_pct ?? 0;
+  const ispLat = isp?.latency_ms ?? null;
+  const ispLoss = isp?.packet_loss_pct ?? 0;
+  const cfLat = cloudflare?.latency_ms ?? null;
+  const cfLoss = cloudflare?.packet_loss_pct ?? 0;
+
+  // Local network / router problem
+  if (gwLat !== null && gwLat > 50) {
+    return {
+      level: "critical",
+      where: "Local Network / Router",
+      detail: `High gateway latency (${gwLat.toFixed(0)} ms). Check your router, LAN switches, or cabling.`,
+      icon: "🔴",
+    };
+  }
+  if (gwLoss > 5) {
+    return {
+      level: "critical",
+      where: "Local Network / Router",
+      detail: `Packet loss to gateway (${gwLoss.toFixed(1)}%). Possible faulty cable, switch port error, or duplex mismatch.`,
+      icon: "🔴",
+    };
+  }
+
+  // ISP / WAN problem
+  if (ispLat !== null && gwLat !== null && ispLat - gwLat > 80) {
+    return {
+      level: "critical",
+      where: "ISP / WAN Link",
+      detail: `ISP latency ${ispLat.toFixed(0)} ms vs gateway ${gwLat.toFixed(0)} ms. Likely ISP congestion or WAN link degradation.`,
+      icon: "🟠",
+    };
+  }
+  if (ispLoss > 5) {
+    return {
+      level: "critical",
+      where: "ISP / WAN Link",
+      detail: `Packet loss on WAN path (${ispLoss.toFixed(1)}%). Contact your ISP or check the WAN interface on the router.`,
+      icon: "🟠",
+    };
+  }
+
+  // Internet / DNS / remote routing
+  if (cfLat !== null && ispLat !== null && cfLat - ispLat > 80) {
+    return {
+      level: "warning",
+      where: "Internet Routing / Remote Server",
+      detail: `Extra latency beyond ISP (${(cfLat - ispLat).toFixed(0)} ms to Cloudflare). Could be internet congestion or CDN routing.`,
+      icon: "🟡",
+    };
+  }
+  if (cfLoss > 5) {
+    return {
+      level: "warning",
+      where: "Internet / Remote Server",
+      detail: `Packet loss to Cloudflare DNS (${cfLoss.toFixed(1)}%). Check upstream routing or try alternate DNS.`,
+      icon: "🟡",
+    };
+  }
+
+  // Mild warning from health score
+  if (latestInternetHealth.value < 80 && latestInternetHealth.value > 0) {
+    return {
+      level: "warning",
+      where: "Network",
+      detail: `Health score at ${latestInternetHealth.value.toFixed(0)}% — elevated latency or jitter detected. Monitor closely.`,
+      icon: "🟡",
+    };
+  }
+
+  if (latestInternetHealth.value >= 80) {
+    return {
+      level: "ok",
+      where: "All Hops",
+      detail: "All monitored hops look healthy. Gateway, ISP, and internet routing are within normal thresholds.",
+      icon: "🟢",
+    };
+  }
+
+  return null;
+});
+
 function buildPulseChartOption(points: InternetHealthPoint[]): any {
   const categories = points.map((p) =>
     p.timestamp.split("T")[1]?.slice(0, 8) ?? p.timestamp
@@ -158,7 +255,7 @@ function connectMetricsSocket(): void {
     metricsSocket = null;
   }
 
-  const token = localStorage.getItem("access_token");
+  const token = localStorage.getItem("np-token");
   if (!token) return;
 
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -426,6 +523,35 @@ onBeforeUnmount(() => {
             Waiting for Pulse data from latency monitor...
           </p>
         </div>
+      </div>
+    </div>
+
+    <!-- Path Diagnosis Banner -->
+    <div
+      v-if="pathDiagnosis"
+      class="rounded-md border px-3 py-2 text-xs flex items-start gap-2"
+      :class="{
+        'border-emerald-500/40 bg-emerald-500/5': pathDiagnosis.level === 'ok',
+        'border-amber-500/40 bg-amber-500/5': pathDiagnosis.level === 'warning',
+        'border-rose-500/40 bg-rose-500/10': pathDiagnosis.level === 'critical',
+      }"
+    >
+      <span class="shrink-0 text-base leading-none mt-0.5">{{ pathDiagnosis.icon }}</span>
+      <div>
+        <span
+          class="font-semibold text-[0.7rem] uppercase tracking-wider"
+          :class="{
+            'text-emerald-400': pathDiagnosis.level === 'ok',
+            'text-amber-400': pathDiagnosis.level === 'warning',
+            'text-rose-400': pathDiagnosis.level === 'critical',
+          }"
+        >
+          {{ pathDiagnosis.level === 'ok' ? 'All Clear' : 'Issue Detected' }}
+          <span class="font-normal normal-case tracking-normal text-[var(--np-muted-text)] ml-1">
+            — {{ pathDiagnosis.where }}
+          </span>
+        </span>
+        <p class="mt-0.5 text-[0.7rem] text-[var(--np-muted-text)]">{{ pathDiagnosis.detail }}</p>
       </div>
     </div>
   </section>
