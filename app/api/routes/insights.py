@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_user
@@ -83,3 +86,63 @@ async def get_traffic_analysis(
         },
         "message": "Configure traffic monitoring agents for detailed analysis",
     }
+
+
+class TcpProbeRequest(BaseModel):
+    host: str = Field(..., min_length=1, max_length=253)
+    port: int = Field(..., ge=1, le=65535)
+
+
+class TcpProbeResponse(BaseModel):
+    host: str
+    port: int
+    latency_ms: Optional[float] = None
+    error: Optional[str] = None
+
+
+@router.post(
+    "/tcp-probe",
+    response_model=TcpProbeResponse,
+    summary="Measure TCP connection time to a host:port",
+)
+async def tcp_probe(
+    body: TcpProbeRequest,
+    current_user: User = Depends(get_current_user),
+) -> TcpProbeResponse:
+    """Attempt a TCP connection to *host*:*port* and return the time to connect.
+
+    This measures the full TCP handshake latency (SYN → SYN-ACK → ACK) and helps
+    distinguish network-layer delays from application-layer delays.  A high TCP
+    probe latency compared to a low ICMP latency indicates server-side congestion.
+    """
+    timeout = 5.0
+    t_start = time.perf_counter()
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(body.host, body.port),
+            timeout=timeout,
+        )
+        elapsed_ms = (time.perf_counter() - t_start) * 1000.0
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return TcpProbeResponse(
+            host=body.host,
+            port=body.port,
+            latency_ms=round(elapsed_ms, 2),
+        )
+    except asyncio.TimeoutError:
+        return TcpProbeResponse(
+            host=body.host,
+            port=body.port,
+            error=f"Connection timed out after {timeout:.0f}s — host unreachable or port filtered.",
+        )
+    except OSError as exc:
+        return TcpProbeResponse(
+            host=body.host,
+            port=body.port,
+            error=str(exc),
+        )
+
