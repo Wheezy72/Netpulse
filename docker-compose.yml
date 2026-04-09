@@ -23,7 +23,7 @@ services:
 
   # Connection pooler – sits in front of Postgres, reduces connection overhead.
   pgbouncer:
-    image: bitnami/pgbouncer:latest
+    image: bitnami/pgbouncer:1.23.1
     container_name: netpulse-pgbouncer
     restart: unless-stopped
     depends_on:
