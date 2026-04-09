@@ -5,10 +5,16 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Least-privilege default: all tokens start read-only.
+permissions:
+  contents: read
+
 jobs:
   e2e:
     name: Full-Stack Boot + Health Check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
