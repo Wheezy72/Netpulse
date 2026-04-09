@@ -113,6 +113,7 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
+      network: host
     container_name: netpulse-app
     restart: unless-stopped
     depends_on:
@@ -149,6 +150,7 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
+      network: host
     container_name: netpulse-worker
     restart: unless-stopped
     depends_on:
@@ -179,6 +181,7 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
+      network: host
     container_name: netpulse-beat
     restart: unless-stopped
     depends_on:
@@ -207,6 +210,7 @@ services:
     build:
       context: ./probes
       dockerfile: Dockerfile
+      network: host
     container_name: netpulse-probe
     restart: unless-stopped
     depends_on:
