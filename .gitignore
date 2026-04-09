@@ -1,4 +1,6 @@
-# Python
+# ==========================================
+# PYTHON
+# ==========================================
 __pycache__/
 *.py[cod]
 *.pyo
@@ -18,32 +20,66 @@ htmlcov/
 venv/
 env/
 
-# Node / frontend
+# ==========================================
+# NODE / FRONTEND
+# ==========================================
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-dist/
-*.log
-package-lock.json
+frontend/dist/
+.eslintcache
 
-# Editor / OS
+# ==========================================
+# GOLANG (DATA PLANE PROBES)
+# ==========================================
+probes/netpulse-probe
+*.exe
+*.test
+*.prof
+
+# ==========================================
+# DOCKER & DATABASE VOLUMES
+# ==========================================
+docker-data/
+pg-data/
+influx-data/
+redis-data/
+rabbitmq-data/
+
+# ==========================================
+# APP DATA, PCAPS & SCANS
+# ==========================================
+data/pcaps/*.pcap
+data/pcaps/*.pcapng
+data/scans/*.txt
+data/scans/*.xml
+# (Keep the directories, ignore the contents)
+!data/scans/.gitkeep
+!data/pcaps/.gitkeep
+
+# ==========================================
+# BACKGROUND WORKERS
+# ==========================================
+celerybeat-schedule.db
+celerybeat.pid
+*.log
+
+# ==========================================
+# ENVIRONMENT / SECRETS
+# ==========================================
+.env
+.env.local
+.env.*.local
+
+# ==========================================
+# EDITOR / OS / AI ARTIFACTS
+# ==========================================
 .DS_Store
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# Environment / secrets
-.env
-.env.local
-.env.*.local
-
-# Docker
-docker-data/
-celerybeat-schedule.db
-
-# Replit & AI Artifacts
 .local/
 .config/
 .replit
@@ -53,6 +89,8 @@ attached_assets/
 # Archives
 *.zip
 *.rar
+*.tar.gz
 
 # Temp files
-main.py
+# Prefix with slash to ONLY ignore a temp main.py at the root, preserving app/main.py
+/main.py
