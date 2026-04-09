@@ -20,7 +20,7 @@ class NetworkSegment(Base):
     vlan_id: Mapped[int] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     scan_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=datetime.utcnow,

@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least-privilege default: all tokens start read-only.
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint Python with ruff
+  # ---------------------------------------------------------------------------
+  lint-python:
+    name: Lint Python
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff
+        run: ruff check app/
+
+      - name: Install vulture
+        run: pip install vulture
+
+      - name: Run vulture (dead-code detection)
+        run: vulture app/ vulture_whitelist.py --min-confidence 80
+
+  # ---------------------------------------------------------------------------
+  # Python unit tests (no DB / Redis required)
+  # ---------------------------------------------------------------------------
+  test-python:
+    name: Unit Tests (Python)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: pip install fastapi httpx pydantic-settings pytest pytest-asyncio
+
+      - name: Run tests
+        run: pytest tests/ -v
+
+  # ---------------------------------------------------------------------------
+  # Rust probe: fmt check, clippy, unit tests (no network / pcap required)
+  # ---------------------------------------------------------------------------
+  lint-test-rust:
+    name: Fmt + Clippy + Test (Rust probe)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain with clippy and rustfmt
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: probes
+
+      - name: Install libpcap (required by the pcap crate at compile time)
+        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+
+      - name: cargo fmt --check
+        working-directory: probes
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        working-directory: probes
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo test
+        working-directory: probes
+        run: cargo test
+
+  # ---------------------------------------------------------------------------
+  # Docker build smoke test — proves all Dockerfiles build cleanly.
+  # Catches apt/package failures and broken URLs before they reach a real machine.
+  # ---------------------------------------------------------------------------
+  docker-build:
+    name: Docker Build Smoke Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Copy env defaults
+        run: cp .env.example .env
+
+      - name: Build all images (no cache)
+        run: docker compose build --no-cache

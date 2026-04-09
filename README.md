@@ -23,61 +23,59 @@ A self-hosted network monitoring console for home labs and enterprise NOC/SOC te
 > **Recommended** - One command, everything works.
 
 ```bash
-# Clone and run
 git clone <repo-url> && cd netpulse
+cp .env.example .env          # customise if needed
 docker compose up -d --build
-
-# That's it. Open http://localhost:8000
+# Open http://localhost:8000
 ```
 
-### Clean reset (recommended for QA)
+### Clean reset (wipe volumes)
 
 ```bash
-docker compose down -v
-docker compose up -d --build
-```
-
-(Optional) shortcut:
-
-```bash
+docker compose down -v && docker compose up -d --build
+# or use the helper script:
 bash scripts/docker_reset.sh
 ```
 
 **What you get:**
-- PostgreSQL + Redis (auto-configured)
-- Backend API with nmap/packet capture
+- PostgreSQL + pgbouncer + Redis (auto-configured)
+- Backend API with nmap / Scapy / Zeek / packet capture
+- Rust data-plane probe — passive packet capture → RabbitMQ → InfluxDB
 - Frontend ready to go
-- All network scanning capabilities
 
-**Zeek is included in the app image.** Verify:
+**Verify Zeek is available:**
 
 ```bash
 docker compose exec app zeek --version
 ```
 
 <details>
-<summary><b>Docker Environment Variables</b></summary>
+<summary><b>Environment Variables</b></summary>
 
-Create a `.env` file to customize:
+Edit `.env` (copied from `.env.example`) to override defaults:
 
 ```env
 SECRET_KEY=your-secure-secret-key
+PROBE_IFACE=eth0                    # interface for the Rust probe
+RABBITMQ_PASSWORD=netpulse
+INFLUXDB_TOKEN=netpulse-influx-token
+
+# Optional alerts
 ENABLE_EMAIL_ALERTS=false
 ENABLE_WHATSAPP_ALERTS=false
-# AI Assistant (optional)
+
+# Optional AI assistant
 # OPENAI_API_KEY=sk-...
 # ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 </details>
 
-**Upgrades:** Non-destructive database upgrades are provided as SQL files in `migrations/` (apply them to an existing DB volume when updating).
+**Upgrades:** Non-destructive database upgrades are SQL files in `migrations/` — apply them to an existing DB volume when updating.
 
 ---
 
 ## Alternative: Bare Metal Install
-
-> For when you want more control or can't use Docker.
 
 <details>
 <summary><b>Linux (Debian/Ubuntu/Fedora/Arch)</b></summary>
@@ -86,12 +84,6 @@ ENABLE_WHATSAPP_ALERTS=false
 sudo ./scripts/setup_linux.sh
 ./scripts/run_stack.sh
 ```
-
-The script will:
-- Check if PostgreSQL is installed (uses existing install if found)
-- Install PostgreSQL system-wide if not present
-- Set up the database and all dependencies
-- Configure everything automatically
 
 </details>
 
@@ -103,12 +95,46 @@ scripts\windows_setup.bat
 scripts\windows_run_stack.bat
 ```
 
-The script will:
-- Check for PostgreSQL in PATH and Program Files
-- Auto-install via winget/Chocolatey if not found
-- Set up database and dependencies
-
 </details>
+
+---
+
+## Development
+
+### Python backend
+
+```bash
+# Install dev dependencies
+pip install -e ".[dev]"
+
+# Linting
+ruff check app/
+vulture app/ vulture_whitelist.py --min-confidence 80
+
+# Tests (no external services required)
+pytest tests/ -v
+```
+
+### Rust data-plane probe (`probes/`)
+
+```bash
+cd probes
+
+cargo test           # run all unit tests
+cargo fmt            # format code
+cargo clippy         # lint (zero-warning policy)
+```
+
+> **Note:** `libpcap-dev` must be installed for the probe to compile (`sudo apt install libpcap-dev` on Debian/Ubuntu).
+
+### CI (GitHub Actions)
+
+| Job | What it checks |
+|---|---|
+| `lint-python` | ruff + vulture |
+| `test-python` | pytest unit tests |
+| `lint-test-rust` | cargo fmt + clippy + test |
+| `docker-build` | all images build cleanly |
 
 ---
 
@@ -148,7 +174,7 @@ The script will:
 **Security**
 - Vulnerability scanning
 - Threat intel (AbuseIPDB)
-- Rate limiting
+- Rate limiting (Redis-backed)
 
 </td>
 <td>
@@ -167,10 +193,12 @@ The script will:
 ## Stack
 
 ```
-Backend   → FastAPI + PostgreSQL + Scapy + Nmap
-Frontend  → Vue 3 + TypeScript + Tailwind
-AI        → OpenAI / Anthropic / Google
-Deploy    → Docker Compose (recommended)
+Backend      → FastAPI + PostgreSQL + Scapy + Nmap + Zeek
+Frontend     → Vue 3 + TypeScript + Tailwind
+Data-plane   → Rust probe (pcap + pnet + lapin → RabbitMQ)
+Time-series  → InfluxDB
+AI           → OpenAI / Anthropic / Google
+Deploy       → Docker Compose (recommended)
 ```
 
 ---
@@ -188,3 +216,4 @@ Check **[docs/dev_guide.md](docs/dev_guide.md)** for API reference, architecture
 <sub>No telemetry. No cloud lock-in. Your data stays yours.</sub>
 
 </div>
+

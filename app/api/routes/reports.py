@@ -39,12 +39,12 @@ def _generate_short_name(report_type: str, date_range_days: int = 7) -> str:
     """Generate a readable report name like NetReport_Jan17-24_2026."""
     now = datetime.now()
     start_date = now - __import__('datetime').timedelta(days=date_range_days)
-    
+
     if start_date.month == now.month:
         date_range = f"{start_date.strftime('%b')}{start_date.day}-{now.day}"
     else:
         date_range = f"{start_date.strftime('%b%d')}-{now.strftime('%b%d')}"
-    
+
     year = now.strftime("%Y")
     return f"NetReport_{date_range}_{year}"
 
@@ -70,21 +70,20 @@ def _generate_pdf_content(
             TableStyle,
             HRFlowable,
         )
-        from reportlab.graphics.shapes import Drawing, Rect, String
-        from reportlab.graphics import renderPDF
-        
+        from reportlab.graphics.shapes import String
+
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
-        
+
         styles = getSampleStyleSheet()
-        
+
         np_indigo = colors.HexColor('#6366f1')
         np_cyan = colors.HexColor('#00f3ff')
         np_slate_dark = colors.HexColor('#1e293b')
         np_slate = colors.HexColor('#334155')
         np_slate_light = colors.HexColor('#64748b')
         np_white = colors.white
-        
+
         logo_style = ParagraphStyle(
             'LogoStyle',
             parent=styles['Normal'],
@@ -94,7 +93,7 @@ def _generate_pdf_content(
             spaceAfter=2,
             leading=36,
         )
-        
+
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
@@ -103,7 +102,7 @@ def _generate_pdf_content(
             spaceAfter=15,
             fontName='Helvetica-Bold',
         )
-        
+
         heading_style = ParagraphStyle(
             'CustomHeading',
             parent=styles['Heading2'],
@@ -113,7 +112,7 @@ def _generate_pdf_content(
             spaceAfter=10,
             fontName='Helvetica-Bold',
         )
-        
+
         subheading_style = ParagraphStyle(
             'SubHeading',
             parent=styles['Normal'],
@@ -122,7 +121,7 @@ def _generate_pdf_content(
             spaceAfter=6,
             fontName='Helvetica-Bold',
         )
-        
+
         body_style = ParagraphStyle(
             'CustomBody',
             parent=styles['Normal'],
@@ -130,7 +129,7 @@ def _generate_pdf_content(
             textColor=np_slate_dark,
             spaceAfter=8,
         )
-        
+
         meta_style = ParagraphStyle(
             'MetaStyle',
             parent=styles['Normal'],
@@ -138,7 +137,7 @@ def _generate_pdf_content(
             textColor=np_slate_light,
             spaceAfter=6,
         )
-        
+
         tagline_style = ParagraphStyle(
             'TaglineStyle',
             parent=styles['Normal'],
@@ -147,18 +146,18 @@ def _generate_pdf_content(
             spaceBefore=0,
             spaceAfter=12,
         )
-        
+
         elements = []
-        
+
         elements.append(Paragraph("NETPULSE", logo_style))
         elements.append(Paragraph("Network Operations Console", tagline_style))
         elements.append(HRFlowable(width="100%", thickness=2, color=np_cyan, spaceAfter=20))
-        
+
         elements.append(Paragraph(title, title_style))
         elements.append(Paragraph(f"Generated: {datetime.now().strftime('%B %d, %Y at %H:%M')}", meta_style))
         elements.append(Paragraph(f"Report Type: {report_type.replace('_', ' ').title()}", meta_style))
         elements.append(Spacer(1, 20))
-        
+
         elements.append(Paragraph("Executive Summary", heading_style))
         elements.append(HRFlowable(width="30%", thickness=1, color=np_indigo, spaceAfter=10))
         summary_text = f"""
@@ -170,16 +169,16 @@ def _generate_pdf_content(
         """
         elements.append(Paragraph(summary_text, body_style))
         elements.append(Spacer(1, 15))
-        
+
         if devices:
             elements.append(Paragraph("Device Inventory", heading_style))
             elements.append(HRFlowable(width="30%", thickness=1, color=np_indigo, spaceAfter=10))
-            
+
             online_count = sum(1 for d in devices if d.is_online)
             offline_count = len(devices) - online_count
             elements.append(Paragraph(f"<b>Online:</b> {online_count} | <b>Offline:</b> {offline_count}", subheading_style))
             elements.append(Spacer(1, 8))
-            
+
             table_data = [['Hostname', 'IP Address', 'Status', 'Type']]
             for device in devices[:20]:
                 status = 'Online' if device.is_online else 'Offline'
@@ -189,7 +188,7 @@ def _generate_pdf_content(
                     status,
                     device.device_type or 'Unknown',
                 ])
-            
+
             table = Table(table_data, colWidths=[2*inch, 1.5*inch, 1*inch, 1.5*inch])
             table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), np_indigo),
@@ -211,11 +210,11 @@ def _generate_pdf_content(
             ]))
             elements.append(table)
             elements.append(Spacer(1, 20))
-        
+
         if include_metrics:
             elements.append(Paragraph("Network Metrics", heading_style))
             elements.append(HRFlowable(width="30%", thickness=1, color=np_indigo, spaceAfter=10))
-            
+
             metrics_table_data = [
                 ['Metric', 'Value', 'Status'],
                 ['Average Response Time', '12ms', 'Good'],
@@ -242,11 +241,11 @@ def _generate_pdf_content(
             ]))
             elements.append(metrics_table)
             elements.append(Spacer(1, 15))
-        
+
         if include_alerts:
             elements.append(Paragraph("Recent Alerts", heading_style))
             elements.append(HRFlowable(width="30%", thickness=1, color=np_indigo, spaceAfter=10))
-            
+
             alerts_table_data = [
                 ['Severity', 'Count', 'Description'],
                 ['Critical', '0', 'No critical alerts'],
@@ -277,7 +276,7 @@ def _generate_pdf_content(
                 ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
             ]))
             elements.append(alerts_table)
-        
+
         elements.append(Spacer(1, 30))
         elements.append(HRFlowable(width="100%", thickness=1, color=np_slate_light, spaceAfter=10))
         footer_style = ParagraphStyle(
@@ -289,11 +288,11 @@ def _generate_pdf_content(
         )
         elements.append(Paragraph("Generated by NetPulse Enterprise - Network Operations Console", footer_style))
         elements.append(Paragraph(f"Report ID: {uuid.uuid4().hex[:8].upper()}", footer_style))
-        
+
         doc.build(elements)
         buffer.seek(0)
         return buffer.getvalue()
-        
+
     except ImportError:
         return _generate_simple_pdf(report_type, title, devices)
 
@@ -333,12 +332,12 @@ endobj
 endobj
 xref
 0 6
-0000000000 65535 f 
-0000000009 00000 n 
-0000000058 00000 n 
-0000000115 00000 n 
-0000000266 00000 n 
-0000000516 00000 n 
+0000000000 65535 f
+0000000009 00000 n
+0000000058 00000 n
+0000000115 00000 n
+0000000266 00000 n
+0000000516 00000 n
 trailer
 << /Size 6 /Root 1 0 R >>
 startxref
@@ -358,15 +357,15 @@ async def generate_report(
     current_user: User = Depends(get_current_user),
 ) -> StreamingResponse:
     """Generate a professional PDF report with Sysadmin Pro styling."""
-    
+
     short_name = _generate_short_name(request.report_type, request.date_range_days)
     title = request.title or f"NetPulse {request.report_type.replace('_', ' ').title()} Report"
-    
+
     devices: List[Any] = []
     if request.include_devices:
         result = await db.execute(select(Device).limit(100))
         devices = list(result.scalars().all())
-    
+
     pdf_content = _generate_pdf_content(
         report_type=request.report_type,
         title=title,
@@ -374,7 +373,7 @@ async def generate_report(
         include_metrics=request.include_metrics,
         include_alerts=request.include_alerts,
     )
-    
+
     return StreamingResponse(
         io.BytesIO(pdf_content),
         media_type="application/pdf",
@@ -414,7 +413,7 @@ async def generate_devices_pdf(
     """Generate a PDF report of all discovered devices."""
     result = await db.execute(select(Device).limit(500))
     devices = list(result.scalars().all())
-    
+
     pdf_content = _generate_pdf_content(
         report_type="device_inventory",
         title="Device Inventory Report",
@@ -422,10 +421,10 @@ async def generate_devices_pdf(
         include_metrics=False,
         include_alerts=False,
     )
-    
+
     now = datetime.now()
     filename = f"Devices_{now.strftime('%b%d')}_{now.strftime('%Y')}"
-    
+
     return StreamingResponse(
         io.BytesIO(pdf_content),
         media_type="application/pdf",
@@ -454,21 +453,21 @@ async def generate_logs_pdf(
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
-    
+
     logs_data = memory_handler.get_logs(level=request.level, limit=request.limit)
     logs = [log.to_dict() for log in logs_data]
-    
+
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=40, bottomMargin=40)
     styles = getSampleStyleSheet()
-    
+
     np_indigo = colors.HexColor('#4f46e5')
     np_cyan = colors.HexColor('#06b6d4')
     np_slate = colors.HexColor('#334155')
-    
+
     logo_style = ParagraphStyle('LogoStyle', parent=styles['Normal'], fontSize=28, textColor=np_cyan, fontName='Helvetica-Bold', spaceAfter=8)
     title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=18, textColor=np_indigo, spaceBefore=10, spaceAfter=10)
-    
+
     elements = []
     elements.append(Paragraph("NETPULSE", logo_style))
     elements.append(Spacer(1, 10))
@@ -477,7 +476,7 @@ async def generate_logs_pdf(
     elements.append(Paragraph(f"Generated: {datetime.now().strftime('%B %d, %Y at %H:%M')}", styles['Normal']))
     elements.append(Paragraph(f"Total Entries: {len(logs)}", styles['Normal']))
     elements.append(Spacer(1, 15))
-    
+
     if logs:
         table_data = [['Time', 'Level', 'Message']]
         for log in logs[:200]:
@@ -485,7 +484,7 @@ async def generate_logs_pdf(
             level = log.get('level', 'INFO').upper()
             msg = log.get('message', '')[:80]
             table_data.append([ts, level, msg])
-        
+
         table = Table(table_data, colWidths=[100, 60, 340])
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), np_indigo),
@@ -496,13 +495,13 @@ async def generate_logs_pdf(
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
         ]))
         elements.append(table)
-    
+
     doc.build(elements)
     buffer.seek(0)
-    
+
     now = datetime.now()
     filename = f"Logs_{now.strftime('%b%d')}_{now.strftime('%Y')}"
-    
+
     return StreamingResponse(
         buffer,
         media_type="application/pdf",
@@ -533,47 +532,47 @@ async def generate_scan_pdf(
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Preformatted, HRFlowable
-    
+
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=40, bottomMargin=40)
     styles = getSampleStyleSheet()
-    
+
     np_indigo = colors.HexColor('#4f46e5')
     np_cyan = colors.HexColor('#06b6d4')
-    
+
     logo_style = ParagraphStyle('LogoStyle', parent=styles['Normal'], fontSize=28, textColor=np_cyan, fontName='Helvetica-Bold', spaceAfter=8)
     title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=18, textColor=np_indigo, spaceBefore=10, spaceAfter=10)
     code_style = ParagraphStyle('CodeStyle', parent=styles['Normal'], fontSize=8, fontName='Courier', leftIndent=10, textColor=colors.HexColor('#1e293b'))
-    
+
     elements = []
     elements.append(Paragraph("NETPULSE", logo_style))
     elements.append(Spacer(1, 10))
     elements.append(Paragraph(f"Scan Report: {request.scan_type or 'Network Scan'}", title_style))
     elements.append(HRFlowable(width="100%", thickness=2, color=np_cyan, spaceAfter=15))
     elements.append(Paragraph(f"Generated: {datetime.now().strftime('%B %d, %Y at %H:%M')}", styles['Normal']))
-    
+
     if request.target:
         elements.append(Paragraph(f"<b>Target:</b> {request.target}", styles['Normal']))
     if request.command:
         elements.append(Paragraph(f"<b>Command:</b> <font name='Courier' size='9'>{request.command}</font>", styles['Normal']))
-    
+
     elements.append(Spacer(1, 20))
     elements.append(Paragraph("Scan Results", ParagraphStyle('Heading', parent=styles['Heading2'], fontSize=14, textColor=np_indigo)))
     elements.append(HRFlowable(width="30%", thickness=1, color=np_indigo, spaceAfter=10))
-    
+
     if request.results:
         lines = request.results.split('\n')
         for line in lines[:500]:
             elements.append(Preformatted(line[:120], code_style))
     else:
         elements.append(Paragraph("No results available.", styles['Normal']))
-    
+
     doc.build(elements)
     buffer.seek(0)
-    
+
     now = datetime.now()
     filename = f"Scan_{request.scan_type or 'results'}_{now.strftime('%b%d_%H%M')}"
-    
+
     return StreamingResponse(
         buffer,
         media_type="application/pdf",

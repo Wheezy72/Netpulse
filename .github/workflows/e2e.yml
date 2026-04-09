@@ -1,0 +1,83 @@
+name: E2E Smoke Test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least-privilege default: all tokens start read-only.
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: Full-Stack Boot + Health Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Copy env defaults
+        run: cp .env.example .env
+
+      # Start the core backend services (probe excluded: requires NET_RAW / host networking).
+      # celery_worker and celery_beat are also excluded here; they depend on
+      # app being healthy, which this job verifies first.
+      - name: Start core services
+        run: |
+          docker compose up -d db pgbouncer redis rabbitmq influxdb app
+
+      # Wait up to 5 minutes for the app container's healthcheck to turn green,
+      # then assert the liveness endpoint returns HTTP 200.
+      - name: Wait for app to be healthy
+        run: |
+          echo "Waiting for app healthcheck..."
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' netpulse-app 2>/dev/null || echo "starting")
+            echo "Attempt $i/30 — health: $STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "App is healthy."
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "Timed out waiting for app to become healthy."
+              docker compose logs app
+              exit 1
+            fi
+            sleep 10
+          done
+
+      - name: Assert /api/health/live returns 200
+        run: |
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/health/live)
+          echo "HTTP status: $RESPONSE"
+          if [ "$RESPONSE" != "200" ]; then
+            echo "Health check FAILED (expected 200, got $RESPONSE)"
+            docker compose logs app
+            exit 1
+          fi
+          echo "Health check PASSED."
+
+      - name: Assert /api/health/ready returns 200
+        run: |
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/health/ready)
+          echo "HTTP status: $RESPONSE"
+          if [ "$RESPONSE" != "200" ]; then
+            echo "Readiness check FAILED (expected 200, got $RESPONSE)"
+            docker compose logs app
+            exit 1
+          fi
+          echo "Readiness check PASSED."
+
+      - name: Print service logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

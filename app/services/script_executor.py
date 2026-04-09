@@ -55,7 +55,7 @@ class NetworkTools:
         """Send TCP RST packets to tear down a connection.
 
         Uses scapy to craft and send TCP RST packets. Requires root privileges.
-        
+
         Args:
             src_ip: Source IP address
             src_port: Source port
@@ -66,7 +66,7 @@ class NetworkTools:
         def _send_rst() -> None:
             try:
                 from scapy.all import IP, TCP, send
-                
+
                 for _ in range(count):
                     pkt = IP(src=src_ip, dst=dst_ip) / TCP(
                         sport=src_port,
@@ -79,18 +79,18 @@ class NetworkTools:
                 pass
             except Exception:
                 pass
-        
+
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, _send_rst)
 
     async def ping(self, target: str, count: int = 4, timeout: int = 2) -> dict:
         """Ping a target host and return statistics.
-        
+
         Args:
             target: IP address or hostname to ping
             count: Number of ping packets
             timeout: Timeout per packet in seconds
-            
+
         Returns:
             Dictionary with ping statistics
         """
@@ -113,10 +113,10 @@ class NetworkTools:
                     text=True,
                     timeout=count * timeout + 5
                 )
-                
+
                 lines = result.stdout.split("\n")
                 stats = {"target": target, "success": result.returncode == 0}
-                
+
                 for line in lines:
                     if "packets transmitted" in line:
                         parts = line.split(",")
@@ -135,11 +135,11 @@ class NetworkTools:
                                 stats["rtt_min"] = float(rtt_values[0])
                                 stats["rtt_avg"] = float(rtt_values[1])
                                 stats["rtt_max"] = float(rtt_values[2])
-                
+
                 return stats
             except Exception as e:
                 return {"target": target, "success": False, "error": str(e)}
-        
+
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _ping_sync)
 
@@ -147,17 +147,17 @@ class NetworkTools:
         self, target: str, ports: list[int], timeout: float = 1.0
     ) -> dict:
         """Scan specific ports on a target host.
-        
+
         Args:
             target: IP address or hostname
             ports: List of ports to scan
             timeout: Connection timeout per port
-            
+
         Returns:
             Dictionary with port scan results
         """
         import socket
-        
+
         async def check_port(port: int) -> tuple[int, bool]:
             def _check() -> bool:
                 try:
@@ -168,14 +168,14 @@ class NetworkTools:
                     return result == 0
                 except Exception:
                     return False
-            
+
             loop = asyncio.get_event_loop()
             is_open = await loop.run_in_executor(None, _check)
             return (port, is_open)
-        
+
         tasks = [check_port(port) for port in ports[:100]]
         results = await asyncio.gather(*tasks)
-        
+
         return {
             "target": target,
             "open_ports": [port for port, is_open in results if is_open],

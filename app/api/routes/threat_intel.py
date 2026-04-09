@@ -96,7 +96,7 @@ async def check_ip(
             status_code=503,
             detail="AbuseIPDB API key not configured. Add it in Settings > Threat Intelligence.",
         )
-    
+
     try:
         result = await abuseipdb_service.check_ip(
             ip_address=request.ip_address,
@@ -118,13 +118,13 @@ async def check_ip(
             status_code=502,
             detail=f"Failed to check IP reputation: {str(e)}",
         )
-    
+
     if result is None:
         raise HTTPException(
             status_code=502,
             detail="Failed to check IP reputation. Please try again.",
         )
-    
+
     return IPCheckResponse(
         ip_address=result.ip_address,
         is_public=result.is_public,
@@ -155,12 +155,12 @@ async def check_bulk(
             status_code=503,
             detail="AbuseIPDB API key not configured. Add it in Settings > Threat Intelligence.",
         )
-    
+
     results = await abuseipdb_service.check_bulk(
         ip_addresses=request.ip_addresses,
         max_age_in_days=request.max_age_days,
     )
-    
+
     response_results = [
         IPCheckResponse(
             ip_address=r.ip_address,
@@ -178,9 +178,9 @@ async def check_bulk(
         )
         for r in results
     ]
-    
+
     high_risk_count = sum(1 for r in results if r.risk_level in ("high", "critical"))
-    
+
     return BulkIPCheckResponse(
         results=response_results,
         checked_count=len(response_results),
@@ -201,26 +201,26 @@ async def report_ip(
             status_code=503,
             detail="AbuseIPDB API key not configured.",
         )
-    
+
     for cat_id in request.categories:
         if cat_id not in ABUSEIPDB_CATEGORIES:
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid category ID: {cat_id}",
             )
-    
+
     success = await abuseipdb_service.report_ip(
         ip_address=request.ip_address,
         categories=request.categories,
         comment=request.comment,
     )
-    
+
     if not success:
         raise HTTPException(
             status_code=502,
             detail="Failed to report IP. Please try again.",
         )
-    
+
     return {"success": True, "message": f"IP {request.ip_address} reported successfully"}
 
 
@@ -238,12 +238,12 @@ async def get_blacklist(
             status_code=503,
             detail="AbuseIPDB API key not configured.",
         )
-    
+
     ips = await abuseipdb_service.get_blacklist(
         confidence_minimum=confidence_minimum,
         limit=limit,
     )
-    
+
     return {
         "count": len(ips),
         "confidence_minimum": confidence_minimum,

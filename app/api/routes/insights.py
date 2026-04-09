@@ -28,7 +28,7 @@ async def get_bottlenecks(
     current_user: User = Depends(get_current_user),
 ) -> List[Dict[str, Any]]:
     """Identify devices and network segments experiencing performance issues.
-    
+
     Returns a list of potential bottlenecks with severity levels and recommendations.
     """
     return await detect_bottlenecks(db)
@@ -57,7 +57,7 @@ async def get_nmap_recommend(
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Get intelligent nmap scan recommendations for a target.
-    
+
     The system analyzes known device information and provides tailored
     scan commands based on the target type.
     """

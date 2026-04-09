@@ -37,7 +37,7 @@ async def get_logs(
         limit=limit,
         offset=offset,
     )
-    
+
     return {
         "logs": [log.to_dict() for log in logs],
         "total": len(memory_handler.logs),

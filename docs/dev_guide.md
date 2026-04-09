@@ -10,10 +10,12 @@ This guide covers setup, development, and deployment of NetPulse Enterprise — 
 |-------|-----------|---------|
 | **Backend** | FastAPI (Python 3.11+) | Async REST API, SQLAlchemy ORM |
 | **Frontend** | Vue 3 + TypeScript + Vite | Tailwind CSS, ECharts, Cytoscape.js |
-| **Database** | PostgreSQL 16 | Neon-backed on Replit, standard PG elsewhere |
-| **Auth** | JWT + bcrypt | Admin-only access, no RBAC enforcement |
-| **Background** | In-process asyncio | Latency monitoring (15s), uptime checks (configurable) |
-| **AI (optional)** | OpenAI API | Chatbot, device analysis, smart command builder |
+| **Database** | PostgreSQL 16 + pgbouncer | Connection pooling via pgbouncer |
+| **Auth** | JWT + Argon2id | RBAC (admin/viewer), Redis session cache |
+| **Background** | Celery Beat + Workers | Latency monitoring, uptime checks (Redis broker) |
+| **Data-plane probe** | Rust (pcap + pnet + lapin) | Passive packet capture → RabbitMQ → InfluxDB |
+| **Time-series** | InfluxDB 2.7 | Probe telemetry and network metrics |
+| **AI (optional)** | OpenAI / Anthropic / Google | Chatbot, device analysis, smart command builder |
 
 ---
 
@@ -271,10 +273,14 @@ docker-compose up -d --build
 | Service | Image | Port | Description |
 |---------|-------|------|-------------|
 | `db` | postgres:16-alpine | 5432 (internal) | PostgreSQL with health check |
+| `pgbouncer` | bitnami/pgbouncer | 5432 | Connection pooler |
 | `redis` | redis:7-alpine | 6379 (internal) | Celery broker/backend |
+| `rabbitmq` | rabbitmq:3.13-management | 5672 / 15672 | Message broker for probe telemetry |
+| `influxdb` | influxdb:2.7-alpine | 8086 | Time-series metrics store |
 | `app` | Custom (multi-stage) | 8000 | Backend + built frontend |
 | `celery_worker` | Custom (multi-stage) | (none) | Executes background jobs |
 | `celery_beat` | Custom (multi-stage) | (none) | Schedules periodic jobs |
+| `probe` | Custom Rust (multi-stage) | (none) | Passive packet capture → RabbitMQ |
 
 ### Environment Configuration
 
