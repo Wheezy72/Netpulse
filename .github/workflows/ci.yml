@@ -75,6 +75,11 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: probes
+
       - name: Install libpcap (required by the pcap crate at compile time)
         run: sudo apt-get update && sudo apt-get install -y libpcap-dev
 

@@ -1,7 +1,6 @@
 # =============================================================================
-# Stage 1: builder — compile the Rust binary against a musl target so the
-# resulting binary can run on a minimal Debian slim runtime without glibc
-# compatibility issues. libpcap-dev is the only build-time C dependency.
+# Stage 1: builder — compile the release binary. libpcap-dev is the only
+# build-time C dependency; libpcap is dynamically linked into the binary.
 # =============================================================================
 FROM rust:1.78-slim AS builder
 

@@ -61,7 +61,7 @@ services:
       retries: 5
 
   # ---------------------------------------------------------------------------
-  # Message broker – RabbitMQ (used by the Go probe for telemetry fan-out)
+  # Message broker – RabbitMQ (used by the Rust probe for telemetry fan-out)
   # ---------------------------------------------------------------------------
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
