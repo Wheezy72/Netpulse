@@ -11,7 +11,7 @@ RUN npm run build
 # Stage 2: python-builder — compile Python wheels so the runtime stage needs
 # no compiler toolchain and carries no build-time residue.
 # =============================================================================
-FROM python:3.11-slim AS python-builder
+FROM python:3.14-slim AS python-builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -34,7 +34,7 @@ RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
 # =============================================================================
 # Stage 3: production — minimal runtime image.
 # =============================================================================
-FROM python:3.11-slim AS production
+FROM python:3.14-slim AS production
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
