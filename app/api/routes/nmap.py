@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import re
 import shlex
 import shutil
@@ -13,6 +14,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_user, require_admin
+from app.core.config import settings
 from app.db.session import async_session_factory
 from app.models.scan_job import ScanJob, ScanJobStatus
 from app.models.user import User
@@ -223,6 +225,41 @@ def get_scan_type_from_command(command: str) -> str:
     return "Custom Scan"
 
 
+def _is_medical_iot_target(target: str) -> bool:
+    """Return True if the target falls within a configured medical/IoT VLAN CIDR.
+
+    These ranges must never be scanned with active techniques (SYN probes, etc.).
+    Passive ARP / Zeek is the only allowed discovery method for these segments.
+    """
+    if not settings.medical_iot_vlan_cidrs:
+        return False
+
+    try:
+        # Handle plain IP or CIDR notation from the target string.
+        addr = ipaddress.ip_address(target.split("/")[0])
+    except ValueError:
+        # Hostname target – cannot classify statically.
+        # Operators must ensure medical/IoT VLANs are not reachable by hostname.
+        logger.debug("Medical VLAN check skipped for non-IP target: %s", target)
+        return False  # Allow the scan; hostname safety must be enforced at network level.
+
+    for cidr in settings.medical_iot_vlan_cidrs:
+        try:
+            if addr in ipaddress.ip_network(cidr, strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _contains_active_syn_flags(command: str) -> bool:
+    """Return True if the command contains flags that trigger active SYN probing."""
+    # -sS (SYN stealth), -sA (ACK), -sW (Window), -sM (Maimon) – all send raw packets.
+    active_flags = {"-sS", "-sA", "-sW", "-sM", "-sZ"}
+    tokens = set(shlex.split(command))
+    return bool(tokens & active_flags)
+
+
 @router.post("/execute", response_model=ScanResult)
 async def execute_nmap(
     request: NmapCommandRequest,
@@ -235,6 +272,17 @@ async def execute_nmap(
 
     if not _validate_target(request.target):
         raise HTTPException(status_code=400, detail="Invalid target format")
+
+    # Block active SYN scans against medical/IoT VLANs.
+    # These segments must only be monitored passively (ARP / Zeek).
+    if _is_medical_iot_target(request.target) and _contains_active_syn_flags(request.command):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Active SYN scans are not permitted against medical/IoT VLAN targets. "
+                "Use passive ARP discovery or Zeek sniffing for these segments."
+            ),
+        )
 
     safe_args = _parse_safe_nmap_args(request.command, request.target)
     command_str = " ".join(safe_args)

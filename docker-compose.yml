@@ -1,6 +1,9 @@
 version: "3.9"
 
 services:
+  # ---------------------------------------------------------------------------
+  # Core data stores
+  # ---------------------------------------------------------------------------
   db:
     image: postgres:16-alpine
     container_name: netpulse-db
@@ -9,12 +12,38 @@ services:
       POSTGRES_DB: netpulse
       POSTGRES_USER: netpulse
       POSTGRES_PASSWORD: netpulse
-    ports:
-      - "5432:5432"
+    # Port is intentionally NOT exposed externally - all app traffic goes via pgbouncer.
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U netpulse -d netpulse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Connection pooler – sits in front of Postgres, reduces connection overhead.
+  pgbouncer:
+    image: bitnami/pgbouncer:latest
+    container_name: netpulse-pgbouncer
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRESQL_HOST: db
+      POSTGRESQL_PORT: 5432
+      POSTGRESQL_DATABASE: netpulse
+      POSTGRESQL_USERNAME: netpulse
+      POSTGRESQL_PASSWORD: netpulse
+      PGBOUNCER_DATABASE: netpulse
+      PGBOUNCER_PORT: 5432
+      PGBOUNCER_POOL_MODE: session
+      PGBOUNCER_MAX_CLIENT_CONN: 200
+      PGBOUNCER_DEFAULT_POOL_SIZE: 25
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U netpulse -d netpulse"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -31,21 +60,75 @@ services:
       timeout: 5s
       retries: 5
 
+  # ---------------------------------------------------------------------------
+  # Message broker – RabbitMQ (used by the Go probe for telemetry fan-out)
+  # ---------------------------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: netpulse-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: netpulse
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-netpulse}
+      RABBITMQ_DEFAULT_VHOST: netpulse
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Time-series database – InfluxDB (stores probe telemetry and metrics)
+  # ---------------------------------------------------------------------------
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: netpulse-influxdb
+    restart: unless-stopped
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: netpulse
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD:-netpulse123}
+      DOCKER_INFLUXDB_INIT_ORG: netpulse
+      DOCKER_INFLUXDB_INIT_BUCKET: telemetry
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN:-netpulse-influx-token}
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Application
+  # ---------------------------------------------------------------------------
   app:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/backend.Dockerfile
     container_name: netpulse-app
     restart: unless-stopped
     depends_on:
-      db:
+      pgbouncer:
         condition: service_healthy
       redis:
         condition: service_healthy
     user: "0"
     environment:
-      DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@db:5432/netpulse
+      DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@pgbouncer:5432/netpulse
       REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://netpulse:${RABBITMQ_PASSWORD:-netpulse}@rabbitmq:5672/netpulse
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-netpulse-influx-token}
+      INFLUXDB_ORG: netpulse
+      INFLUXDB_BUCKET: telemetry
       SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
       ENVIRONMENT: production
       PULSE_GATEWAY_IP: ${PULSE_GATEWAY_IP:-192.168.1.1}
@@ -65,21 +148,23 @@ services:
   celery_worker:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/backend.Dockerfile
     container_name: netpulse-worker
     restart: unless-stopped
     depends_on:
       app:
         condition: service_healthy
-      db:
+      pgbouncer:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: ["celery", "-A", "app.core.celery_app.celery_app", "worker", "--loglevel=info"]
+    # --concurrency=4 caps parallelism; --max-tasks-per-child=100 recycles workers to prevent memory leaks.
+    command: ["celery", "-A", "app.core.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=4", "--max-tasks-per-child=100"]
     user: "0"
     environment:
-      DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@db:5432/netpulse
+      DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@pgbouncer:5432/netpulse
       REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://netpulse:${RABBITMQ_PASSWORD:-netpulse}@rabbitmq:5672/netpulse
       SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
       ENVIRONMENT: production
       SCRIPTS_BASE_DIR: /app/scripts
@@ -93,20 +178,20 @@ services:
   celery_beat:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/backend.Dockerfile
     container_name: netpulse-beat
     restart: unless-stopped
     depends_on:
       app:
         condition: service_healthy
-      db:
+      pgbouncer:
         condition: service_healthy
       redis:
         condition: service_healthy
     command: ["celery", "-A", "app.core.celery_app.celery_app", "beat", "--loglevel=info"]
     user: "0"
     environment:
-      DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@db:5432/netpulse
+      DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@pgbouncer:5432/netpulse
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
       ENVIRONMENT: production
@@ -115,6 +200,28 @@ services:
     volumes:
       - app_data:/app/data
 
+  # ---------------------------------------------------------------------------
+  # Data-plane probe (Go) – passive packet capture, HL7/DICOM BPF drop, telemetry fan-out
+  # ---------------------------------------------------------------------------
+  probe:
+    build:
+      context: ./probes
+      dockerfile: Dockerfile
+    container_name: netpulse-probe
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    network_mode: host  # needs raw packet access
+    environment:
+      RABBITMQ_URL: amqp://netpulse:${RABBITMQ_PASSWORD:-netpulse}@localhost:5672/netpulse
+      PROBE_IFACE: ${PROBE_IFACE:-eth0}
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+
 volumes:
   db_data:
   app_data:
+  rabbitmq_data:
+  influxdb_data:

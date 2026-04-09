@@ -94,6 +94,32 @@ body {
   100% { transform: translateX(200%); }
 }
 
+/* Vue Router view fade transition */
+.np-fade-enter-active,
+.np-fade-leave-active {
+  transition: opacity 0.15s ease;
+}
+.np-fade-enter-from,
+.np-fade-leave-to {
+  opacity: 0;
+}
+
+/* Sheet (slide-over) transition – slides in from the right */
+.np-slide-right-enter-active,
+.np-slide-right-leave-active {
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.np-slide-right-enter-from,
+.np-slide-right-leave-to {
+  transform: translateX(100%);
+}
+
+/* Monospace styling for network data in any theme */
+.np-mono {
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  font-size: 0.8125rem;
+}
+
 /* ============================================
    SHARED UTILITY CLASSES
    ============================================ */
@@ -908,4 +934,17 @@ body.theme-sysadmin tr {
 
 body.theme-sysadmin tr:hover {
   background: rgba(245, 158, 11, 0.04);
+}
+
+/* ============================================
+   SPLITPANES THEME OVERRIDES
+   ============================================ */
+.splitpanes__splitter {
+  background: var(--np-border, rgba(20, 184, 166, 0.2)) !important;
+  position: relative;
+}
+.splitpanes__splitter:hover,
+.splitpanes__splitter:active {
+  background: var(--np-accent-primary, #14b8a6) !important;
+  opacity: 0.6;
 }

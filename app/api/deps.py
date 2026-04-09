@@ -5,15 +5,19 @@ Shared FastAPI dependencies and security helpers.
 
 Provides:
 - db_session: async SQLAlchemy session dependency.
-- Password hashing helpers.
-- JWT creation and validation.
-- A role-based authorization dependency (require_role) that ensures the
-  caller is authenticated and optionally enforces RBAC.
+- Password hashing (Argon2id via argon2-cffi / passlib).
+- JWT creation and validation with Redis-backed session caching.
+- A role-based authorization dependency (require_role) that enforces RBAC.
+- Async audit logging via a Celery task (non-blocking).
 """
 
+import hashlib
+import json
+import threading
 from datetime import datetime, timedelta
 from typing import Annotated, AsyncGenerator, Optional
 
+import redis.asyncio as aioredis
 from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
@@ -23,13 +27,37 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import async_session_factory
-from app.models.audit_log import AuditLog
 from app.models.user import User, UserRole
 
-# Use a password hashing scheme that doesn't rely on the external bcrypt module
-# to avoid compatibility issues with newer bcrypt releases.
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+# Argon2id is the recommended password hashing algorithm (memory-hard, GPU-resistant).
+# passlib delegates to argon2-cffi under the hood when "argon2" is selected.
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 security_scheme = HTTPBearer(auto_error=True)
+
+# Shared async Redis client – reused across requests.
+# Lock ensures exactly one client is created even under concurrent startup.
+_redis_client: aioredis.Redis | None = None
+_redis_lock = threading.Lock()
+
+
+def _get_redis() -> aioredis.Redis:
+    global _redis_client
+    if _redis_client is None:
+        with _redis_lock:
+            # Double-checked locking: re-check after acquiring the lock.
+            if _redis_client is None:
+                _redis_client = aioredis.from_url(
+                    settings.redis_url,
+                    encoding="utf-8",
+                    decode_responses=True,
+                )
+    return _redis_client
+
+
+def _token_cache_key(token: str) -> str:
+    """Derive a short, stable Redis key from the raw JWT (no sensitive data stored as key)."""
+    digest = hashlib.sha256(token.encode()).hexdigest()[:32]
+    return f"np:session:{digest}"
 
 
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
@@ -52,9 +80,8 @@ def create_access_token(
 ) -> str:
     """Create a signed JWT for the given subject.
 
-    The `role` field is preserved in the token for client display purposes.
-    Authorization decisions are enforced using the current user's role from
-    the database.
+    The `role` field is embedded in the token for display; authorisation
+    decisions always re-read the role from the Redis cache or database.
     """
     to_encode = {"sub": subject, "role": role}
     expire = datetime.utcnow() + (
@@ -63,19 +90,20 @@ def create_access_token(
         else timedelta(minutes=settings.access_token_expire_minutes)
     )
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(
-        to_encode,
-        settings.secret_key,
-        algorithm=settings.jwt_algorithm,
-    )
-    return encoded_jwt
+    return jwt.encode(to_encode, settings.secret_key, algorithm=settings.jwt_algorithm)
 
 
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Security(security_scheme)],
     db: AsyncSession = Depends(db_session),
 ) -> User:
-    """Decode the bearer token and return the associated active User."""
+    """Validate the bearer token and return the associated active User.
+
+    Flow:
+    1. Decode and verify the JWT signature / expiry.
+    2. Look up the user in the Redis cache (avoids a DB round-trip on every request).
+    3. On a cache miss, fetch from PostgreSQL and populate the cache with a TTL.
+    """
     token = credentials.credentials
     try:
         payload = jwt.decode(
@@ -84,7 +112,7 @@ async def get_current_user(
             algorithms=[settings.jwt_algorithm],
         )
         email: str = payload.get("sub")
-        if email is None:
+        if not email:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid authentication credentials",
@@ -95,6 +123,34 @@ async def get_current_user(
             detail="Could not validate credentials",
         ) from None
 
+    # --- Redis cache lookup ---
+    redis = _get_redis()
+    cache_key = _token_cache_key(token)
+    try:
+        cached = await redis.get(cache_key)
+        if cached:
+            data = json.loads(cached)
+            # Reconstruct a lightweight User-like object from the cache.
+            user = User(
+                id=data["id"],
+                email=data["email"],
+                full_name=data.get("full_name"),
+                role=UserRole(data["role"]),
+                is_active=data["is_active"],
+            )
+            if not user.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Inactive or missing user",
+                )
+            return user
+    except HTTPException:
+        raise
+    except Exception:
+        # Cache read failures should never block authentication.
+        pass
+
+    # --- Database fallback ---
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
 
@@ -103,6 +159,24 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Inactive or missing user",
         )
+
+    # Populate the cache; TTL matches the token's remaining lifetime.
+    exp: int = payload.get("exp", 0)
+    ttl = max(exp - int(datetime.utcnow().timestamp()), 60)
+    try:
+        await redis.setex(
+            cache_key,
+            ttl,
+            json.dumps({
+                "id": user.id,
+                "email": user.email,
+                "full_name": user.full_name,
+                "role": user.role.value,
+                "is_active": user.is_active,
+            }),
+        )
+    except Exception:
+        pass  # Never block on cache write failures.
 
     return user
 
@@ -135,25 +209,24 @@ async def require_admin(
             detail="Admin privileges required",
         )
 
-    # Best-effort audit logging for privileged operations.
+    # Fire-and-forget audit log via Celery – never blocks the response.
     try:
-        async with async_session_factory() as session:
-            session.add(
-                AuditLog(
-                    user_id=user.id,
-                    method=request.method,
-                    path=request.url.path,
-                    action=f"{request.method} {request.url.path}",
-                    ip_address=getattr(request.client, "host", None),
-                    details={
-                        "query": dict(request.query_params),
-                        "path_params": request.scope.get("path_params", {}),
-                    },
-                )
-            )
-            await session.commit()
+        from app.core.celery_app import celery_app
+
+        celery_app.send_task(
+            "app.tasks.write_audit_log",
+            kwargs={
+                "user_id": user.id,
+                "method": request.method,
+                "path": request.url.path,
+                "ip_address": getattr(request.client, "host", None),
+                "details": {
+                    "query": dict(request.query_params),
+                    "path_params": request.scope.get("path_params", {}),
+                },
+            },
+        )
     except Exception:
-        # Never block admin operations on audit failures.
-        pass
+        pass  # Never block admin operations on audit failures.
 
     return user

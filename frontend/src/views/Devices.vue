@@ -2,6 +2,8 @@
 import axios from "axios";
 import { computed, onMounted, ref } from "vue";
 import Uptime from "./Uptime.vue";
+import DeviceDrawer from "../components/DeviceDrawer.vue";
+import { resolveOui } from "../utils/oui";
 
 const props = defineProps<{
   theme: "nightshade" | "sysadmin";
@@ -10,6 +12,21 @@ const props = defineProps<{
 
 const isNightshade = computed(() => props.theme === "nightshade");
 const isAdmin = computed(() => !!props.isAdmin);
+
+// Drawer state – no routing, the table stays interactive beneath it.
+const drawerOpen = ref(false);
+const drawerDeviceId = ref<number | null>(null);
+
+function openDrawer(device: DeviceRow) {
+  selectedDevice.value = device;
+  drawerDeviceId.value = device.id;
+  drawerOpen.value = true;
+}
+
+function closeDrawer() {
+  drawerOpen.value = false;
+  drawerDeviceId.value = null;
+}
 
 const activeTab = ref<string>("inventory");
 
@@ -449,7 +466,7 @@ onMounted(async () => {
               v-for="d in filteredDevices"
               :key="d.id"
               class="cursor-pointer transition-colors hover:bg-white/5"
-              @click="selectDevice(d)"
+              @click="openDrawer(d)"
             >
               <td class="px-3 py-2">
                 <div class="font-mono text-[var(--np-text)]">{{ d.ip_address }}</div>
@@ -500,4 +517,12 @@ onMounted(async () => {
        <p class="text-xs text-[var(--np-muted-text)]">SNMP Polling interface active.</p>
        </div>
   </div>
+
+  <!-- Device detail drawer – slides over from the right, no page navigation -->
+  <DeviceDrawer
+    :device-id="drawerDeviceId"
+    :open="drawerOpen"
+    :theme="props.theme"
+    @close="closeDrawer"
+  />
 </template>

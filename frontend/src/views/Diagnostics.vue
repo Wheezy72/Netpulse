@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { useWebSocket } from "@vueuse/core";
 
 interface Props {
   theme: "nightshade" | "sysadmin";
@@ -218,7 +219,62 @@ function severityBadge(severity: string): string {
   if (severity === "warning") return "bg-amber-500/15 text-amber-400 border border-amber-500/30";
   return "bg-slate-500/15 text-slate-300 border border-slate-500/30";
 }
-</script>
+
+// ── Live MTR WebSocket timeline ─────────────────────────────────────────────
+// The backend pushes real-time hop latency data over a WebSocket.
+// If no WS endpoint exists yet, the feature degrades gracefully.
+interface MtrHop {
+  hop: number;
+  host: string;
+  loss_pct: number;
+  avg_ms: number;
+  best_ms: number;
+  worst_ms: number;
+}
+
+const mtrTarget = ref("8.8.8.8");
+const mtrActive = ref(false);
+const mtrHops = ref<MtrHop[]>([]);
+const mtrError = ref<string | null>(null);
+
+let mtrWs: WebSocket | null = null;
+
+function startMtr() {
+  if (mtrWs) { mtrWs.close(); mtrWs = null; }
+  mtrHops.value = [];
+  mtrError.value = null;
+  mtrActive.value = true;
+
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const url = `${protocol}//${window.location.host}/api/diagnostics/mtr/stream?target=${encodeURIComponent(mtrTarget.value)}`;
+
+  mtrWs = new WebSocket(url);
+  mtrWs.onmessage = (ev) => {
+    try {
+      const data = JSON.parse(ev.data);
+      if (Array.isArray(data.hops)) {
+        mtrHops.value = data.hops;
+      }
+    } catch { /* ignore malformed frames */ }
+  };
+  mtrWs.onerror = () => {
+    mtrError.value = "MTR WebSocket error. Ensure the backend supports /api/diagnostics/mtr/stream.";
+    mtrActive.value = false;
+  };
+  mtrWs.onclose = () => {
+    mtrActive.value = false;
+  };
+}
+
+function stopMtr() {
+  mtrWs?.close();
+  mtrWs = null;
+  mtrActive.value = false;
+}
+
+onBeforeUnmount(() => {
+  stopMtr();
+});
 
 <template>
   <div class="space-y-5">
@@ -531,5 +587,86 @@ function severityBadge(severity: string): string {
       </div>
 
     </div>
+
+    <!-- ── Live MTR WebSocket Timeline ────────────────────────────────────── -->
+    <div class="np-panel p-5 space-y-4">
+      <div class="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h2 class="font-semibold text-sm" :class="isNightshade ? 'text-teal-300' : 'text-amber-300'">
+            Live MTR Traceroute
+          </h2>
+          <p class="text-xs mt-0.5" :style="{ color: 'var(--np-muted-text)' }">
+            Real-time per-hop latency streamed over WebSocket.
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+          <input
+            v-model="mtrTarget"
+            type="text"
+            placeholder="Target (IP or hostname)"
+            class="rounded border px-3 py-1.5 text-sm bg-transparent outline-none font-mono"
+            :class="isNightshade ? 'border-teal-400/30 text-teal-100' : 'border-amber-400/30 text-amber-100'"
+            :disabled="mtrActive"
+          />
+          <button
+            v-if="!mtrActive"
+            type="button"
+            class="rounded px-3 py-1.5 text-xs font-medium transition-colors"
+            :class="isNightshade ? 'bg-teal-500/20 text-teal-300 hover:bg-teal-500/30 border border-teal-400/30' : 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-400/30'"
+            @click="startMtr"
+          >
+            ▶ Start
+          </button>
+          <button
+            v-else
+            type="button"
+            class="rounded px-3 py-1.5 text-xs font-medium transition-colors border border-red-400/30 text-red-400 hover:bg-red-400/10"
+            @click="stopMtr"
+          >
+            ■ Stop
+          </button>
+        </div>
+      </div>
+
+      <div v-if="mtrError" class="text-xs text-rose-400">{{ mtrError }}</div>
+
+      <div
+        v-if="mtrHops.length > 0"
+        class="overflow-x-auto rounded border"
+        :class="isNightshade ? 'border-teal-400/20' : 'border-slate-700'"
+      >
+        <table class="w-full text-xs font-mono">
+          <thead>
+            <tr class="border-b" :class="isNightshade ? 'border-teal-400/20 text-teal-300/60' : 'border-slate-700 text-slate-400'">
+              <th class="px-3 py-2 text-left">Hop</th>
+              <th class="px-3 py-2 text-left">Host</th>
+              <th class="px-3 py-2 text-right">Loss %</th>
+              <th class="px-3 py-2 text-right">Avg ms</th>
+              <th class="px-3 py-2 text-right">Best ms</th>
+              <th class="px-3 py-2 text-right">Worst ms</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y" :class="isNightshade ? 'divide-teal-400/10' : 'divide-slate-700/50'">
+            <tr v-for="hop in mtrHops" :key="hop.hop" class="transition-colors hover:bg-white/5">
+              <td class="px-3 py-2 text-[var(--np-muted-text)]">{{ hop.hop }}</td>
+              <td class="px-3 py-2 text-[var(--np-text)]">{{ hop.host }}</td>
+              <td class="px-3 py-2 text-right" :class="hop.loss_pct > 0 ? 'text-rose-400' : 'text-[var(--np-muted-text)]'">{{ hop.loss_pct }}%</td>
+              <td class="px-3 py-2 text-right" :style="{ color: 'var(--np-accent-primary)' }">{{ hop.avg_ms }}</td>
+              <td class="px-3 py-2 text-right text-[var(--np-muted-text)]">{{ hop.best_ms }}</td>
+              <td class="px-3 py-2 text-right text-[var(--np-muted-text)]">{{ hop.worst_ms }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div v-else-if="!mtrActive" class="text-xs text-center py-4" :style="{ color: 'var(--np-muted-text)' }">
+        Start an MTR session to see live per-hop latency data.
+      </div>
+      <div v-else class="flex items-center gap-2 text-xs" :style="{ color: 'var(--np-muted-text)' }">
+        <div class="np-spinner w-4 h-4"></div>
+        Streaming MTR to {{ mtrTarget }}…
+      </div>
+    </div>
+
   </div>
 </template>

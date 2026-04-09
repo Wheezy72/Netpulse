@@ -10,11 +10,15 @@
   "dependencies": {
     "vue": "^3.5.0",
     "vue-router": "^4.4.0",
+    "pinia": "^2.2.0",
+    "@tanstack/vue-query": "^5.59.0",
+    "@vueuse/core": "^11.3.0",
     "axios": "^1.7.0",
     "echarts": "^5.5.0",
     "vue-echarts": "^6.7.0",
+    "@vue-flow/core": "^1.42.0",
+    "splitpanes": "^3.1.5",
     "cytoscape": "^3.30.0",
-    "vis-network": "^9.1.9",
     "xterm": "^5.3.0",
     "xterm-addon-fit": "^0.8.0",
     "vue-virtual-scroller": "2.0.0-beta.8"

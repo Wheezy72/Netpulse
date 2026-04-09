@@ -1,5 +1,8 @@
 import { createApp } from "vue";
+import { createPinia } from "pinia";
+import { VueQueryPlugin } from "@tanstack/vue-query";
 import App from "./App.vue";
+import router from "./router";
 import "./assets/styles.css";
 import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 
@@ -9,13 +12,14 @@ import { CanvasRenderer } from "echarts/renderers";
 import { LineChart } from "echarts/charts";
 import { GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
 
-// Register the ECharts pieces we need. This keeps the bundle smaller than
-// loading everything by default.
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent]);
 
 const app = createApp(App);
 
-// Global chart component used in the Pulse panel (and anywhere else we need charts).
+app.use(createPinia());
+app.use(router);
+app.use(VueQueryPlugin);
+
 app.component("v-chart", ECharts);
 
 app.mount("#app");

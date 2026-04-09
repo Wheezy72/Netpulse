@@ -4,11 +4,14 @@ from __future__ import annotations
 FastAPI application entrypoint.
 
 Responsible for:
-- Initialising the database schema (for simple deployments).
 - Configuring CORS and security middleware.
 - Rate limiting for API protection.
 - Mounting the API router under /api.
 - Serving the built Vue SPA frontend.
+
+Database schema changes are exclusively handled via Alembic migrations.
+The `create_all` call has been removed; run `alembic upgrade head` before
+starting the app for the first time or after adding new migrations.
 """
 
 import os
@@ -22,18 +25,15 @@ from fastapi.responses import JSONResponse, FileResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from app.api.routes import api_router
 from app.core.config import settings
-from app.db.base import Base
 from app.db.session import engine
 from app.services.logging_service import setup_logging
 
-# Ensure all model modules are imported so Base.metadata has the full schema.
-import app.models  # noqa: F401
+import app.models  # noqa: F401 – ensure all models are registered with SQLAlchemy
 
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
@@ -41,28 +41,28 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Add security headers to all responses."""
-    
+
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
-        
+
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
-        
+
         if request.url.path.startswith("/api"):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
             response.headers["Pragma"] = "no-cache"
-        
+
         return response
 
 
 class RequestValidationMiddleware(BaseHTTPMiddleware):
     """Validate and sanitize incoming requests."""
-    
+
     MAX_CONTENT_LENGTH = 10 * 1024 * 1024
-    
+
     async def dispatch(self, request: Request, call_next) -> Response:
         content_length = request.headers.get("content-length")
         if content_length:
@@ -74,7 +74,7 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
                     )
             except ValueError:
                 pass
-        
+
         return await call_next(request)
 
 
@@ -82,24 +82,10 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """FastAPI lifespan handler.
 
-    Note: recurring monitoring jobs (Pulse latency monitoring, uptime checks, etc.)
-    are intentionally NOT run in the web process. They are scheduled via Celery Beat
-    (see app/core/celery_app.py) and executed by Celery workers.
+    Schema management: use `alembic upgrade head` before starting the app.
+    Recurring monitoring jobs are scheduled via Celery Beat – not in this process.
     """
     setup_logging()
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-        # Minimal, idempotent schema fix-ups for deployments that reuse an existing
-        # database volume. `create_all()` does not ALTER existing tables.
-        if engine.dialect.name == "postgresql":
-            await conn.execute(
-                text(
-                    "ALTER TABLE pcap_files ADD COLUMN IF NOT EXISTS zeek_summary JSON NULL"
-                )
-            )
-
     try:
         yield
     finally:
@@ -139,38 +125,34 @@ app.add_middleware(
     max_age=600,
 )
 
-# 1. Mount the API router
 app.include_router(api_router, prefix="/api")
 
-# 2. Add catch-all route to serve the Vue SPA
+
 @app.get("/{catchall:path}", include_in_schema=False)
 async def serve_vue_spa(catchall: str):
+    """Catch-all route to serve the built Vue.js frontend.
+
+    Serves static assets directly; falls back to index.html so Vue Router
+    handles client-side navigation.
     """
-    Catch-all route to serve the built Vue.js frontend.
-    If the path maps to a physical file (e.g., .js, .css), it serves it.
-    Otherwise, it serves index.html to let Vue Router handle the navigation.
-    """
-    # Ensure we don't accidentally intercept broken /api/ calls
     if catchall.startswith("api/"):
         return JSONResponse(
-            status_code=404, 
+            status_code=404,
             content={"error": {"code": 404, "message": "API endpoint not found"}}
         )
 
     static_dir = "/app/static"
     file_path = os.path.join(static_dir, catchall)
 
-    # If requesting a specific file (like .js, .css, .ico), serve it directly
     if catchall and os.path.isfile(file_path):
         return FileResponse(file_path)
 
-    # Otherwise, serve index.html to let Vue Router handle the client-side routing
     index_path = os.path.join(static_dir, "index.html")
     if os.path.isfile(index_path):
         return FileResponse(index_path)
 
     return JSONResponse(
-        status_code=404, 
+        status_code=404,
         content={"error": "Frontend build not found in /app/static"}
     )
 
@@ -180,12 +162,7 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     """Return HTTP errors in a consistent JSON envelope."""
     return JSONResponse(
         status_code=exc.status_code,
-        content={
-            "error": {
-                "code": exc.status_code,
-                "message": exc.detail,
-            }
-        },
+        content={"error": {"code": exc.status_code, "message": exc.detail}},
     )
 
 
@@ -194,14 +171,14 @@ async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
     """Return request validation errors with field-level details."""
-    sanitized_errors = []
-    for error in exc.errors():
-        sanitized_errors.append({
+    sanitized_errors = [
+        {
             "loc": error.get("loc", []),
             "msg": error.get("msg", "Validation error"),
             "type": error.get("type", "value_error"),
-        })
-    
+        }
+        for error in exc.errors()
+    ]
     return JSONResponse(
         status_code=422,
         content={
@@ -216,15 +193,10 @@ async def validation_exception_handler(
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Catch-all handler to avoid leaking internal details to clients."""
+    """Catch-all handler – prevents leaking internal details to clients."""
     return JSONResponse(
         status_code=500,
-        content={
-            "error": {
-                "code": 500,
-                "message": "Internal server error",
-            }
-        },
+        content={"error": {"code": 500, "message": "Internal server error"}},
     )
 
 

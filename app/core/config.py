@@ -11,7 +11,10 @@ Settings are loaded from environment variables (and optional .env files)
 and used across the backend for:
 - database and Redis connections,
 - security and CORS,
-- script directories and allowlists.
+- script directories and allowlists,
+- RabbitMQ / InfluxDB (split-plane data architecture),
+- medical/IoT VLAN protection,
+- rogue DHCP killswitch.
 """
 
 
@@ -22,7 +25,6 @@ class Settings(BaseSettings):
     for typical defaults in a containerized deployment.
     """
 
-    # Pydantic v2 model configuration: load from .env by default
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     app_name: str = "NetPulse Enterprise"
@@ -39,6 +41,15 @@ class Settings(BaseSettings):
     # Redis / Celery
     redis_url: str = "redis://redis:6379/0"
 
+    # RabbitMQ – used by the Go data-plane probe for telemetry fan-out.
+    rabbitmq_url: str = "amqp://netpulse:netpulse@rabbitmq:5672/netpulse"
+
+    # InfluxDB – time-series storage for probe telemetry and bandwidth metrics.
+    influxdb_url: str = "http://influxdb:8086"
+    influxdb_token: str = "netpulse-influx-token"
+    influxdb_org: str = "netpulse"
+    influxdb_bucket: str = "telemetry"
+
     # Network monitoring targets (Pulse)
     pulse_gateway_ip: str = "192.168.1.1"
     pulse_isp_ip: str = "8.8.8.8"
@@ -47,8 +58,22 @@ class Settings(BaseSettings):
     # Rogue DHCP detection allowlist (MAC addresses).
     # Recommended env var format:
     #   ALLOWED_DHCP_SERVER_MACS="aa:bb:cc:dd:ee:ff,11:22:33:44:55:66"
-    # (We keep this as a string to avoid strict JSON list parsing requirements.)
     allowed_dhcp_server_macs: str | None = None
+
+    # Rogue DHCP killswitch – SSH into the switch and admin-shutdown the rogue port.
+    # Set ROGUE_DHCP_KILLSWITCH_ENABLED=true to activate.
+    rogue_dhcp_killswitch_enabled: bool = False
+    rogue_dhcp_switch_host: str | None = None
+    rogue_dhcp_switch_user: str | None = None
+    rogue_dhcp_switch_password: str | None = None
+    # Netmiko device_type string, e.g. "cisco_ios", "mikrotik_routeros", "juniper_junos"
+    rogue_dhcp_switch_type: str = "cisco_ios"
+
+    # Medical / IoT VLAN protection.
+    # List of CIDR ranges that must never receive active Nmap SYN scans.
+    # Passive ARP / Zeek sniffing is the only allowed discovery method for these ranges.
+    # Example: MEDICAL_IOT_VLAN_CIDRS='["10.20.0.0/16","192.168.50.0/24"]'
+    medical_iot_vlan_cidrs: List[str] = Field(default_factory=list)
 
     # Paths
     scripts_base_dir: str = "./scripts"
@@ -96,7 +121,7 @@ class Settings(BaseSettings):
     whatsapp_report_template: str = "[NetPulse] Report Generated\n\n{subject}\n\n{body}\n\nTime: {timestamp}"
     whatsapp_health_template: str = "[NetPulse] Health Alert\n\n{subject}\n\nDevice: {device_name} ({device_ip})\nSegment: {segment_name}\n\n{body}\n\nTime: {timestamp}"
     whatsapp_device_template: str = "[NetPulse] Device Alert\n\nDevice: {device_name}\nIP: {device_ip}\nMAC: {device_mac}\nSegment: {segment_name}\n\n{body}\n\nTime: {timestamp}"
-    
+
     # Email templates (same variables available)
     email_vuln_template: str = "Device: {device_name} ({device_ip})\nMAC: {device_mac}\nSegment: {segment_name}\n\n{body}"
     email_device_template: str = "Device: {device_name}\nIP: {device_ip}\nMAC: {device_mac}\nSegment: {segment_name}\n\n{body}"
@@ -111,16 +136,10 @@ class Settings(BaseSettings):
 
     # CORS configuration
     cors_allow_origins: List[str] = Field(
-        # Vite dev server defaults to 5173, but this repo's vite.config.ts uses 5000.
-        # Include both common defaults.
         default_factory=lambda: ["http://localhost:5000", "http://localhost:5173"]
     )
 
     # Script governance.
-    # This list lets you explicitly control which prebuilt scripts can run.
-    # You can override it via env vars such as:
-    #  ALLOWED_PREBUILT_SCRIPTS="backup_switch.py,malformed_syn_flood.py"
-    # If left empty, all scripts present in the prebuilt directory are allowed.
     allowed_prebuilt_scripts: List[str] = Field(
         default_factory=lambda: [
             "backup_switch.py",

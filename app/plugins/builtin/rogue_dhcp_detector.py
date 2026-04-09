@@ -180,6 +180,65 @@ def _persist_alerts_to_db(alerts: list[dict[str, Any]]) -> None:
     loop.create_task(_persist())
 
 
+def _killswitch_port(server_mac: str) -> None:
+    """SSH into the network switch and admin-shutdown the offending port.
+
+    This is a best-effort operation. Requires the following settings to be
+    configured: ROGUE_DHCP_KILLSWITCH_ENABLED, ROGUE_DHCP_SWITCH_HOST,
+    ROGUE_DHCP_SWITCH_USER, ROGUE_DHCP_SWITCH_PASSWORD.
+
+    The function uses Netmiko to connect to the switch and runs vendor-appropriate
+    interface-shutdown commands based on ROGUE_DHCP_SWITCH_TYPE.
+    """
+    if not settings.rogue_dhcp_killswitch_enabled:
+        return
+    if not settings.rogue_dhcp_switch_host:
+        logger.warning("Killswitch enabled but ROGUE_DHCP_SWITCH_HOST is not set")
+        return
+
+    try:
+        from netmiko import ConnectHandler  # type: ignore[import-untyped]
+
+        device = {
+            "device_type": settings.rogue_dhcp_switch_type,
+            "host": settings.rogue_dhcp_switch_host,
+            "username": settings.rogue_dhcp_switch_user or "",
+            "password": settings.rogue_dhcp_switch_password or "",
+            "timeout": 15,
+        }
+
+        # Build shutdown commands based on device type.
+        if "mikrotik" in settings.rogue_dhcp_switch_type:
+            # MikroTik RouterOS: disable the interface by MAC
+            commands = [f"/interface set [find mac-address={server_mac}] disabled=yes"]
+        else:
+            # Cisco IOS / generic: use CDP/ARP to find the interface; fall back to
+            # a MAC-address-table lookup command. Operators should tune this to
+            # their environment.
+            mac_formatted = server_mac.replace(":", "")
+            commands = [
+                f"show mac address-table address {mac_formatted}",
+            ]
+            logger.warning(
+                "Killswitch: device type %s requires manual port identification. "
+                "Please verify the output and shutdown the interface manually. "
+                "MAC: %s",
+                settings.rogue_dhcp_switch_type,
+                server_mac,
+            )
+
+        with ConnectHandler(**device) as conn:
+            output = conn.send_config_set(commands) if commands else ""
+            logger.warning(
+                "Killswitch executed for rogue MAC %s on %s: %s",
+                server_mac,
+                settings.rogue_dhcp_switch_host,
+                output[:200],
+            )
+    except Exception as exc:
+        logger.error("Killswitch failed for MAC %s: %s", server_mac, exc)
+
+
 class RogueDhcpDetector:
     name = "Rogue DHCP Detector"
     description = "Detects unauthorized DHCP servers by passively sniffing DHCP OFFER/ACK packets"
@@ -312,6 +371,15 @@ class RogueDhcpDetector:
             )
 
             _persist_alerts_to_db(alerts)
+
+            # Trigger the killswitch for each unique rogue MAC (if configured).
+            if settings.rogue_dhcp_killswitch_enabled:
+                seen_macs: set[str] = set()
+                for alert in alerts:
+                    mac = alert.get("server_mac", "")
+                    if mac and mac not in seen_macs:
+                        seen_macs.add(mac)
+                        _killswitch_port(mac)
 
             return {
                 "status": "ok",
