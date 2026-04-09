@@ -5,7 +5,6 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Any, Dict
 
-import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
@@ -19,6 +18,7 @@ from app.api.deps import (
     verify_password,
 )
 from app.core.config import settings
+from app.core.redis import get_redis
 from app.models.user import User, UserRole
 
 logger = logging.getLogger("netpulse.auth")
@@ -31,10 +31,6 @@ _RATE_LIMIT_WINDOW_SECONDS = 300
 
 _RESET_TOKEN_KEY_PREFIX = "np:reset_token:"
 _RESET_TOKEN_TTL_SECONDS = 3600
-
-
-def _build_redis_client() -> aioredis.Redis:
-    return aioredis.from_url(settings.redis_url, encoding="utf-8", decode_responses=True)
 
 
 def _rate_limit_key_for_ip(client_ip: str) -> str:
@@ -52,7 +48,7 @@ async def _enforce_login_rate_limit(request: Request) -> None:
     Unix epoch, so ZREMRANGEBYSCORE + ZCARD runs atomically in a single pipeline.
     """
     client_ip = request.client.host if request.client else "unknown"
-    redis_client = _build_redis_client()
+    redis_client = get_redis()
     rate_limit_key = _rate_limit_key_for_ip(client_ip)
     current_unix_time = datetime.utcnow().timestamp()
     window_start_time = current_unix_time - _RATE_LIMIT_WINDOW_SECONDS
@@ -73,7 +69,7 @@ async def _enforce_login_rate_limit(request: Request) -> None:
 
 
 async def _store_password_reset_token_in_redis(token: str, user_email: str) -> None:
-    redis_client = _build_redis_client()
+    redis_client = get_redis()
     reset_token_key = _reset_token_key(token)
     await redis_client.hset(reset_token_key, mapping={"email": user_email})
     await redis_client.expire(reset_token_key, _RESET_TOKEN_TTL_SECONDS)
@@ -81,7 +77,7 @@ async def _store_password_reset_token_in_redis(token: str, user_email: str) -> N
 
 async def _consume_password_reset_token_from_redis(token: str) -> str | None:
     """Return the email for the token and delete it (tokens are single-use)."""
-    redis_client = _build_redis_client()
+    redis_client = get_redis()
     reset_token_key = _reset_token_key(token)
     token_data = await redis_client.hgetall(reset_token_key)
     if not token_data:

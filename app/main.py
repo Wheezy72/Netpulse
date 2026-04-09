@@ -30,6 +30,7 @@ from starlette.responses import Response
 
 from app.api.routes import api_router
 from app.core.config import settings
+from app.core.redis import close_pool, init_pool
 from app.db.session import engine
 from app.services.logging_service import setup_logging
 
@@ -86,10 +87,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Recurring monitoring jobs are scheduled via Celery Beat – not in this process.
     """
     setup_logging()
+    await init_pool()
     try:
         yield
     finally:
         await engine.dispose()
+        await close_pool()
 
 
 app = FastAPI(

@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import threading
 from datetime import datetime, timedelta
 from typing import Annotated, AsyncGenerator, Optional
 
-import redis.asyncio as aioredis
 from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
@@ -15,27 +13,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.redis import get_redis
 from app.db.session import async_session_factory
 from app.models.user import User, UserRole
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 security_scheme = HTTPBearer(auto_error=True)
-
-_redis_client: aioredis.Redis | None = None
-_redis_lock = threading.Lock()
-
-
-def _get_redis() -> aioredis.Redis:
-    global _redis_client
-    if _redis_client is None:
-        with _redis_lock:
-            if _redis_client is None:
-                _redis_client = aioredis.from_url(
-                    settings.redis_url,
-                    encoding="utf-8",
-                    decode_responses=True,
-                )
-    return _redis_client
 
 
 def _token_cache_key(token: str) -> str:
@@ -98,7 +81,7 @@ async def get_current_user(
             detail="Could not validate credentials",
         ) from None
 
-    redis = _get_redis()
+    redis = get_redis()
     cache_key = _token_cache_key(token)
     try:
         cached = await redis.get(cache_key)
