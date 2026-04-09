@@ -2,7 +2,7 @@
 # Stage 1: builder — compile the release binary. libpcap-dev is the only
 # build-time C dependency; libpcap is dynamically linked into the binary.
 # =============================================================================
-FROM rust:1.78-slim AS builder
+FROM rust:stable AS builder
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
