@@ -20,7 +20,7 @@ pnet_packet = "0.35"
 
 # lapin is the de-facto AMQP 0-9-1 client for async Rust. It integrates
 # natively with tokio and handles channel multiplexing and heartbeats.
-lapin = "2.5"
+lapin = "4.4"
 
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
