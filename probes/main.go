@@ -113,7 +113,12 @@ func main() {
 			break
 		}
 		log.Printf("probe: amqp connect attempt %d/10: %v", attempt, err)
-		time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		// Cap backoff at 30 seconds to avoid excessive wait times.
+		delay := time.Duration(attempt) * 2 * time.Second
+		if delay > 30*time.Second {
+			delay = 30 * time.Second
+		}
+		time.Sleep(delay)
 	}
 	if err != nil {
 		log.Fatalf("probe: could not connect to RabbitMQ: %v", err)

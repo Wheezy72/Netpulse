@@ -228,7 +228,7 @@ def _killswitch_port(server_mac: str) -> None:
             )
 
         with ConnectHandler(**device) as conn:
-            output = conn.send_config_set(commands) if len(commands) > 0 else ""
+            output = conn.send_config_set(commands) if commands else ""
             logger.warning(
                 "Killswitch executed for rogue MAC %s on %s: %s",
                 server_mac,

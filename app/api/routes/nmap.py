@@ -238,7 +238,10 @@ def _is_medical_iot_target(target: str) -> bool:
         # Handle plain IP or CIDR notation from the target string.
         addr = ipaddress.ip_address(target.split("/")[0])
     except ValueError:
-        return False  # hostname – can't classify statically; allow and log.
+        # Hostname target – cannot classify statically.
+        # Operators must ensure medical/IoT VLANs are not reachable by hostname.
+        logger.debug("Medical VLAN check skipped for non-IP target: %s", target)
+        return False  # Allow the scan; hostname safety must be enforced at network level.
 
     for cidr in settings.medical_iot_vlan_cidrs:
         try:

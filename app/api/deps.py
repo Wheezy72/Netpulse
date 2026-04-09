@@ -13,6 +13,7 @@ Provides:
 
 import hashlib
 import json
+import threading
 from datetime import datetime, timedelta
 from typing import Annotated, AsyncGenerator, Optional
 
@@ -34,17 +35,22 @@ pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 security_scheme = HTTPBearer(auto_error=True)
 
 # Shared async Redis client – reused across requests.
+# Lock ensures exactly one client is created even under concurrent startup.
 _redis_client: aioredis.Redis | None = None
+_redis_lock = threading.Lock()
 
 
 def _get_redis() -> aioredis.Redis:
     global _redis_client
     if _redis_client is None:
-        _redis_client = aioredis.from_url(
-            settings.redis_url,
-            encoding="utf-8",
-            decode_responses=True,
-        )
+        with _redis_lock:
+            # Double-checked locking: re-check after acquiring the lock.
+            if _redis_client is None:
+                _redis_client = aioredis.from_url(
+                    settings.redis_url,
+                    encoding="utf-8",
+                    decode_responses=True,
+                )
     return _redis_client
 
 
