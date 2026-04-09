@@ -35,14 +35,14 @@ updates:
       - "dependencies"
       - "github-actions"
 
-  # Track Go module dependency updates.
-  - package-ecosystem: "gomod"
+  # Track Rust (Cargo) dependency updates for the data-plane probe.
+  - package-ecosystem: "cargo"
     directory: "/probes"
     schedule:
       interval: "weekly"
     labels:
       - "dependencies"
-      - "go"
+      - "rust"
 
   # Track Python pip dependency updates.
   - package-ecosystem: "pip"

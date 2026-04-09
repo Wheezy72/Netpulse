@@ -1,5 +1,5 @@
 """
-Pytest configuration and shared fixtures for the Netpulse test suite.
+Pytest configuration and shared fixtures for the NetPulse test suite.
 
 Tests are designed to run without any external services (no database,
 no Redis, no RabbitMQ). Each test file imports only the modules it
