@@ -275,6 +275,7 @@ function stopMtr() {
 onBeforeUnmount(() => {
   stopMtr();
 });
+</script>
 
 <template>
   <div class="space-y-5">
@@ -282,21 +283,20 @@ onBeforeUnmount(() => {
     <header class="flex items-center justify-between">
       <div>
         <h1
-          class="text-xl font-bold tracking-wide"
-          :style="{ color: 'var(--np-accent-primary)', fontFamily: isNightshade ? '\'Orbitron\', sans-serif' : '\'Inter\', system-ui, sans-serif' }"
+          class="text-xl font-bold tracking-wide text-amber-500 dark:text-teal-500"
+          :style="{ fontFamily: isNightshade ? '\'Orbitron\', sans-serif' : '\'Inter\', system-ui, sans-serif' }"
         >
           Diagnostics
         </h1>
-        <p class="text-xs text-[var(--np-muted-text)]">
+        <p class="text-xs text-slate-400 dark:text-teal-300">
           Network health · Path analysis · Issue localization
         </p>
       </div>
       <button
         type="button"
         @click="refresh"
-        class="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition-colors"
-        style="border-color: var(--np-border); color: var(--np-muted-text)"
-        :class="healthLoading ? 'opacity-50 cursor-not-allowed' : 'hover:text-[var(--np-text)] hover:bg-white/5'"
+        class="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition-colors border-amber-500/15 dark:border-teal-500/20 text-slate-400 dark:text-teal-300"
+        :class="healthLoading ? 'opacity-50 cursor-not-allowed' : 'hover:text-slate-100 dark:hover:text-sky-100 hover:bg-white/5'"
         :disabled="healthLoading"
       >
         <svg class="w-3.5 h-3.5" :class="{ 'animate-spin': healthLoading }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -311,13 +311,13 @@ onBeforeUnmount(() => {
       <template v-if="health">
         <!-- Score -->
         <div class="np-panel p-4 flex flex-col gap-1">
-          <span class="text-[0.6rem] uppercase tracking-widest text-[var(--np-muted-text)]">Health Score</span>
+          <span class="text-[0.6rem] uppercase tracking-widest text-slate-400 dark:text-teal-300">Health Score</span>
           <div class="flex items-baseline gap-2">
             <span
               class="text-3xl font-bold"
               :class="statusColor(health.status)"
             >{{ health.health_score }}</span>
-            <span class="text-sm text-[var(--np-muted-text)]">/ 100</span>
+            <span class="text-sm text-slate-400 dark:text-teal-300">/ 100</span>
           </div>
           <div class="flex items-center gap-1.5 mt-1">
             <span class="w-2 h-2 rounded-full" :class="statusDot(health.status)"></span>
@@ -326,10 +326,10 @@ onBeforeUnmount(() => {
         </div>
         <!-- Devices -->
         <div class="np-panel p-4 flex flex-col gap-1">
-          <span class="text-[0.6rem] uppercase tracking-widest text-[var(--np-muted-text)]">Devices</span>
+          <span class="text-[0.6rem] uppercase tracking-widest text-slate-400 dark:text-teal-300">Devices</span>
           <div class="flex items-baseline gap-2">
-            <span class="text-3xl font-bold text-[var(--np-text)]">{{ health.total_devices }}</span>
-            <span class="text-sm text-[var(--np-muted-text)]">total</span>
+            <span class="text-3xl font-bold text-slate-100 dark:text-sky-100">{{ health.total_devices }}</span>
+            <span class="text-sm text-slate-400 dark:text-teal-300">total</span>
           </div>
           <div class="flex gap-3 text-[0.7rem] mt-1">
             <span class="text-emerald-400">{{ health.online_devices }} online</span>
@@ -338,7 +338,7 @@ onBeforeUnmount(() => {
         </div>
         <!-- Issues -->
         <div class="np-panel p-4 flex flex-col gap-1">
-          <span class="text-[0.6rem] uppercase tracking-widest text-[var(--np-muted-text)]">Active Issues</span>
+          <span class="text-[0.6rem] uppercase tracking-widest text-slate-400 dark:text-teal-300">Active Issues</span>
           <div class="flex items-baseline gap-2">
             <span
               class="text-3xl font-bold"
@@ -353,15 +353,15 @@ onBeforeUnmount(() => {
         </div>
         <!-- Last Updated -->
         <div class="np-panel p-4 flex flex-col gap-1">
-          <span class="text-[0.6rem] uppercase tracking-widest text-[var(--np-muted-text)]">Last Updated</span>
-          <span class="text-[0.75rem] text-[var(--np-text)] mt-1">
+          <span class="text-[0.6rem] uppercase tracking-widest text-slate-400 dark:text-teal-300">Last Updated</span>
+          <span class="text-[0.75rem] text-slate-100 dark:text-sky-100 mt-1">
             {{ new Date(health.last_updated).toLocaleTimeString() }}
           </span>
-          <span class="text-[0.65rem] text-[var(--np-muted-text)] mt-0.5">Auto-refreshes every 30s</span>
+          <span class="text-[0.65rem] text-slate-400 dark:text-teal-300 mt-0.5">Auto-refreshes every 30s</span>
         </div>
       </template>
       <template v-else-if="healthLoading">
-        <div class="np-panel p-4 col-span-4 text-center text-xs text-[var(--np-muted-text)]">
+        <div class="np-panel p-4 col-span-4 text-center text-xs text-slate-400 dark:text-teal-300">
           Loading network health…
         </div>
       </template>
@@ -376,10 +376,10 @@ onBeforeUnmount(() => {
       <!-- Path Diagnosis -->
       <div class="np-panel p-4 space-y-3">
         <header class="flex items-center gap-2">
-          <svg class="w-4 h-4" style="color: var(--np-accent-primary)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-4 h-4 text-amber-500 dark:text-teal-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
           </svg>
-          <span class="text-sm font-semibold" style="color: var(--np-accent-primary)">Path Analysis — Where Is the Problem?</span>
+          <span class="text-sm font-semibold text-amber-500 dark:text-teal-500">Path Analysis — Where Is the Problem?</span>
         </header>
 
         <!-- Hop chain -->
@@ -392,7 +392,7 @@ onBeforeUnmount(() => {
               'border-emerald-500/30 bg-emerald-500/5': hop.status === 'ok',
               'border-amber-500/30 bg-amber-500/5': hop.status === 'warning',
               'border-rose-500/30 bg-rose-500/10': hop.status === 'critical',
-              'border-[var(--np-border)] bg-black/20': hop.status === 'unknown',
+              'border-amber-500/15 dark:border-teal-500/20 bg-black/20': hop.status === 'unknown',
             }"
           >
             <!-- Icon / connector -->
@@ -406,33 +406,33 @@ onBeforeUnmount(() => {
                   'bg-slate-500': hop.status === 'unknown',
                 }"
               ></span>
-              <div v-if="idx < hops.length - 1" class="w-0.5 h-3 bg-[var(--np-border)]"></div>
+              <div v-if="idx < hops.length - 1" class="w-0.5 h-3 bg-amber-500/15 dark:bg-teal-500/20"></div>
             </div>
             <div class="flex-1 min-w-0">
               <div class="flex items-center justify-between gap-2">
-                <span class="text-[0.75rem] font-semibold text-[var(--np-text)]">{{ hop.label }}</span>
+                <span class="text-[0.75rem] font-semibold text-slate-100 dark:text-sky-100">{{ hop.label }}</span>
                 <span
                   class="text-[0.65rem] uppercase tracking-wide"
                   :class="{
                     'text-emerald-400': hop.status === 'ok',
                     'text-amber-400': hop.status === 'warning',
                     'text-rose-400': hop.status === 'critical',
-                    'text-[var(--np-muted-text)]': hop.status === 'unknown',
+                    'text-slate-400 dark:text-teal-300': hop.status === 'unknown',
                   }"
                 >
                   {{ hop.status === 'unknown' ? 'No data' : hop.status.toUpperCase() }}
                 </span>
               </div>
-              <p class="text-[0.7rem] text-[var(--np-muted-text)] mt-0.5">{{ hop.note }}</p>
-              <div v-if="hop.latency_ms !== null" class="flex gap-3 mt-1 text-[0.65rem] text-[var(--np-muted-text)]">
-                <span>Latency: <strong class="text-[var(--np-text)]">{{ hop.latency_ms.toFixed(1) }} ms</strong></span>
-                <span v-if="hop.jitter_ms !== null">Jitter: <strong class="text-[var(--np-text)]">{{ hop.jitter_ms.toFixed(1) }} ms</strong></span>
-                <span v-if="hop.packet_loss_pct !== null">Loss: <strong class="text-[var(--np-text)]">{{ hop.packet_loss_pct.toFixed(1) }}%</strong></span>
+              <p class="text-[0.7rem] text-slate-400 dark:text-teal-300 mt-0.5">{{ hop.note }}</p>
+              <div v-if="hop.latency_ms !== null" class="flex gap-3 mt-1 text-[0.65rem] text-slate-400 dark:text-teal-300">
+                <span>Latency: <strong class="text-slate-100 dark:text-sky-100">{{ hop.latency_ms.toFixed(1) }} ms</strong></span>
+                <span v-if="hop.jitter_ms !== null">Jitter: <strong class="text-slate-100 dark:text-sky-100">{{ hop.jitter_ms.toFixed(1) }} ms</strong></span>
+                <span v-if="hop.packet_loss_pct !== null">Loss: <strong class="text-slate-100 dark:text-sky-100">{{ hop.packet_loss_pct.toFixed(1) }}%</strong></span>
               </div>
             </div>
           </div>
 
-          <p v-if="!hops.length && !pulseLoading" class="text-[0.7rem] text-[var(--np-muted-text)] text-center py-4">
+          <p v-if="!hops.length && !pulseLoading" class="text-[0.7rem] text-slate-400 dark:text-teal-300 text-center py-4">
             Path data will appear after the latency monitor collects its first samples (every 15 s).
           </p>
         </div>
@@ -451,11 +451,11 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- TCP Probe -->
-        <div class="border-t pt-3 space-y-2" style="border-color: var(--np-border)">
-          <h3 class="text-[0.7rem] uppercase tracking-widest" style="color: var(--np-accent-primary)">
+        <div class="border-t pt-3 space-y-2 border-amber-500/15 dark:border-teal-500/20">
+          <h3 class="text-[0.7rem] uppercase tracking-widest text-amber-500 dark:text-teal-500">
             TCP Connection Probe
           </h3>
-          <p class="text-[0.65rem] text-[var(--np-muted-text)]">
+          <p class="text-[0.65rem] text-slate-400 dark:text-teal-300">
             Test TCP handshake time to any host:port — detects server-level vs. network-level delays.
           </p>
           <div class="flex gap-2">
@@ -463,8 +463,7 @@ onBeforeUnmount(() => {
               v-model="tcpHost"
               type="text"
               placeholder="host or IP"
-              class="flex-1 rounded-md border bg-black/60 px-2 py-1 text-[0.75rem] focus:outline-none focus:ring-1"
-              style="border-color: var(--np-border); color: var(--np-text)"
+              class="flex-1 rounded-md border bg-black/60 px-2 py-1 text-[0.75rem] focus:outline-none focus:ring-1 border-amber-500/15 dark:border-teal-500/20 text-slate-100 dark:text-sky-100"
               @keyup.enter="runTcpTest"
             />
             <input
@@ -473,8 +472,7 @@ onBeforeUnmount(() => {
               min="1"
               max="65535"
               placeholder="port"
-              class="w-20 rounded-md border bg-black/60 px-2 py-1 text-[0.75rem] focus:outline-none focus:ring-1"
-              style="border-color: var(--np-border); color: var(--np-text)"
+              class="w-20 rounded-md border bg-black/60 px-2 py-1 text-[0.75rem] focus:outline-none focus:ring-1 border-amber-500/15 dark:border-teal-500/20 text-slate-100 dark:text-sky-100"
             />
             <button
               type="button"
@@ -498,7 +496,7 @@ onBeforeUnmount(() => {
             <template v-else>
               ✓ TCP handshake to <strong>{{ tcpHost }}:{{ tcpPort }}</strong> completed in
               <strong>{{ tcpResult.latency_ms?.toFixed(1) }} ms</strong>
-              <span class="block mt-0.5 text-[0.65rem]" :class="(tcpResult.latency_ms ?? 0) > 200 ? 'text-amber-400' : 'text-[var(--np-muted-text)]'">
+              <span class="block mt-0.5 text-[0.65rem]" :class="(tcpResult.latency_ms ?? 0) > 200 ? 'text-amber-400' : 'text-slate-400 dark:text-teal-300'">
                 {{ (tcpResult.latency_ms ?? 0) > 200 ? 'High TCP latency — possible server-side congestion or high server load.' : 'Connection time is within normal range.' }}
               </span>
             </template>
@@ -509,11 +507,11 @@ onBeforeUnmount(() => {
       <!-- Bottlenecks -->
       <div class="np-panel p-4 space-y-3">
         <header class="flex items-center gap-2">
-          <svg class="w-4 h-4" style="color: var(--np-accent-primary)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-4 h-4 text-amber-500 dark:text-teal-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
-          <span class="text-sm font-semibold" style="color: var(--np-accent-primary)">Interface Bottlenecks</span>
-          <span class="text-[0.6rem] text-[var(--np-muted-text)] ml-1">(SNMP-based, last 5 min)</span>
+          <span class="text-sm font-semibold text-amber-500 dark:text-teal-500">Interface Bottlenecks</span>
+          <span class="text-[0.6rem] text-slate-400 dark:text-teal-300 ml-1">(SNMP-based, last 5 min)</span>
         </header>
 
         <div v-if="health?.bottlenecks?.length" class="space-y-3">
@@ -528,40 +526,40 @@ onBeforeUnmount(() => {
           >
             <div class="flex items-center justify-between gap-2">
               <div>
-                <span class="text-[0.75rem] font-semibold text-[var(--np-text)]">{{ b.hostname }}</span>
-                <span class="text-[0.65rem] text-[var(--np-muted-text)] ml-2 font-mono">{{ b.ip_address }}</span>
+                <span class="text-[0.75rem] font-semibold text-slate-100 dark:text-sky-100">{{ b.hostname }}</span>
+                <span class="text-[0.65rem] text-slate-400 dark:text-teal-300 ml-2 font-mono">{{ b.ip_address }}</span>
               </div>
               <span class="rounded px-2 py-0.5 text-[0.6rem] uppercase tracking-wider" :class="severityBadge(b.severity)">
                 {{ b.severity }}
               </span>
             </div>
             <ul class="space-y-0.5">
-              <li v-for="(issue, i) in b.issues" :key="i" class="text-[0.7rem] text-[var(--np-muted-text)] flex items-start gap-1">
+              <li v-for="(issue, i) in b.issues" :key="i" class="text-[0.7rem] text-slate-400 dark:text-teal-300 flex items-start gap-1">
                 <span class="mt-0.5 w-1.5 h-1.5 rounded-full shrink-0" :class="b.severity === 'critical' ? 'bg-rose-500' : 'bg-amber-500'"></span>
                 {{ issue }}
               </li>
             </ul>
-            <p class="text-[0.68rem] text-[var(--np-muted-text)] italic">↳ {{ b.recommendation }}</p>
+            <p class="text-[0.68rem] text-slate-400 dark:text-teal-300 italic">↳ {{ b.recommendation }}</p>
           </div>
         </div>
 
-        <div v-else-if="healthLoading" class="text-[0.7rem] text-[var(--np-muted-text)] py-4 text-center">
+        <div v-else-if="healthLoading" class="text-[0.7rem] text-slate-400 dark:text-teal-300 py-4 text-center">
           Loading bottleneck data…
         </div>
 
         <div v-else class="rounded-md border border-emerald-500/20 bg-emerald-500/5 px-3 py-4 text-center">
           <p class="text-[0.75rem] text-emerald-400 font-semibold">No interface bottlenecks detected</p>
-          <p class="text-[0.65rem] text-[var(--np-muted-text)] mt-1">
+          <p class="text-[0.65rem] text-slate-400 dark:text-teal-300 mt-1">
             Enable SNMP polling on devices to get real-time bandwidth utilisation data.
           </p>
         </div>
 
         <!-- Interpretation guide -->
-        <div class="border-t pt-3 space-y-2" style="border-color: var(--np-border)">
-          <h3 class="text-[0.7rem] uppercase tracking-widest" style="color: var(--np-accent-primary)">
+        <div class="border-t pt-3 space-y-2 border-amber-500/15 dark:border-teal-500/20">
+          <h3 class="text-[0.7rem] uppercase tracking-widest text-amber-500 dark:text-teal-500">
             How to Read This
           </h3>
-          <dl class="space-y-2 text-[0.7rem] text-[var(--np-muted-text)]">
+          <dl class="space-y-2 text-[0.7rem] text-slate-400 dark:text-teal-300">
             <div>
               <dt class="font-semibold text-rose-400 inline">High gateway latency (>50 ms):</dt>
               <dd class="inline ml-1">Router overloaded or LAN issue. Check CPU, ARP table size, or switch errors.</dd>
@@ -595,7 +593,7 @@ onBeforeUnmount(() => {
           <h2 class="font-semibold text-sm" :class="isNightshade ? 'text-teal-300' : 'text-amber-300'">
             Live MTR Traceroute
           </h2>
-          <p class="text-xs mt-0.5" :style="{ color: 'var(--np-muted-text)' }">
+          <p class="text-xs mt-0.5 text-slate-400 dark:text-teal-300">
             Real-time per-hop latency streamed over WebSocket.
           </p>
         </div>
@@ -648,21 +646,21 @@ onBeforeUnmount(() => {
           </thead>
           <tbody class="divide-y" :class="isNightshade ? 'divide-teal-400/10' : 'divide-slate-700/50'">
             <tr v-for="hop in mtrHops" :key="hop.hop" class="transition-colors hover:bg-white/5">
-              <td class="px-3 py-2 text-[var(--np-muted-text)]">{{ hop.hop }}</td>
-              <td class="px-3 py-2 text-[var(--np-text)]">{{ hop.host }}</td>
-              <td class="px-3 py-2 text-right" :class="hop.loss_pct > 0 ? 'text-rose-400' : 'text-[var(--np-muted-text)]'">{{ hop.loss_pct }}%</td>
-              <td class="px-3 py-2 text-right" :style="{ color: 'var(--np-accent-primary)' }">{{ hop.avg_ms }}</td>
-              <td class="px-3 py-2 text-right text-[var(--np-muted-text)]">{{ hop.best_ms }}</td>
-              <td class="px-3 py-2 text-right text-[var(--np-muted-text)]">{{ hop.worst_ms }}</td>
+              <td class="px-3 py-2 text-slate-400 dark:text-teal-300">{{ hop.hop }}</td>
+              <td class="px-3 py-2 text-slate-100 dark:text-sky-100">{{ hop.host }}</td>
+              <td class="px-3 py-2 text-right" :class="hop.loss_pct > 0 ? 'text-rose-400' : 'text-slate-400 dark:text-teal-300'">{{ hop.loss_pct }}%</td>
+              <td class="px-3 py-2 text-right text-amber-500 dark:text-teal-500">{{ hop.avg_ms }}</td>
+              <td class="px-3 py-2 text-right text-slate-400 dark:text-teal-300">{{ hop.best_ms }}</td>
+              <td class="px-3 py-2 text-right text-slate-400 dark:text-teal-300">{{ hop.worst_ms }}</td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <div v-else-if="!mtrActive" class="text-xs text-center py-4" :style="{ color: 'var(--np-muted-text)' }">
+      <div v-else-if="!mtrActive" class="text-xs text-center py-4 text-slate-400 dark:text-teal-300">
         Start an MTR session to see live per-hop latency data.
       </div>
-      <div v-else class="flex items-center gap-2 text-xs" :style="{ color: 'var(--np-muted-text)' }">
+      <div v-else class="flex items-center gap-2 text-xs text-slate-400 dark:text-teal-300">
         <div class="np-spinner w-4 h-4"></div>
         Streaming MTR to {{ mtrTarget }}…
       </div>

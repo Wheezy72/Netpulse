@@ -11,9 +11,9 @@ import { onMounted, computed, ref, watch } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useMagicKeys } from "@vueuse/core";
 
-import CommandPalette from "./components/CommandPalette.vue";
-import ChatBot from "./components/ChatBot.vue";
-import Toast from "./components/Toast.vue";
+import CommandPalette from "./components/features/CommandPalette.vue";
+import ChatBot from "./components/features/ChatBot.vue";
+import Toast from "./components/ui/Toast.vue";
 
 import { useAuthStore } from "./stores/auth";
 import { useUiStore } from "./stores/ui";
@@ -118,8 +118,7 @@ onMounted(async () => {
 
 <template>
   <div
-    class="min-h-screen flex"
-    :style="{ backgroundColor: 'var(--np-bg)', color: 'var(--np-text)' }"
+    class="min-h-screen flex bg-[#0a0f1a] dark:bg-[#030712] text-slate-100 dark:text-sky-100"
   >
     <!-- Command palette (global) -->
     <CommandPalette />
@@ -174,7 +173,7 @@ onMounted(async () => {
         ]"
       >
         <!-- Logo -->
-        <div class="flex items-center gap-3 px-3 py-4 border-b" :style="{ borderColor: 'var(--np-border)' }">
+        <div class="flex items-center gap-3 px-3 py-4 border-b border-amber-500/15 dark:border-teal-500/20">
           <div
             class="h-9 w-9 rounded-lg flex items-center justify-center border shrink-0"
             :class="isNightshade ? 'border-teal-400/60 bg-slate-900/80' : 'border-amber-500/50 bg-slate-800/50'"
@@ -188,7 +187,7 @@ onMounted(async () => {
               class="text-sm font-semibold tracking-wider uppercase truncate"
               :class="isNightshade ? 'text-teal-400' : 'text-amber-400'"
             >NetPulse</h1>
-            <p class="text-[0.6rem] tracking-wide text-[var(--np-muted-text)] truncate">Network Operations Console</p>
+            <p class="text-[0.6rem] tracking-wide text-slate-400 dark:text-teal-300 truncate">Network Operations Console</p>
           </div>
         </div>
 
@@ -196,8 +195,7 @@ onMounted(async () => {
         <button
           type="button"
           @click="ui.toggleSidebar()"
-          class="hidden md:flex items-center justify-center w-full py-2 text-[var(--np-muted-text)] hover:text-[var(--np-text)] transition-colors border-b"
-          :style="{ borderColor: 'var(--np-border)' }"
+          class="hidden md:flex items-center justify-center w-full py-2 text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100 transition-colors border-b border-amber-500/15 dark:border-teal-500/20"
         >
           <svg
             class="w-4 h-4 transition-transform duration-300"
@@ -213,8 +211,7 @@ onMounted(async () => {
           v-if="ui.sidebarExpanded"
           type="button"
           @click="ui.openCommandPalette()"
-          class="mx-2 mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs transition-colors hover:border-[var(--np-accent-primary)]"
-          :style="{ borderColor: 'var(--np-border)', color: 'var(--np-muted-text)' }"
+          class="mx-2 mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs transition-colors hover:border-amber-500 dark:hover:border-teal-500 border-amber-500/15 dark:border-teal-500/20 text-slate-400 dark:text-teal-300"
           title="Open command palette"
         >
           <span class="flex-1 text-left">Search commands…</span>
@@ -232,7 +229,7 @@ onMounted(async () => {
             :class="[
               isActive(item.id)
                 ? isNightshade ? 'bg-teal-500/15 text-teal-400' : 'bg-amber-500/15 text-amber-400'
-                : 'text-[var(--np-muted-text)] hover:text-[var(--np-text)] hover:bg-white/5',
+                : 'text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100 hover:bg-white/5',
             ]"
             :title="item.label"
           >
@@ -267,7 +264,7 @@ onMounted(async () => {
         </nav>
 
         <!-- Footer: theme toggle + user info + logout -->
-        <div class="border-t px-2 py-3 space-y-2" :style="{ borderColor: 'var(--np-border)' }">
+        <div class="border-t px-2 py-3 space-y-2 border-amber-500/15 dark:border-teal-500/20">
           <button
             type="button"
             @click="toggleTheme"
@@ -279,7 +276,7 @@ onMounted(async () => {
             <svg v-else class="w-5 h-5 shrink-0 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
             </svg>
-            <span v-if="ui.sidebarExpanded" class="truncate text-[var(--np-muted-text)]">
+            <span v-if="ui.sidebarExpanded" class="truncate text-slate-400 dark:text-teal-300">
               {{ isNightshade ? "Nightshade" : "SysAdmin" }}
             </span>
           </button>
@@ -292,7 +289,7 @@ onMounted(async () => {
               {{ (auth.user?.email?.[0] || "U").toUpperCase() }}
             </div>
             <div v-if="ui.sidebarExpanded" class="flex-1 min-w-0">
-              <p class="text-xs truncate text-[var(--np-text)]">{{ auth.user?.email || "Operator" }}</p>
+              <p class="text-xs truncate text-slate-100 dark:text-sky-100">{{ auth.user?.email || "Operator" }}</p>
               <p :class="['text-[0.6rem] uppercase tracking-widest', isNightshade ? 'text-emerald-400' : 'text-amber-400']">
                 {{ auth.user?.role === "admin" ? "Admin" : "Operator" }}
               </p>

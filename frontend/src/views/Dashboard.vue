@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import PulsePanel from "../components/PulsePanel.vue";
-import TopologyPanel from "../components/TopologyPanel.vue";
+import PulsePanel from "../components/features/PulsePanel.vue";
+import TopologyPanel from "../components/features/TopologyPanel.vue";
 
 interface Props {
   infoMode: "full" | "compact";

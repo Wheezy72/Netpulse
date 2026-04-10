@@ -19,7 +19,8 @@ services:
       test: ["CMD-SHELL", "pg_isready -U netpulse -d netpulse"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
 
   # Connection pooler – sits in front of Postgres, reduces connection overhead.
   pgbouncer:
@@ -80,7 +81,8 @@ services:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 15s
       timeout: 10s
-      retries: 5
+      retries: 10
+      start_period: 60s
 
   # ---------------------------------------------------------------------------
   # Time-series database – InfluxDB (stores probe telemetry and metrics)
