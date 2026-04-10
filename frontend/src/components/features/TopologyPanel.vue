@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import axios from "axios";
-import { Network, Options } from "vis-network/standalone/umd/vis-network.min.js";
-import { DataSet } from "vis-data/standalone/umd/vis-data.min.js";
+import { Network, Options } from "vis-network/standalone/esm/vis-network.mjs";
+import { DataSet } from "vis-data/standalone/esm/vis-data.mjs";
 import { computed, onBeforeUnmount, onMounted, ref, nextTick } from "vue";
 
 type ReconTargetService = {
@@ -344,17 +344,17 @@ onBeforeUnmount(() => {
     <header class="np-panel-header">
       <div class="flex flex-col">
         <span class="np-panel-title">Eye: Topology &amp; Recon</span>
-        <span class="text-[0.7rem] text-[var(--np-muted-text)]">
+        <span class="text-[0.7rem] text-slate-400 dark:text-teal-300">
           Passive discovery + Nmap insights.
         </span>
       </div>
-      <div class="flex items-center gap-3 text-[0.7rem] text-[var(--np-muted-text)]">
+      <div class="flex items-center gap-3 text-[0.7rem] text-slate-400 dark:text-teal-300">
         <span class="hidden sm:inline">Zone</span>
         <select
           v-model="selectedZone"
           @change="loadTopology"
-          class="rounded border bg-black/40 px-2 py-0.5 text-[0.7rem] focus:outline-none focus:ring-1"
-          style="border-color: var(--np-border); color: var(--np-text)"
+          class="rounded border bg-black/40 px-2 py-0.5 text-[0.7rem] focus:outline-none focus:ring-1
+                 border-amber-500/15 dark:border-teal-500/20 text-slate-100 dark:text-sky-100"
         >
           <option :value="null">All zones</option>
           <option v-for="z in zones" :key="z" :value="z">{{ z }}</option>
@@ -365,10 +365,9 @@ onBeforeUnmount(() => {
     <div class="grid gap-3 lg:grid-rows-[minmax(0,2fr)_minmax(0,1.4fr)]">
       <div
         ref="graphContainer"
-        class="relative min-h-[300px] w-full rounded-md border bg-black/40"
-        style="border-color: var(--np-border)"
+        class="relative min-h-[300px] w-full rounded-md border bg-black/40 border-amber-500/15 dark:border-teal-500/20"
       >
-        <div v-if="topologyLoading" class="absolute inset-0 flex items-center justify-center text-xs text-[var(--np-muted-text)] pointer-events-none z-10">
+        <div v-if="topologyLoading" class="absolute inset-0 flex items-center justify-center text-xs text-slate-400 dark:text-teal-300 pointer-events-none z-10">
           Building physics graph…
         </div>
         <div v-else-if="topologyError" class="absolute inset-0 flex items-center justify-center text-xs text-rose-300 pointer-events-none z-10">
@@ -378,18 +377,17 @@ onBeforeUnmount(() => {
 
       <div
         v-if="hoveredNode"
-        class="rounded-md border bg-black/70 p-3 text-xs"
-        style="border-color: var(--np-border)"
+        class="rounded-md border bg-black/70 p-3 text-xs border-amber-500/15 dark:border-teal-500/20"
       >
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-[0.7rem] uppercase tracking-[0.16em]" style="color: var(--np-accent-primary)">
+            <p class="text-[0.7rem] uppercase tracking-[0.16em] text-amber-500 dark:text-teal-500">
               Device Focus
             </p>
-            <p class="mt-1 font-mono text-[var(--np-text)]">
+            <p class="mt-1 font-mono text-slate-100 dark:text-sky-100">
               {{ hoveredNode.hostname || hoveredNode.ip_address }}
             </p>
-            <p v-if="hoveredNode.zone" class="text-[0.65rem] text-[var(--np-muted-text)]">
+            <p v-if="hoveredNode.zone" class="text-[0.65rem] text-slate-400 dark:text-teal-300">
               Zone: {{ hoveredNode.zone }}
             </p>
           </div>
@@ -402,11 +400,11 @@ onBeforeUnmount(() => {
         </div>
         <dl class="mt-2 grid grid-cols-2 gap-1 text-[0.7rem]">
           <div>
-            <dt class="text-[var(--np-muted-text)]">IP</dt>
-            <dd class="font-mono text-[var(--np-text)]">{{ hoveredNode.ip_address }}</dd>
+            <dt class="text-slate-400 dark:text-teal-300">IP</dt>
+            <dd class="font-mono text-slate-100 dark:text-sky-100">{{ hoveredNode.ip_address }}</dd>
           </div>
           <div>
-            <dt class="text-[var(--np-muted-text)]">Type</dt>
+            <dt class="text-slate-400 dark:text-teal-300">Type</dt>
             <dd>
               <span v-if="deviceDetail && deviceDetail.type_guess">
                 {{ deviceDetail.type_guess }}
@@ -420,11 +418,11 @@ onBeforeUnmount(() => {
             </dd>
           </div>
           <div>
-            <dt class="text-[var(--np-muted-text)]">Gateway</dt>
+            <dt class="text-slate-400 dark:text-teal-300">Gateway</dt>
             <dd>{{ hoveredNode.is_gateway ? "yes" : "no" }}</dd>
           </div>
           <div>
-            <dt class="text-[var(--np-muted-text)]">Vulnerabilities</dt>
+            <dt class="text-slate-400 dark:text-teal-300">Vulnerabilities</dt>
             <dd>{{ hoveredNode.vulnerability_count }}</dd>
           </div>
         </dl>
@@ -433,7 +431,7 @@ onBeforeUnmount(() => {
           v-if="props.isAdmin && selectedNode && selectedNode.id === hoveredNode.id"
           class="mt-3 space-y-2"
         >
-          <p class="text-[0.65rem] uppercase tracking-[0.16em]" style="color: var(--np-accent-primary)">
+          <p class="text-[0.65rem] uppercase tracking-[0.16em] text-amber-500 dark:text-teal-500">
             Quick Actions
           </p>
           <div class="flex flex-wrap gap-2">
@@ -441,8 +439,8 @@ onBeforeUnmount(() => {
               type="button"
               @click="runPrebuiltScriptForDevice('malformed_syn_flood.py', { count: 30 })"
               class="rounded-md border bg-black/80 px-2 py-0.5 text-[0.65rem]
-                     text-[var(--np-text)] hover:bg-teal-500/10 disabled:opacity-50"
-              style="border-color: var(--np-border)"
+                     text-slate-100 dark:text-sky-100 hover:bg-teal-500/10 disabled:opacity-50
+                     border-amber-500/15 dark:border-teal-500/20"
               :disabled="isRunningAction"
             >
               SYN Storm (template)
@@ -451,8 +449,8 @@ onBeforeUnmount(() => {
               type="button"
               @click="runPrebuiltScriptForDevice('malformed_xmas_scan.py')"
               class="rounded-md border bg-black/80 px-2 py-0.5 text-[0.65rem]
-                     text-[var(--np-text)] hover:bg-teal-500/10 disabled:opacity-50"
-              style="border-color: var(--np-border)"
+                     text-slate-100 dark:text-sky-100 hover:bg-teal-500/10 disabled:opacity-50
+                     border-amber-500/15 dark:border-teal-500/20"
               :disabled="isRunningAction"
             >
               Xmas Scan (template)
@@ -461,19 +459,19 @@ onBeforeUnmount(() => {
               type="button"
               @click="runPrebuiltScriptForDevice('malformed_overlap_fragments.py')"
               class="rounded-md border bg-black/80 px-2 py-0.5 text-[0.65rem]
-                     text-[var(--np-text)] hover:bg-teal-500/10 disabled:opacity-50"
-              style="border-color: var(--np-border)"
+                     text-slate-100 dark:text-sky-100 hover:bg-teal-500/10 disabled:opacity-50
+                     border-amber-500/15 dark:border-teal-500/20"
               :disabled="isRunningAction"
             >
               Overlap Fragments
             </button>
           </div>
 
-          <div class="mt-3 border-t pt-2 space-y-2" style="border-color: var(--np-border)">
-            <p class="text-[0.65rem] uppercase tracking-[0.16em]" style="color: var(--np-accent-primary)">
+          <div class="mt-3 border-t pt-2 space-y-2 border-amber-500/15 dark:border-teal-500/20">
+            <p class="text-[0.65rem] uppercase tracking-[0.16em] text-amber-500 dark:text-teal-500">
               Device Summary
             </p>
-            <p v-if="deviceDetailLoading" class="text-[0.7rem] text-[var(--np-muted-text)]">
+            <p v-if="deviceDetailLoading" class="text-[0.7rem] text-slate-400 dark:text-teal-300">
               Loading device detail...
             </p>
             <p v-else-if="deviceDetailError" class="text-[0.7rem] text-rose-300">
@@ -505,30 +503,29 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="rounded-md border bg-black/40 p-3 text-xs" style="border-color: var(--np-border)">
+      <div class="rounded-md border bg-black/40 p-3 text-xs border-amber-500/15 dark:border-teal-500/20">
         <div class="flex items-center justify-between">
           <div>
-            <h3 class="text-[0.7rem] uppercase tracking-[0.16em]" style="color: var(--np-accent-primary)">
+            <h3 class="text-[0.7rem] uppercase tracking-[0.16em] text-amber-500 dark:text-teal-500">
               Quick Recon
             </h3>
-            <p class="mt-0.5 text-[0.7rem] text-[var(--np-muted-text)]">
+            <p class="mt-0.5 text-[0.7rem] text-slate-400 dark:text-teal-300">
               Select a target and get context-aware Nmap script recommendations.
             </p>
           </div>
-          <span class="rounded-full border px-2 py-0.5 text-[0.6rem]" style="border-color: var(--np-border); color: var(--np-muted-text)">
+          <span class="rounded-full border px-2 py-0.5 text-[0.6rem] border-amber-500/15 dark:border-teal-500/20 text-slate-400 dark:text-teal-300">
             Scanner
           </span>
         </div>
 
         <div class="mt-2 flex flex-col gap-2">
-          <label class="text-[0.7rem] text-[var(--np-muted-text)]">
+          <label class="text-[0.7rem] text-slate-400 dark:text-teal-300">
             Target (IP / Hostname)
             <input
               v-model="selectedTarget"
               type="text"
               class="mt-1 w-full rounded-md border bg-black/60 px-2 py-1 text-[0.75rem]
-                     focus:outline-none focus:ring-1"
-              style="border-color: var(--np-border); color: var(--np-text)"
+                     focus:outline-none focus:ring-1 border-amber-500/15 dark:border-teal-500/20 text-slate-100 dark:text-sky-100"
               placeholder="10.0.0.15"
             />
           </label>
@@ -551,7 +548,7 @@ onBeforeUnmount(() => {
           <div v-if="selectedServices.length" class="mt-2 grid gap-2 md:grid-cols-2">
             <div v-for="svc in selectedServices" :key="`${svc.protocol}-${svc.port}`" class="text-[0.7rem]">
               <div class="flex items-center justify-between">
-                <span class="font-mono" style="color: var(--np-accent-primary)">
+                <span class="font-mono text-amber-500 dark:text-teal-500">
                   {{ svc.protocol }}/{{ svc.port }}
                 </span>
                 <span class="rounded bg-teal-500/10 px-1.5 py-0.5 text-[0.65rem]">
@@ -561,33 +558,31 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="mt-2 border-t pt-2" style="border-color: var(--np-border)">
+          <div class="mt-2 border-t pt-2 border-amber-500/15 dark:border-teal-500/20">
             <div v-if="hasRecommendations" class="space-y-2">
               <div
                 v-for="(rec, idx) in recommendations"
                 :key="idx"
-                class="rounded-md border bg-black/60 p-2"
-                style="border-color: var(--np-border)"
+                class="rounded-md border bg-black/60 p-2 border-amber-500/15 dark:border-teal-500/20"
               >
-                <p class="text-[0.7rem] font-semibold" style="color: var(--np-accent-primary)">
+                <p class="text-[0.7rem] font-semibold text-amber-500 dark:text-teal-500">
                   {{ rec.reason }}
                 </p>
-                <p class="mt-1 text-[0.7rem] text-[var(--np-muted-text)]">
+                <p class="mt-1 text-[0.7rem] text-slate-400 dark:text-teal-300">
                   Suggested Nmap scripts:
                 </p>
                 <div class="mt-1 flex flex-wrap gap-1">
                   <span
                     v-for="script in rec.scripts"
                     :key="script"
-                    class="rounded border bg-black/70 px-1.5 py-0.5 text-[0.65rem] font-mono"
-                    style="border-color: var(--np-border)"
+                    class="rounded border bg-black/70 px-1.5 py-0.5 text-[0.65rem] font-mono border-amber-500/15 dark:border-teal-500/20"
                   >
                     {{ script }}
                   </span>
                 </div>
               </div>
             </div>
-            <p v-else class="text-[0.7rem] text-[var(--np-muted-text)]">
+            <p v-else class="text-[0.7rem] text-slate-400 dark:text-teal-300">
               Enter a target and run a scan to see tailored Nmap script suggestions.
             </p>
           </div>

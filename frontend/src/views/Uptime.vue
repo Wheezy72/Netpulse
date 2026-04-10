@@ -176,7 +176,14 @@ function statusColor(status: string | null): string {
   if (status === "up") return "#22c55e";
   if (status === "down") return "#ef4444";
   if (status === "degraded") return "#eab308";
-  return "var(--np-muted-text)";
+  return "#94a3b8";
+}
+
+function statusClasses(status: string | null): string {
+  if (status === "up") return "text-green-500 bg-green-500/10";
+  if (status === "down") return "text-red-500 bg-red-500/10";
+  if (status === "degraded") return "text-yellow-500 bg-yellow-500/10";
+  return "text-slate-400 bg-slate-500/10";
 }
 
 function statusLabel(status: string | null): string {
@@ -249,47 +256,47 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div v-if="showForm" class="np-panel p-4 rounded-lg border" :style="{ borderColor: 'var(--np-border)', backgroundColor: 'var(--np-surface)' }">
+    <div v-if="showForm" class="np-panel p-4 rounded-lg border border-amber-500/15 dark:border-teal-500/20 bg-gray-900 dark:bg-[#0a0f1e]">
       <form @submit.prevent="createTarget" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
         <div>
-          <label class="block text-xs uppercase tracking-wider mb-1" :style="{ color: 'var(--np-muted-text)' }">Name</label>
+          <label class="block text-xs uppercase tracking-wider mb-1 text-slate-400 dark:text-teal-300">Name</label>
           <input
             v-model="formName"
             type="text"
             placeholder="Google DNS"
-            class="w-full px-3 py-2 rounded-lg text-sm border outline-none"
-            :style="{ backgroundColor: 'var(--np-bg)', borderColor: 'var(--np-border)', color: 'var(--np-text)' }"
+            class="w-full px-3 py-2 rounded-lg text-sm border outline-none
+                   bg-[#0a0f1a] dark:bg-[#030712] border-amber-500/15 dark:border-teal-500/20 text-slate-100 dark:text-sky-100"
           />
         </div>
         <div>
-          <label class="block text-xs uppercase tracking-wider mb-1" :style="{ color: 'var(--np-muted-text)' }">Target (IP/URL)</label>
+          <label class="block text-xs uppercase tracking-wider mb-1 text-slate-400 dark:text-teal-300">Target (IP/URL)</label>
           <input
             v-model="formTarget"
             type="text"
             placeholder="8.8.8.8 or https://example.com"
-            class="w-full px-3 py-2 rounded-lg text-sm border outline-none"
-            :style="{ backgroundColor: 'var(--np-bg)', borderColor: 'var(--np-border)', color: 'var(--np-text)' }"
+            class="w-full px-3 py-2 rounded-lg text-sm border outline-none
+                   bg-[#0a0f1a] dark:bg-[#030712] border-amber-500/15 dark:border-teal-500/20 text-slate-100 dark:text-sky-100"
           />
         </div>
         <div>
-          <label class="block text-xs uppercase tracking-wider mb-1" :style="{ color: 'var(--np-muted-text)' }">Check Type</label>
+          <label class="block text-xs uppercase tracking-wider mb-1 text-slate-400 dark:text-teal-300">Check Type</label>
           <select
             v-model="formCheckType"
-            class="w-full px-3 py-2 rounded-lg text-sm border outline-none"
-            :style="{ backgroundColor: 'var(--np-bg)', borderColor: 'var(--np-border)', color: 'var(--np-text)' }"
+            class="w-full px-3 py-2 rounded-lg text-sm border outline-none
+                   bg-[#0a0f1a] dark:bg-[#030712] border-amber-500/15 dark:border-teal-500/20 text-slate-100 dark:text-sky-100"
           >
             <option value="ping">Ping</option>
             <option value="http">HTTP</option>
           </select>
         </div>
         <div>
-          <label class="block text-xs uppercase tracking-wider mb-1" :style="{ color: 'var(--np-muted-text)' }">Interval (sec)</label>
+          <label class="block text-xs uppercase tracking-wider mb-1 text-slate-400 dark:text-teal-300">Interval (sec)</label>
           <input
             v-model.number="formInterval"
             type="number"
             min="10"
-            class="w-full px-3 py-2 rounded-lg text-sm border outline-none"
-            :style="{ backgroundColor: 'var(--np-bg)', borderColor: 'var(--np-border)', color: 'var(--np-text)' }"
+            class="w-full px-3 py-2 rounded-lg text-sm border outline-none
+                   bg-[#0a0f1a] dark:bg-[#030712] border-amber-500/15 dark:border-teal-500/20 text-slate-100 dark:text-sky-100"
           />
         </div>
         <div>
@@ -315,29 +322,28 @@ onUnmounted(() => {
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
       <div
         v-for="card in [
-          { label: 'Total Targets', value: summary?.total_targets ?? 0, color: 'var(--np-accent-primary)' },
-          { label: 'Up', value: summary?.targets_up ?? 0, color: '#22c55e' },
-          { label: 'Down', value: summary?.targets_down ?? 0, color: '#ef4444' },
-          { label: 'Degraded', value: summary?.targets_degraded ?? 0, color: '#eab308' },
+          { label: 'Total Targets', value: summary?.total_targets ?? 0, cls: 'text-amber-500 dark:text-teal-500' },
+          { label: 'Up', value: summary?.targets_up ?? 0, cls: 'text-green-500' },
+          { label: 'Down', value: summary?.targets_down ?? 0, cls: 'text-red-500' },
+          { label: 'Degraded', value: summary?.targets_degraded ?? 0, cls: 'text-yellow-500' },
         ]"
         :key="card.label"
-        class="np-panel p-4 rounded-lg border text-center"
-        :style="{ borderColor: 'var(--np-border)', backgroundColor: 'var(--np-surface)' }"
+        class="np-panel p-4 rounded-lg border text-center border-amber-500/15 dark:border-teal-500/20 bg-gray-900 dark:bg-[#0a0f1e]"
       >
-        <div class="text-lg font-bold font-mono" :style="{ color: card.color }">
+        <div class="text-lg font-bold font-mono" :class="card.cls">
           {{ card.value }}
         </div>
-        <div class="text-[0.65rem] uppercase tracking-wider mt-1" :style="{ color: 'var(--np-muted-text)' }">
+        <div class="text-[0.65rem] uppercase tracking-wider mt-1 text-slate-400 dark:text-teal-300">
           {{ card.label }}
         </div>
       </div>
     </div>
 
-    <div v-if="loading && !summary" class="text-center py-12" :style="{ color: 'var(--np-muted-text)' }">
+    <div v-if="loading && !summary" class="text-center py-12 text-slate-400 dark:text-teal-300">
       Loading uptime data...
     </div>
 
-    <div v-else-if="summary && summary.targets.length === 0" class="text-center py-12" :style="{ color: 'var(--np-muted-text)' }">
+    <div v-else-if="summary && summary.targets.length === 0" class="text-center py-12 text-slate-400 dark:text-teal-300">
       <p class="text-sm">No uptime targets configured yet.</p>
       <p class="text-xs mt-1">Click "Add Target" to start monitoring.</p>
     </div>
@@ -346,8 +352,10 @@ onUnmounted(() => {
       <div
         v-for="t in summary.targets"
         :key="t.id"
-        class="np-panel rounded-lg border overflow-hidden transition-all"
-        :style="{ borderColor: selectedTargetId === t.id ? 'var(--np-accent-primary)' : 'var(--np-border)', backgroundColor: 'var(--np-surface)' }"
+        class="np-panel rounded-lg border overflow-hidden transition-all bg-gray-900 dark:bg-[#0a0f1e]"
+        :class="selectedTargetId === t.id
+          ? 'border-amber-500 dark:border-teal-500'
+          : 'border-amber-500/15 dark:border-teal-500/20'"
       >
         <div
           class="flex items-center gap-4 p-4 cursor-pointer hover:bg-white/5 transition-colors"
@@ -360,36 +368,36 @@ onUnmounted(() => {
 
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2">
-              <span class="text-sm font-semibold truncate" :style="{ color: 'var(--np-text)' }">{{ t.name }}</span>
+              <span class="text-sm font-semibold truncate text-slate-100 dark:text-sky-100">{{ t.name }}</span>
               <span
                 class="px-2 py-0.5 rounded text-[0.6rem] font-bold uppercase tracking-wider"
-                :style="{ backgroundColor: statusColor(t.last_status) + '20', color: statusColor(t.last_status) }"
+                :class="statusClasses(t.last_status)"
               >
                 {{ statusLabel(t.last_status) }}
               </span>
               <span
-                class="px-1.5 py-0.5 rounded text-[0.55rem] uppercase tracking-wider"
-                :style="{ backgroundColor: 'var(--np-bg)', color: 'var(--np-muted-text)', border: '1px solid var(--np-border)' }"
+                class="px-1.5 py-0.5 rounded text-[0.55rem] uppercase tracking-wider
+                       bg-[#0a0f1a] dark:bg-[#030712] text-slate-400 dark:text-teal-300 border border-amber-500/15 dark:border-teal-500/20"
               >
                 {{ t.check_type }}
               </span>
             </div>
-            <div class="text-xs mt-0.5 truncate" :style="{ color: 'var(--np-muted-text)' }">
+            <div class="text-xs mt-0.5 truncate text-slate-400 dark:text-teal-300">
               {{ t.target }}
             </div>
           </div>
 
-          <div class="hidden sm:flex items-center gap-6 text-xs shrink-0" :style="{ color: 'var(--np-muted-text)' }">
+          <div class="hidden sm:flex items-center gap-6 text-xs shrink-0 text-slate-400 dark:text-teal-300">
             <div class="text-right">
-              <div class="font-mono" :style="{ color: 'var(--np-text)' }">{{ formatLatency(t.last_latency_ms) }}</div>
+              <div class="font-mono text-slate-100 dark:text-sky-100">{{ formatLatency(t.last_latency_ms) }}</div>
               <div class="text-[0.6rem] uppercase tracking-wider">Latency</div>
             </div>
             <div class="text-right">
-              <div class="font-mono" :style="{ color: t.consecutive_failures > 0 ? '#ef4444' : 'var(--np-text)' }">{{ t.consecutive_failures }}</div>
+              <div class="font-mono" :class="t.consecutive_failures > 0 ? 'text-red-500' : 'text-slate-100 dark:text-sky-100'">{{ t.consecutive_failures }}</div>
               <div class="text-[0.6rem] uppercase tracking-wider">Failures</div>
             </div>
             <div class="text-right max-w-[140px]">
-              <div class="font-mono truncate" :style="{ color: 'var(--np-text)' }">{{ formatTime(t.last_checked_at) }}</div>
+              <div class="font-mono truncate text-slate-100 dark:text-sky-100">{{ formatTime(t.last_checked_at) }}</div>
               <div class="text-[0.6rem] uppercase tracking-wider">Last Check</div>
             </div>
           </div>
@@ -418,20 +426,20 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div v-if="selectedTargetId === t.id" class="border-t px-4 py-3" :style="{ borderColor: 'var(--np-border)', backgroundColor: 'var(--np-bg)' }">
-          <div class="text-xs uppercase tracking-wider mb-2 font-semibold" :style="{ color: 'var(--np-muted-text)' }">
+        <div v-if="selectedTargetId === t.id" class="border-t px-4 py-3 border-amber-500/15 dark:border-teal-500/20 bg-[#0a0f1a] dark:bg-[#030712]">
+          <div class="text-xs uppercase tracking-wider mb-2 font-semibold text-slate-400 dark:text-teal-300">
             Check History (Last 50)
           </div>
-          <div v-if="historyLoading" class="text-xs py-4 text-center" :style="{ color: 'var(--np-muted-text)' }">
+          <div v-if="historyLoading" class="text-xs py-4 text-center text-slate-400 dark:text-teal-300">
             Loading history...
           </div>
-          <div v-else-if="history.length === 0" class="text-xs py-4 text-center" :style="{ color: 'var(--np-muted-text)' }">
+          <div v-else-if="history.length === 0" class="text-xs py-4 text-center text-slate-400 dark:text-teal-300">
             No checks recorded yet.
           </div>
           <div v-else class="overflow-x-auto max-h-64 overflow-y-auto">
             <table class="w-full text-xs">
               <thead>
-                <tr :style="{ color: 'var(--np-muted-text)' }">
+                <tr class="text-slate-400 dark:text-teal-300">
                   <th class="text-left py-1 px-2 uppercase tracking-wider font-medium">Time</th>
                   <th class="text-left py-1 px-2 uppercase tracking-wider font-medium">Status</th>
                   <th class="text-right py-1 px-2 uppercase tracking-wider font-medium">Latency</th>
@@ -443,21 +451,20 @@ onUnmounted(() => {
                 <tr
                   v-for="c in history"
                   :key="c.id"
-                  class="border-t"
-                  :style="{ borderColor: 'var(--np-border)' }"
+                  class="border-t border-amber-500/15 dark:border-teal-500/20"
                 >
-                  <td class="py-1 px-2 font-mono whitespace-nowrap" :style="{ color: 'var(--np-text)' }">{{ formatTime(c.timestamp) }}</td>
+                  <td class="py-1 px-2 font-mono whitespace-nowrap text-slate-100 dark:text-sky-100">{{ formatTime(c.timestamp) }}</td>
                   <td class="py-1 px-2">
                     <span
                       class="px-1.5 py-0.5 rounded text-[0.6rem] font-bold uppercase"
-                      :style="{ backgroundColor: statusColor(c.status) + '20', color: statusColor(c.status) }"
+                      :class="statusClasses(c.status)"
                     >
                       {{ statusLabel(c.status) }}
                     </span>
                   </td>
-                  <td class="py-1 px-2 text-right font-mono" :style="{ color: 'var(--np-text)' }">{{ formatLatency(c.latency_ms) }}</td>
-                  <td class="py-1 px-2 text-right font-mono" :style="{ color: 'var(--np-text)' }">{{ c.status_code ?? '--' }}</td>
-                  <td class="py-1 px-2 truncate max-w-[200px]" :style="{ color: '#ef4444' }">{{ c.error_message || '--' }}</td>
+                  <td class="py-1 px-2 text-right font-mono text-slate-100 dark:text-sky-100">{{ formatLatency(c.latency_ms) }}</td>
+                  <td class="py-1 px-2 text-right font-mono text-slate-100 dark:text-sky-100">{{ c.status_code ?? '--' }}</td>
+                  <td class="py-1 px-2 truncate max-w-[200px] text-red-500">{{ c.error_message || '--' }}</td>
                 </tr>
               </tbody>
             </table>

@@ -349,7 +349,7 @@ onMounted(async () => {
             ? isNightshade
               ? 'bg-teal-500/20 text-teal-400 border border-b-0 border-teal-500/30'
               : 'bg-amber-500/20 text-amber-400 border border-b-0 border-amber-500/30'
-            : 'text-[var(--np-muted-text)] hover:text-[var(--np-text)] hover:bg-white/5'
+            : 'text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100 hover:bg-white/5'
         ]"
         :style="{ fontFamily: isNightshade ? '\'Orbitron\', sans-serif' : '\'Inter\', sans-serif' }"
       >
@@ -364,7 +364,7 @@ onMounted(async () => {
             ? isNightshade
               ? 'bg-teal-500/20 text-teal-400 border border-b-0 border-teal-500/30'
               : 'bg-amber-500/20 text-amber-400 border border-b-0 border-amber-500/30'
-            : 'text-[var(--np-muted-text)] hover:text-[var(--np-text)] hover:bg-white/5'
+            : 'text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100 hover:bg-white/5'
         ]"
         :style="{ fontFamily: isNightshade ? '\'Orbitron\', sans-serif' : '\'Inter\', sans-serif' }"
       >
@@ -379,7 +379,7 @@ onMounted(async () => {
             ? isNightshade
               ? 'bg-teal-500/20 text-teal-400 border border-b-0 border-teal-500/30'
               : 'bg-amber-500/20 text-amber-400 border border-b-0 border-amber-500/30'
-            : 'text-[var(--np-muted-text)] hover:text-[var(--np-text)] hover:bg-white/5'
+            : 'text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100 hover:bg-white/5'
         ]"
         :style="{ fontFamily: isNightshade ? '\'Orbitron\', sans-serif' : '\'Inter\', sans-serif' }"
       >
@@ -391,7 +391,7 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Devices</span>
-          <span class="text-[0.7rem] text-[var(--np-muted-text)]">
+          <span class="text-[0.7rem] text-slate-400 dark:text-teal-300">
             Inventory of discovered hosts across your zones.
           </span>
         </div>
@@ -447,11 +447,11 @@ onMounted(async () => {
         <button @click="actionNotice = null" class="opacity-70 hover:opacity-100">✕</button>
       </div>
 
-      <div v-if="loading" class="text-xs text-[var(--np-muted-text)]">Loading inventory...</div>
+      <div v-if="loading" class="text-xs text-slate-400 dark:text-teal-300">Loading inventory...</div>
       <div v-else-if="error" class="text-xs text-rose-300">{{ error }}</div>
       <div v-else class="overflow-x-auto rounded-md border border-amber-500/15 dark:border-teal-500/20">
         <table class="w-full text-left text-xs">
-          <thead class="bg-black/40 text-[0.65rem] uppercase tracking-wider text-[var(--np-muted-text)]">
+          <thead class="bg-black/40 text-[0.65rem] uppercase tracking-wider text-slate-400 dark:text-teal-300">
             <tr>
               <th class="px-3 py-2">Target</th>
               <th class="px-3 py-2 hidden sm:table-cell">Type</th>
@@ -467,15 +467,15 @@ onMounted(async () => {
               @click="openDrawer(d)"
             >
               <td class="px-3 py-2">
-                <div class="font-mono text-[var(--np-text)]">{{ d.ip_address }}</div>
-                <div class="text-[0.65rem] text-[var(--np-muted-text)]">{{ d.hostname || d.mac_address || 'Unknown' }}</div>
+                <div class="font-mono text-slate-100 dark:text-sky-100">{{ d.ip_address }}</div>
+                <div class="text-[0.65rem] text-slate-400 dark:text-teal-300">{{ d.hostname || d.mac_address || 'Unknown' }}</div>
               </td>
               <td class="px-3 py-2 hidden sm:table-cell">
                 <span class="rounded bg-black/40 px-1.5 py-0.5 border border-amber-500/15 dark:border-teal-500/20">
                   {{ d.is_gateway ? 'Gateway' : (d.device_type || 'Unknown') }}
                 </span>
               </td>
-              <td class="px-3 py-2 hidden md:table-cell text-[var(--np-muted-text)]">
+              <td class="px-3 py-2 hidden md:table-cell text-slate-400 dark:text-teal-300">
                 {{ d.zone || '—' }}
               </td>
               <td class="px-3 py-2 text-center" @click.stop>
@@ -494,11 +494,11 @@ onMounted(async () => {
                     {{ kickLoadingIp === d.ip_address ? 'Kicking...' : 'Attempt Kick' }}
                   </button>
                 </div>
-                <span v-else class="text-[0.65rem] text-[var(--np-muted-text)]">—</span>
+                <span v-else class="text-[0.65rem] text-slate-400 dark:text-teal-300">—</span>
               </td>
             </tr>
             <tr v-if="filteredDevices.length === 0">
-              <td colspan="4" class="px-3 py-4 text-center text-[var(--np-muted-text)]">
+              <td colspan="4" class="px-3 py-4 text-center text-slate-400 dark:text-teal-300">
                 No devices found.
               </td>
             </tr>
@@ -512,7 +512,7 @@ onMounted(async () => {
     </div>
 
     <div v-if="activeTab === 'snmp'" class="np-panel p-4 space-y-4">
-       <p class="text-xs text-[var(--np-muted-text)]">SNMP Polling interface active.</p>
+       <p class="text-xs text-slate-400 dark:text-teal-300">SNMP Polling interface active.</p>
        </div>
   </div>
 

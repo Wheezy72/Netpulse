@@ -24,7 +24,7 @@ const props = withDefaults(defineProps<Props>(), {
     :class="[
       props.size === 'sm' ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm',
       props.variant === 'primary' && 'np-cyber-btn',
-      props.variant === 'ghost' && 'border border-[var(--np-border)] bg-transparent text-[var(--np-muted-text)] hover:text-[var(--np-text)] hover:border-[var(--np-accent-primary)]',
+      props.variant === 'ghost' && 'border border-amber-500/15 dark:border-teal-500/20 bg-transparent text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100 hover:border-amber-500 dark:hover:border-teal-500',
       props.variant === 'danger' && 'text-red-400 hover:bg-red-400/10 border border-red-400/30',
     ]"
   >

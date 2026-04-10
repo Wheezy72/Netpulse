@@ -477,8 +477,8 @@ onMounted(async () => {
         class="flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium transition-all duration-300 border-b-2 -mb-px"
         :class="[
           activeSettingsTab === tab.key
-            ? 'border-[var(--np-accent-primary)] text-[var(--np-accent-primary)]'
-            : 'border-transparent text-[var(--np-muted-text)] hover:text-[var(--np-text)]'
+            ? 'border-amber-500 dark:border-teal-500 text-amber-500 dark:text-teal-500'
+            : 'border-transparent text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100'
         ]"
       >
         {{ tab.label }}
@@ -494,7 +494,7 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Console Settings</span>
-          <span class="text-[0.7rem] text-[var(--np-muted-text)]">View density and theme.</span>
+          <span class="text-[0.7rem] text-slate-400 dark:text-teal-300">View density and theme.</span>
         </div>
       </header>
 
@@ -549,7 +549,7 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">AI Assistant</span>
-          <span class="text-[0.7rem] text-[var(--np-muted-text)]">Configure the AI chatbot.</span>
+          <span class="text-[0.7rem] text-slate-400 dark:text-teal-300">Configure the AI chatbot.</span>
         </div>
       </header>
 
@@ -606,7 +606,7 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Notifications</span>
-          <span class="text-[0.7rem] text-[var(--np-muted-text)]">Email and WhatsApp alerts.</span>
+          <span class="text-[0.7rem] text-slate-400 dark:text-teal-300">Email and WhatsApp alerts.</span>
         </div>
       </header>
 
@@ -658,7 +658,7 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Network Segments</span>
-          <span class="text-[0.7rem] text-[var(--np-muted-text)]">Subnets for scheduled scanning.</span>
+          <span class="text-[0.7rem] text-slate-400 dark:text-teal-300">Subnets for scheduled scanning.</span>
         </div>
         <button v-if="isAdmin" type="button" class="np-cyber-btn rounded px-3 py-1.5 text-[0.75rem]" @click="showAddSegment = !showAddSegment">
           {{ showAddSegment ? 'Cancel' : '+ Add Segment' }}
@@ -678,7 +678,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <p v-if="segmentsLoading" class="text-[0.75rem] text-[var(--np-muted-text)]">Loading...</p>
+      <p v-if="segmentsLoading" class="text-[0.75rem] text-slate-400 dark:text-teal-300">Loading...</p>
       <p v-else-if="segmentsError" class="text-[0.75rem] text-rose-400">{{ segmentsError }}</p>
 
       <div v-else class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -692,8 +692,8 @@ onMounted(async () => {
             <div>
               <h4 class="font-semibold text-[0.85rem]" :class="isNightshade ? 'text-teal-200' : 'text-amber-200'">{{ seg.name }}</h4>
               <p class="font-mono text-[0.75rem] mt-1" :class="isNightshade ? 'text-teal-400' : 'text-amber-400'">{{ seg.cidr }}</p>
-              <p v-if="seg.vlan_id" class="text-[0.7rem] mt-1 text-[var(--np-muted-text)]">VLAN {{ seg.vlan_id }}</p>
-              <p v-if="seg.description" class="text-[0.7rem] mt-1 text-[var(--np-muted-text)]">{{ seg.description }}</p>
+              <p v-if="seg.vlan_id" class="text-[0.7rem] mt-1 text-slate-400 dark:text-teal-300">VLAN {{ seg.vlan_id }}</p>
+              <p v-if="seg.description" class="text-[0.7rem] mt-1 text-slate-400 dark:text-teal-300">{{ seg.description }}</p>
             </div>
 
             <div class="flex flex-col gap-2 items-end">
@@ -736,7 +736,7 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Scan Scheduler</span>
-          <span class="text-[0.7rem] text-[var(--np-muted-text)]">Configure automatic scans.</span>
+          <span class="text-[0.7rem] text-slate-400 dark:text-teal-300">Configure automatic scans.</span>
         </div>
       </header>
 
@@ -791,7 +791,7 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Threat Intelligence</span>
-          <span class="text-[0.7rem] text-[var(--np-muted-text)]">AbuseIPDB configuration.</span>
+          <span class="text-[0.7rem] text-slate-400 dark:text-teal-300">AbuseIPDB configuration.</span>
         </div>
       </header>
 
@@ -826,12 +826,12 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Backup</span>
-          <span class="text-[0.7rem] text-[var(--np-muted-text)]">Export / restore database snapshots.</span>
+          <span class="text-[0.7rem] text-slate-400 dark:text-teal-300">Export / restore database snapshots.</span>
         </div>
       </header>
 
       <div v-if="!isAdmin" class="np-settings-section">
-        <p class="text-[0.75rem] text-[var(--np-muted-text)]">Backup export/restore is admin-only.</p>
+        <p class="text-[0.75rem] text-slate-400 dark:text-teal-300">Backup export/restore is admin-only.</p>
       </div>
 
       <div v-else class="space-y-4">
@@ -844,13 +844,13 @@ onMounted(async () => {
 
         <div class="np-settings-section">
           <p class="np-settings-section-title">Available Backups</p>
-          <p v-if="backupsLoading" class="text-[0.75rem] text-[var(--np-muted-text)]">Loading...</p>
-          <div v-else-if="backups.length === 0" class="text-[0.75rem] text-[var(--np-muted-text)]">No backups found.</div>
+          <p v-if="backupsLoading" class="text-[0.75rem] text-slate-400 dark:text-teal-300">Loading...</p>
+          <div v-else-if="backups.length === 0" class="text-[0.75rem] text-slate-400 dark:text-teal-300">No backups found.</div>
           <div v-else class="space-y-2">
             <div v-for="b in backups" :key="b.filename" class="flex items-center justify-between rounded border p-3" :class="isNightshade ? 'border-teal-400/20 bg-black/30' : 'border-amber-500/20 bg-slate-800/30'">
               <div class="min-w-0">
                 <p class="font-mono text-[0.75rem] truncate" :class="isNightshade ? 'text-teal-200' : 'text-amber-200'">{{ b.filename }}</p>
-                <p class="text-[0.65rem] text-[var(--np-muted-text)]">{{ formatFileSize(b.size) }} · {{ new Date(b.created_at).toLocaleString() }}</p>
+                <p class="text-[0.65rem] text-slate-400 dark:text-teal-300">{{ formatFileSize(b.size) }} · {{ new Date(b.created_at).toLocaleString() }}</p>
               </div>
               <div class="flex gap-2">
                 <button type="button" class="rounded px-2.5 py-1 text-[0.65rem] font-medium border" :class="isNightshade ? 'border-teal-400/40 text-teal-300 hover:bg-teal-500/15' : 'border-amber-600/40 text-amber-300 hover:bg-amber-600/15'" @click="downloadBackup(b.filename)">Download</button>
@@ -874,7 +874,7 @@ onMounted(async () => {
             <p class="text-[0.75rem] font-medium mb-2" :class="isNightshade ? 'text-emerald-300' : 'text-green-400'">Restore Complete</p>
             <div class="space-y-1">
               <div v-for="(count, table) in restoreResult.tables" :key="table" class="flex items-center justify-between text-[0.7rem]">
-                <span class="text-[var(--np-muted-text)]">{{ table }}</span>
+                <span class="text-slate-400 dark:text-teal-300">{{ table }}</span>
                 <span class="font-mono" :class="isNightshade ? 'text-teal-300' : 'text-amber-300'">{{ count }} records</span>
               </div>
             </div>

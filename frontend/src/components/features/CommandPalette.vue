@@ -8,7 +8,7 @@
 import { ref, computed, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useMagicKeys, onClickOutside } from "@vueuse/core";
-import { useUiStore } from "../stores/ui";
+import { useUiStore } from "../../stores/ui";
 
 const ui = useUiStore();
 const router = useRouter();

@@ -187,7 +187,7 @@ onMounted(async () => {
               class="text-sm font-semibold tracking-wider uppercase truncate"
               :class="isNightshade ? 'text-teal-400' : 'text-amber-400'"
             >NetPulse</h1>
-            <p class="text-[0.6rem] tracking-wide text-[var(--np-muted-text)] truncate">Network Operations Console</p>
+            <p class="text-[0.6rem] tracking-wide text-slate-400 dark:text-teal-300 truncate">Network Operations Console</p>
           </div>
         </div>
 
@@ -195,7 +195,7 @@ onMounted(async () => {
         <button
           type="button"
           @click="ui.toggleSidebar()"
-          class="hidden md:flex items-center justify-center w-full py-2 text-[var(--np-muted-text)] hover:text-[var(--np-text)] transition-colors border-b border-amber-500/15 dark:border-teal-500/20"
+          class="hidden md:flex items-center justify-center w-full py-2 text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100 transition-colors border-b border-amber-500/15 dark:border-teal-500/20"
         >
           <svg
             class="w-4 h-4 transition-transform duration-300"
@@ -211,7 +211,7 @@ onMounted(async () => {
           v-if="ui.sidebarExpanded"
           type="button"
           @click="ui.openCommandPalette()"
-          class="mx-2 mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs transition-colors hover:border-[var(--np-accent-primary)] border-amber-500/15 dark:border-teal-500/20 text-slate-400 dark:text-teal-300"
+          class="mx-2 mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs transition-colors hover:border-amber-500 dark:hover:border-teal-500 border-amber-500/15 dark:border-teal-500/20 text-slate-400 dark:text-teal-300"
           title="Open command palette"
         >
           <span class="flex-1 text-left">Search commands…</span>
@@ -229,7 +229,7 @@ onMounted(async () => {
             :class="[
               isActive(item.id)
                 ? isNightshade ? 'bg-teal-500/15 text-teal-400' : 'bg-amber-500/15 text-amber-400'
-                : 'text-[var(--np-muted-text)] hover:text-[var(--np-text)] hover:bg-white/5',
+                : 'text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100 hover:bg-white/5',
             ]"
             :title="item.label"
           >
@@ -276,7 +276,7 @@ onMounted(async () => {
             <svg v-else class="w-5 h-5 shrink-0 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
             </svg>
-            <span v-if="ui.sidebarExpanded" class="truncate text-[var(--np-muted-text)]">
+            <span v-if="ui.sidebarExpanded" class="truncate text-slate-400 dark:text-teal-300">
               {{ isNightshade ? "Nightshade" : "SysAdmin" }}
             </span>
           </button>
@@ -289,7 +289,7 @@ onMounted(async () => {
               {{ (auth.user?.email?.[0] || "U").toUpperCase() }}
             </div>
             <div v-if="ui.sidebarExpanded" class="flex-1 min-w-0">
-              <p class="text-xs truncate text-[var(--np-text)]">{{ auth.user?.email || "Operator" }}</p>
+              <p class="text-xs truncate text-slate-100 dark:text-sky-100">{{ auth.user?.email || "Operator" }}</p>
               <p :class="['text-[0.6rem] uppercase tracking-widest', isNightshade ? 'text-emerald-400' : 'text-amber-400']">
                 {{ auth.user?.role === "admin" ? "Admin" : "Operator" }}
               </p>

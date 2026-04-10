@@ -16,7 +16,7 @@ const props = withDefaults(defineProps<Props>(), {
       props.variant === 'warning' && 'bg-amber-500/20 text-amber-400',
       props.variant === 'danger'  && 'bg-red-500/20 text-red-400',
       props.variant === 'info'    && 'bg-sky-500/20 text-sky-400',
-      props.variant === 'muted'   && 'bg-[var(--np-surface)] text-[var(--np-muted-text)]',
+      props.variant === 'muted'   && 'bg-gray-900 dark:bg-[#0a0f1e] text-slate-400 dark:text-teal-300',
     ]"
   >
     <slot />

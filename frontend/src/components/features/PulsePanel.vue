@@ -359,18 +359,18 @@ onBeforeUnmount(() => {
     <header class="np-panel-header">
       <div class="flex items-center gap-2">
         <span class="np-panel-title np-text-glow">Pulse: Internet Health</span>
-        <span class="text-[0.6rem] uppercase tracking-[0.18em] text-[var(--np-muted-text)]">
+        <span class="text-[0.6rem] uppercase tracking-[0.18em] text-slate-400 dark:text-teal-300">
           Latency · Jitter · Packet Loss
         </span>
       </div>
-      <div class="flex items-center gap-3 text-xs text-[var(--np-muted-text)]">
+      <div class="flex items-center gap-3 text-xs text-slate-400 dark:text-teal-300">
         <span>Gateway / ISP / Cloudflare</span>
         <span class="h-1 w-10 rounded-full" :class="isSysAdmin ? 'bg-amber-400/60' : 'bg-emerald-400/60'"></span>
         <button
           @click="downloadReport"
           :disabled="isDownloadingReport"
           class="ml-2 flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[0.7rem] font-medium transition-colors
-                 border-[var(--np-border)] bg-[var(--np-surface)]/50 text-[var(--np-muted-text)] hover:text-[var(--np-text)]
+                 border-amber-500/15 dark:border-teal-500/20 bg-gray-900/50 dark:bg-slate-900/50 text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100
                  disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <svg v-if="!isDownloadingReport" xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -398,7 +398,7 @@ onBeforeUnmount(() => {
           />
           <div
             v-else-if="pulseLoading"
-            class="absolute inset-0 flex items-center justify-center text-xs text-[var(--np-muted-text)]"
+            class="absolute inset-0 flex items-center justify-center text-xs text-slate-400 dark:text-teal-300"
           >
             Loading Internet Health...
           </div>
@@ -406,11 +406,11 @@ onBeforeUnmount(() => {
             v-else
             class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center px-4"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 text-[var(--np-accent-primary)] opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 text-amber-500 dark:text-teal-500 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
             </svg>
-            <span class="text-xs text-[var(--np-muted-text)]">Collecting network data...</span>
-            <span class="text-[0.65rem] text-[var(--np-muted-text)] opacity-60">The latency monitor runs every 15 seconds. Charts will appear once enough data points are collected.</span>
+            <span class="text-xs text-slate-400 dark:text-teal-300">Collecting network data...</span>
+            <span class="text-[0.65rem] text-slate-400 dark:text-teal-300 opacity-60">The latency monitor runs every 15 seconds. Charts will appear once enough data points are collected.</span>
           </div>
         </div>
         <p v-if="pulseError" class="mt-2 text-[0.7rem] text-rose-300">
@@ -433,20 +433,20 @@ onBeforeUnmount(() => {
         <div v-if="liveLatency !== null" class="rounded-md border bg-black/40 p-2 border-amber-500/15 dark:border-teal-500/20">
           <div class="flex items-center gap-1 mb-2">
             <span class="w-2 h-2 rounded-full animate-pulse" :class="isSysAdmin ? 'bg-green-500' : 'bg-emerald-400'"></span>
-            <span class="text-[0.6rem] uppercase tracking-widest text-[var(--np-muted-text)]">Live</span>
+            <span class="text-[0.6rem] uppercase tracking-widest text-slate-400 dark:text-teal-300">Live</span>
           </div>
           <div class="grid grid-cols-3 gap-2 text-center">
             <div>
-              <div class="text-sm font-semibold text-[var(--np-text)]">{{ liveLatency?.toFixed(1) ?? '--' }}</div>
-              <div class="text-[0.55rem] text-[var(--np-muted-text)]">Latency ms</div>
+              <div class="text-sm font-semibold text-slate-100 dark:text-sky-100">{{ liveLatency?.toFixed(1) ?? '--' }}</div>
+              <div class="text-[0.55rem] text-slate-400 dark:text-teal-300">Latency ms</div>
             </div>
             <div>
-              <div class="text-sm font-semibold text-[var(--np-text)]">{{ liveJitter?.toFixed(1) ?? '--' }}</div>
-              <div class="text-[0.55rem] text-[var(--np-muted-text)]">Jitter ms</div>
+              <div class="text-sm font-semibold text-slate-100 dark:text-sky-100">{{ liveJitter?.toFixed(1) ?? '--' }}</div>
+              <div class="text-[0.55rem] text-slate-400 dark:text-teal-300">Jitter ms</div>
             </div>
             <div>
-              <div class="text-sm font-semibold text-[var(--np-text)]">{{ livePacketLoss?.toFixed(1) ?? '--' }}</div>
-              <div class="text-[0.55rem] text-[var(--np-muted-text)]">Loss %</div>
+              <div class="text-sm font-semibold text-slate-100 dark:text-sky-100">{{ livePacketLoss?.toFixed(1) ?? '--' }}</div>
+              <div class="text-[0.55rem] text-slate-400 dark:text-teal-300">Loss %</div>
             </div>
           </div>
         </div>
@@ -458,10 +458,10 @@ onBeforeUnmount(() => {
             class="rounded-md border bg-black/40 px-2 py-1.5 border-amber-500/15 dark:border-teal-500/20"
           >
             <div class="flex items-center justify-between">
-              <span class="font-mono text-[var(--np-text)] text-[0.7rem]">
+              <span class="font-mono text-slate-100 dark:text-sky-100 text-[0.7rem]">
                 {{ t.label }}
               </span>
-              <span class="text-[0.7rem] text-[var(--np-text)]">
+              <span class="text-[0.7rem] text-slate-100 dark:text-sky-100">
                 <template v-if="t.latency_ms != null">
                   {{ t.latency_ms.toFixed(1) }} ms
                 </template>
@@ -471,7 +471,7 @@ onBeforeUnmount(() => {
               </span>
             </div>
             <div
-              class="mt-0.5 flex items-center justify-between text-[0.65rem] text-[var(--np-muted-text)]"
+              class="mt-0.5 flex items-center justify-between text-[0.65rem] text-slate-400 dark:text-teal-300"
             >
               <span>
                 Jitter:
@@ -491,7 +491,7 @@ onBeforeUnmount(() => {
           </div>
           <p
             v-if="!pulseTargets.length && !pulseLoading && liveLatency === null"
-            class="text-[0.7rem] text-[var(--np-muted-text)]"
+            class="text-[0.7rem] text-slate-400 dark:text-teal-300"
           >
             Waiting for Pulse data from latency monitor...
           </p>
@@ -520,11 +520,11 @@ onBeforeUnmount(() => {
           }"
         >
           {{ pathDiagnosis.level === 'ok' ? 'All Clear' : 'Issue Detected' }}
-          <span class="font-normal normal-case tracking-normal text-[var(--np-muted-text)] ml-1">
+          <span class="font-normal normal-case tracking-normal text-slate-400 dark:text-teal-300 ml-1">
             — {{ pathDiagnosis.where }}
           </span>
         </span>
-        <p class="mt-0.5 text-[0.7rem] text-[var(--np-muted-text)]">{{ pathDiagnosis.detail }}</p>
+        <p class="mt-0.5 text-[0.7rem] text-slate-400 dark:text-teal-300">{{ pathDiagnosis.detail }}</p>
       </div>
     </div>
   </section>

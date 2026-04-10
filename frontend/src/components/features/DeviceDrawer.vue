@@ -7,7 +7,7 @@
  */
 import { ref, watch } from "vue";
 import axios from "axios";
-import { resolveOui } from "../utils/oui";
+import { resolveOui } from "../../utils/oui";
 
 interface Vulnerability {
   id: number;
@@ -88,11 +88,8 @@ watch(
     <Transition name="np-slide-right">
       <aside
         v-if="open"
-        class="fixed inset-y-0 right-0 z-40 w-full max-w-lg flex flex-col border-l overflow-y-auto"
-        :style="{
-          background: 'var(--np-surface)',
-          borderColor: 'var(--np-border)',
-        }"
+        class="fixed inset-y-0 right-0 z-40 w-full max-w-lg flex flex-col border-l overflow-y-auto
+               bg-gray-900 dark:bg-[#0a0f1e] border-amber-500/15 dark:border-teal-500/20"
       >
         <!-- Header -->
         <div

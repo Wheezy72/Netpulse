@@ -188,7 +188,7 @@ onBeforeUnmount(() => {
     <header class="np-panel-header mb-3">
       <div class="flex flex-col">
         <span class="np-panel-title">Automation Hub</span>
-        <span class="text-[0.65rem] text-[var(--np-muted-text)]">Scripts & Code Generator</span>
+        <span class="text-[0.65rem] text-slate-400 dark:text-teal-300">Scripts & Code Generator</span>
       </div>
     </header>
 
@@ -201,8 +201,8 @@ onBeforeUnmount(() => {
         class="px-3 py-2 text-xs font-medium transition-all duration-300 border-b-2 -mb-px"
         :class="[
           activeTab === tab
-            ? 'border-[var(--np-accent-primary)] text-[var(--np-accent-primary)]'
-            : 'border-transparent text-[var(--np-muted-text)] hover:text-[var(--np-text)]'
+            ? 'border-amber-500 dark:border-teal-500 text-amber-500 dark:text-teal-500'
+            : 'border-transparent text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100'
         ]"
       >
         {{ tab === 'console' ? 'Console' : tab === 'ai-generate' ? 'Code Generator' : 'Quick Scripts' }}
@@ -216,7 +216,7 @@ onBeforeUnmount(() => {
       >
         <div
           v-if="brainLogs.length === 0"
-          class="absolute inset-0 flex flex-col items-center justify-center text-xs text-[var(--np-muted-text)] gap-2"
+          class="absolute inset-0 flex flex-col items-center justify-center text-xs text-slate-400 dark:text-teal-300 gap-2"
         >
           <svg class="w-8 h-8 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -226,7 +226,7 @@ onBeforeUnmount(() => {
         </div>
         <pre
           v-else
-          class="h-full w-full whitespace-pre-wrap break-words bg-transparent p-3 text-xs font-mono text-[var(--np-text)]"
+          class="h-full w-full whitespace-pre-wrap break-words bg-transparent p-3 text-xs font-mono text-slate-100 dark:text-sky-100"
         >{{ brainLogs.join('\n') }}</pre>
       </div>
       <div class="mt-2 flex justify-end">
@@ -234,7 +234,7 @@ onBeforeUnmount(() => {
           v-if="brainLogs.length > 0"
           type="button"
           @click="clearConsole"
-          class="text-[0.6rem] text-[var(--np-muted-text)] hover:text-[var(--np-text)] transition-colors"
+          class="text-[0.6rem] text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100 transition-colors"
         >
           Clear Console
         </button>
@@ -246,7 +246,7 @@ onBeforeUnmount(() => {
         <h3 class="text-sm font-medium mb-3 text-amber-500 dark:text-teal-500">
           Generate a Script
         </h3>
-        <p class="text-[0.7rem] text-[var(--np-muted-text)] mb-3">
+        <p class="text-[0.7rem] text-slate-400 dark:text-teal-300 mb-3">
           Describe what script you need in plain English and get a ready-to-run Python script.
         </p>
 
@@ -282,7 +282,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-if="aiExplanation && !showEditor" class="rounded-lg border p-3 border-amber-500/15 dark:border-teal-500/20 bg-gray-900 dark:bg-[#0a0f1e]">
-        <p class="text-xs text-[var(--np-muted-text)]">{{ aiExplanation }}</p>
+        <p class="text-xs text-slate-400 dark:text-teal-300">{{ aiExplanation }}</p>
       </div>
 
       <div v-if="showEditor" class="rounded-lg border overflow-hidden np-slide-up border-amber-500/15 dark:border-teal-500/20">
@@ -311,13 +311,13 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div v-if="aiExplanation" class="px-3 py-2 text-[0.7rem] text-[var(--np-muted-text)]" style="background: rgba(0,0,0,0.2)">
+        <div v-if="aiExplanation" class="px-3 py-2 text-[0.7rem] text-slate-400 dark:text-teal-300" style="background: rgba(0,0,0,0.2)">
           {{ aiExplanation }}
         </div>
 
         <textarea
           v-model="generatedScript"
-          class="w-full bg-black/90 text-[var(--np-text)] font-mono text-xs p-3 resize-none focus:outline-none"
+          class="w-full bg-black/90 text-slate-100 dark:text-sky-100 font-mono text-xs p-3 resize-none focus:outline-none"
           rows="16"
           spellcheck="false"
         ></textarea>
@@ -326,7 +326,7 @@ onBeforeUnmount(() => {
 
     <div v-else-if="activeTab === 'scripts'" class="np-fade-in">
       <div class="mb-3">
-        <label class="text-xs text-[var(--np-muted-text)] block mb-1">Target (for network scripts)</label>
+        <label class="text-xs text-slate-400 dark:text-teal-300 block mb-1">Target (for network scripts)</label>
         <input
           v-model="selectedTarget"
           type="text"
@@ -382,7 +382,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <p v-if="actionStatus" class="mt-2 text-[0.65rem] text-[var(--np-muted-text)]">
+      <p v-if="actionStatus" class="mt-2 text-[0.65rem] text-slate-400 dark:text-teal-300">
         {{ actionStatus }}
       </p>
     </div>
