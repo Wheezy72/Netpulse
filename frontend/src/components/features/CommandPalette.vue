@@ -5,7 +5,7 @@
  * Provides instant keyboard navigation and scan dispatch without a mouse.
  * Uses VueUse's useMagicKeys for the hotkey and onClickOutside for dismissal.
  */
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
 import { useMagicKeys, onClickOutside } from "@vueuse/core";
 import { useUiStore } from "../../stores/ui";
@@ -18,10 +18,14 @@ const selectedIdx = ref(0);
 
 // Close palette on Escape.
 const { escape } = useMagicKeys();
-watch(escape, (v) => { if (v) ui.closeCommandPalette(); });
+const stopEscapeWatch = watch(escape, (v) => { if (v) ui.closeCommandPalette(); });
 
 const paletteRef = ref<HTMLElement | null>(null);
 onClickOutside(paletteRef, () => ui.closeCommandPalette());
+
+onBeforeUnmount(() => {
+  stopEscapeWatch();
+});
 
 // All navigable commands / actions.
 const allCommands = [

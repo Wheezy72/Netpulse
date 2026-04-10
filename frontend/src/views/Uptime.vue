@@ -176,7 +176,7 @@ function statusColor(status: string | null): string {
   if (status === "up") return "#22c55e";
   if (status === "down") return "#ef4444";
   if (status === "degraded") return "#eab308";
-  return "#94a3b8";
+  return "#94a3b8"; // slate-400 — matches text-slate-400 in statusClasses
 }
 
 function statusClasses(status: string | null): string {

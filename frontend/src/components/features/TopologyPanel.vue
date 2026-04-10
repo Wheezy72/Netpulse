@@ -4,6 +4,21 @@ import { Network, Options } from "vis-network/standalone/esm/vis-network.mjs";
 import { DataSet } from "vis-data/standalone/esm/vis-data.mjs";
 import { computed, onBeforeUnmount, onMounted, ref, nextTick } from "vue";
 
+// Vis-network node/edge colour palette — matches Nightshade (teal) design tokens.
+const NODE_COLORS = {
+  defaultBorder:    "#14b8a6",  // teal-500
+  defaultBg:        "#0f172a",  // slate-900
+  defaultHighlight: "#5eead4",  // teal-300
+  defaultHighBg:    "#111c33",  // slate-800 tinted
+  gatewayBorder:    "#22c55e",  // green-500
+  gatewayHighlight: "#bbf7d0",  // green-200
+  dangerBorder:     "#ef4444",  // red-500
+  dangerHighlight:  "#fecaca",  // red-200
+  edgeColor:        "#14b8a655",
+  edgeHighlight:    "#14b8a6aa",
+  fontColor:        "#e0f7ff",
+} as const;
+
 type ReconTargetService = {
   port: number;
   protocol: string;
@@ -207,20 +222,24 @@ async function loadTopology(): Promise<void> {
     }
 
     const mappedNodes = data.nodes.map((n) => {
-      let nodeColor = { border: "#14b8a6", background: "#0f172a", highlight: { border: "#5eead4", background: "#111c33" } };
+      let nodeColor = {
+        border: NODE_COLORS.defaultBorder,
+        background: NODE_COLORS.defaultBg,
+        highlight: { border: NODE_COLORS.defaultHighlight, background: NODE_COLORS.defaultHighBg },
+      };
       let nodeShape = "dot";
       let nodeShadow = false as any;
 
       if (n.is_gateway) {
         nodeShape = "diamond";
-        nodeColor.border = "#22c55e"; // Green for gateway
-        nodeColor.highlight.border = "#bbf7d0";
+        nodeColor.border = NODE_COLORS.gatewayBorder;
+        nodeColor.highlight.border = NODE_COLORS.gatewayHighlight;
       }
 
       if (n.vulnerability_severity === "high" || n.vulnerability_severity === "critical") {
-        nodeColor.border = "#ef4444";
-        nodeColor.highlight.border = "#fecaca";
-        nodeShadow = { enabled: true, color: "#ef4444", size: 18, x: 0, y: 0 };
+        nodeColor.border = NODE_COLORS.dangerBorder;
+        nodeColor.highlight.border = NODE_COLORS.dangerHighlight;
+        nodeShadow = { enabled: true, color: NODE_COLORS.dangerBorder, size: 18, x: 0, y: 0 };
       }
 
       return {
@@ -229,7 +248,7 @@ async function loadTopology(): Promise<void> {
         shape: nodeShape,
         color: nodeColor,
         shadow: nodeShadow,
-        font: { color: "#e0f7ff", size: 12, face: "monospace" },
+        font: { color: NODE_COLORS.fontColor, size: 12, face: "monospace" },
         size: n.is_gateway ? 22 : 14,
         borderWidth: 2,
         raw: n
@@ -240,7 +259,7 @@ async function loadTopology(): Promise<void> {
       id: `e-${index}`,
       from: e.source,
       to: e.target,
-      color: { color: "#14b8a655", highlight: "#14b8a6aa" },
+      color: { color: NODE_COLORS.edgeColor, highlight: NODE_COLORS.edgeHighlight },
     }));
 
     if (!network) {
