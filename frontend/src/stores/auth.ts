@@ -12,19 +12,36 @@ interface CurrentUser {
 }
 
 export const useAuthStore = defineStore("auth", () => {
-  const token = ref<string | null>(localStorage.getItem("np-token"));
+  // Prefer a long-lived token from localStorage; fall back to a session-only
+  // token stored in sessionStorage (used when "Remember me" is unchecked).
+  const token = ref<string | null>(
+    localStorage.getItem("np-token") ?? sessionStorage.getItem("np-token")
+  );
   const user = ref<CurrentUser | null>(null);
 
   const isAuthenticated = computed(() => !!token.value);
   const isAdmin = computed(() => user.value?.role === "admin");
 
-  function setToken(t: string | null) {
+  /**
+   * Store `t` and set the Axios Authorization header.
+   * When `persist` is true (the default) the token survives browser restarts
+   * via localStorage.  When false it is kept only for the current browser
+   * session via sessionStorage — matching the "Remember me" checkbox intent.
+   */
+  function setToken(t: string | null, persist = true) {
     token.value = t;
     if (t) {
-      localStorage.setItem("np-token", t);
+      if (persist) {
+        localStorage.setItem("np-token", t);
+        sessionStorage.removeItem("np-token");
+      } else {
+        sessionStorage.setItem("np-token", t);
+        localStorage.removeItem("np-token");
+      }
       axios.defaults.headers.common["Authorization"] = `Bearer ${t}`;
     } else {
       localStorage.removeItem("np-token");
+      sessionStorage.removeItem("np-token");
       delete axios.defaults.headers.common["Authorization"];
       user.value = null;
     }

@@ -10,26 +10,24 @@ interface Props {
 
 const props = defineProps<Props>();
 
-const email = ref("");
-const password = ref("");
+// Step 1: enter email → receive token in server console.
+// Step 2: enter token + new password → complete reset.
+const step = ref<"email" | "token">("email");
+
+const forgotEmail = ref("");
+const resetToken = ref("");
+const newPassword = ref("");
 const confirmPassword = ref("");
-const fullName = ref("");
-const showPassword = ref(false);
+const showNewPassword = ref(false);
 const showConfirmPassword = ref(false);
 const isSubmitting = ref(false);
+const successMessage = ref<string | null>(null);
 const errorMessage = ref<string | null>(null);
 const showContent = ref(false);
+const showStatus = ref(false);
 
 const typedTitle = ref("");
 const showCursor = ref(true);
-const showField1 = ref(false);
-const showField2 = ref(false);
-const showField3 = ref(false);
-const showField4 = ref(false);
-const showButton = ref(false);
-const showStatus = ref(false);
-const googleEnabled = ref(false);
-const googleClientId = ref("");
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 let animationId: number | null = null;
@@ -39,7 +37,6 @@ let typingInterval: ReturnType<typeof setInterval> | null = null;
 const isNightshade = computed(() => props.theme === "nightshade");
 
 const emit = defineEmits<{
-  (e: "register-success", token: string): void;
   (e: "switch-to-login"): void;
   (e: "toggle-theme"): void;
 }>();
@@ -165,15 +162,9 @@ onMounted(async () => {
   }, 530);
 
   typeTitle();
-  loadGoogleConfig();
 
   setTimeout(() => { showContent.value = true; }, 100);
-  setTimeout(() => { showField1.value = true; }, 400);
-  setTimeout(() => { showField2.value = true; }, 550);
-  setTimeout(() => { showField3.value = true; }, 700);
-  setTimeout(() => { showField4.value = true; }, 850);
-  setTimeout(() => { showButton.value = true; }, 1000);
-  setTimeout(() => { showStatus.value = true; }, 1300);
+  setTimeout(() => { showStatus.value = true; }, 900);
 });
 
 onUnmounted(() => {
@@ -183,64 +174,58 @@ onUnmounted(() => {
   window.removeEventListener("resize", handleResize);
 });
 
-async function loadGoogleConfig(): Promise<void> {
-  try {
-    const { data } = await axios.get<{ client_id: string | null; enabled: boolean }>(
-      "/api/auth/google/config"
-    );
-    googleEnabled.value = data.enabled;
-    googleClientId.value = data.client_id || "";
-  } catch {
-    googleEnabled.value = false;
-  }
-}
-
-function handleGoogleLogin(): void {
-  if (!googleClientId.value) return;
-  const state = crypto.randomUUID();
-  sessionStorage.setItem("np-oauth-state", state);
-  const redirectUri = `${window.location.origin}/auth/google/callback`;
-  const scope = encodeURIComponent("openid email profile");
-  const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${googleClientId.value}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scope}&state=${state}&access_type=offline&prompt=consent`;
-  window.location.href = url;
-}
-
-async function handleSubmit(): Promise<void> {
+async function handleEmailSubmit(): Promise<void> {
   errorMessage.value = null;
+  successMessage.value = null;
 
-  if (!email.value || !password.value) {
-    errorMessage.value = "All fields are required.";
-    return;
-  }
-
-  if (password.value !== confirmPassword.value) {
-    errorMessage.value = "Passwords do not match.";
-    return;
-  }
-
-  if (password.value.length < 6) {
-    errorMessage.value = "Password must be at least 6 characters.";
+  if (!forgotEmail.value.trim()) {
+    errorMessage.value = "Enter your email address.";
     return;
   }
 
   isSubmitting.value = true;
   try {
-    await axios.post("/api/auth/users", {
-      email: email.value,
-      password: password.value,
-      full_name: fullName.value || null,
+    const { data } = await axios.post<{ message: string }>("/api/auth/forgot-password", {
+      email: forgotEmail.value,
     });
-
-    const { data } = await axios.post<{ access_token: string; token_type: string }>(
-      "/api/auth/login",
-      {
-        email: email.value,
-        password: password.value,
-      }
-    );
-    emit("register-success", data.access_token);
+    successMessage.value = data.message + " Check the server console for the reset token.";
+    step.value = "token";
   } catch {
-    errorMessage.value = "Registration failed. Email may already exist.";
+    errorMessage.value = "Could not send a reset token. Check your email and try again.";
+  } finally {
+    isSubmitting.value = false;
+  }
+}
+
+async function handleResetSubmit(): Promise<void> {
+  errorMessage.value = null;
+  successMessage.value = null;
+
+  if (!resetToken.value.trim()) {
+    errorMessage.value = "Paste the reset token from the server console.";
+    return;
+  }
+  if (newPassword.value.length < 6) {
+    errorMessage.value = "Password must be at least 6 characters.";
+    return;
+  }
+  if (newPassword.value !== confirmPassword.value) {
+    errorMessage.value = "Passwords do not match.";
+    return;
+  }
+
+  isSubmitting.value = true;
+  try {
+    const { data } = await axios.post<{ message: string }>("/api/auth/reset-password", {
+      token: resetToken.value,
+      new_password: newPassword.value,
+    });
+    successMessage.value = data.message;
+    setTimeout(() => {
+      emit("switch-to-login");
+    }, 2000);
+  } catch (e: any) {
+    errorMessage.value = e.response?.data?.detail || "Reset failed. Check your token and try again.";
   } finally {
     isSubmitting.value = false;
   }
@@ -262,6 +247,7 @@ async function handleSubmit(): Promise<void> {
       :class="isNightshade ? 'np-pulse-ring--nightshade' : 'np-pulse-ring--sysadmin'"
     />
 
+    <!-- Theme toggle -->
     <button
       type="button"
       @click="emit('toggle-theme')"
@@ -287,6 +273,7 @@ async function handleSubmit(): Promise<void> {
       :class="showContent ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'"
     >
       <div class="np-login-panel px-8 py-10">
+        <!-- Header -->
         <div class="text-center mb-8">
           <h1 class="np-login-title text-2xl tracking-wide mb-1">
             <span>{{ typedTitle }}</span><span
@@ -296,34 +283,17 @@ async function handleSubmit(): Promise<void> {
             />
           </h1>
           <p class="text-xs font-mono" :class="isNightshade ? 'text-teal-300/50' : 'text-slate-400'">
-            Create Account
+            {{ step === "email" ? "Password Recovery" : "Set New Password" }}
           </p>
         </div>
 
-        <form class="space-y-4" @submit.prevent="handleSubmit">
-          <div
-            class="np-stagger-item"
-            :class="showField1 ? 'np-stagger-visible' : 'np-stagger-hidden'"
-          >
-            <label
-              class="block text-xs uppercase tracking-wider mb-2 font-mono"
-              :class="isNightshade ? 'text-gray-400' : 'text-slate-400'"
-            >
-              Name
-            </label>
-            <input
-              v-model="fullName"
-              type="text"
-              autocomplete="name"
-              class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 text-sm font-mono"
-              placeholder="Admin"
-            />
-          </div>
+        <!-- Step 1: Email -->
+        <form v-if="step === 'email'" class="space-y-5" @submit.prevent="handleEmailSubmit">
+          <p class="text-xs" :class="isNightshade ? 'text-gray-400' : 'text-slate-400'">
+            Enter your account email. A one-time reset token will be printed to the server console.
+          </p>
 
-          <div
-            class="np-stagger-item"
-            :class="showField2 ? 'np-stagger-visible' : 'np-stagger-hidden'"
-          >
+          <div>
             <label
               class="block text-xs uppercase tracking-wider mb-2 font-mono"
               :class="isNightshade ? 'text-gray-400' : 'text-slate-400'"
@@ -331,41 +301,78 @@ async function handleSubmit(): Promise<void> {
               Email
             </label>
             <input
-              v-model="email"
+              v-model="forgotEmail"
               type="email"
-              autocomplete="username"
+              autocomplete="email"
               class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 text-sm font-mono"
-              placeholder="admin@netpulse.local"
+              placeholder="operator@netpulse.local"
             />
           </div>
 
-          <div
-            class="np-stagger-item"
-            :class="showField3 ? 'np-stagger-visible' : 'np-stagger-hidden'"
+          <button
+            type="submit"
+            class="np-cyber-btn np-btn-shimmer w-full rounded-lg px-4 py-3 text-sm font-medium flex items-center justify-center gap-2"
+            :disabled="isSubmitting"
           >
+            <svg v-if="isSubmitting" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+            </svg>
+            <span>{{ isSubmitting ? "Sending…" : "Send Reset Token" }}</span>
+          </button>
+
+          <p v-if="errorMessage" class="text-center text-sm text-red-400">{{ errorMessage }}</p>
+        </form>
+
+        <!-- Step 2: Token + new password -->
+        <form v-else class="space-y-4" @submit.prevent="handleResetSubmit">
+          <p v-if="successMessage" class="text-xs text-center" :class="isNightshade ? 'text-teal-300' : 'text-amber-300'">
+            {{ successMessage }}
+          </p>
+          <p class="text-xs" :class="isNightshade ? 'text-gray-400' : 'text-slate-400'">
+            Paste the token from the server console below and choose a new password.
+          </p>
+
+          <div>
             <label
               class="block text-xs uppercase tracking-wider mb-2 font-mono"
               :class="isNightshade ? 'text-gray-400' : 'text-slate-400'"
             >
-              Password
+              Reset Token
+            </label>
+            <input
+              v-model="resetToken"
+              type="text"
+              autocomplete="off"
+              class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 text-sm font-mono"
+              placeholder="Paste token here"
+            />
+          </div>
+
+          <div>
+            <label
+              class="block text-xs uppercase tracking-wider mb-2 font-mono"
+              :class="isNightshade ? 'text-gray-400' : 'text-slate-400'"
+            >
+              New Password
             </label>
             <div class="relative">
               <input
-                v-model="password"
-                :type="showPassword ? 'text' : 'password'"
+                v-model="newPassword"
+                :type="showNewPassword ? 'text' : 'password'"
                 autocomplete="new-password"
                 class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 pr-11 text-sm font-mono"
                 placeholder="••••••••••••"
               />
               <button
                 type="button"
-                @click="showPassword = !showPassword"
-                class="absolute inset-y-0 right-0 flex items-center px-3 transition-opacity"
+                @click="showNewPassword = !showNewPassword"
+                class="absolute inset-y-0 right-0 flex items-center px-3"
                 :class="isNightshade ? 'text-teal-400/60 hover:text-teal-400' : 'text-amber-400/60 hover:text-amber-400'"
                 tabindex="-1"
-                :title="showPassword ? 'Hide password' : 'Show password'"
+                :title="showNewPassword ? 'Hide password' : 'Show password'"
               >
-                <svg v-if="!showPassword" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg v-if="!showNewPassword" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                 </svg>
@@ -376,10 +383,7 @@ async function handleSubmit(): Promise<void> {
             </div>
           </div>
 
-          <div
-            class="np-stagger-item"
-            :class="showField4 ? 'np-stagger-visible' : 'np-stagger-hidden'"
-          >
+          <div>
             <label
               class="block text-xs uppercase tracking-wider mb-2 font-mono"
               :class="isNightshade ? 'text-gray-400' : 'text-slate-400'"
@@ -397,7 +401,7 @@ async function handleSubmit(): Promise<void> {
               <button
                 type="button"
                 @click="showConfirmPassword = !showConfirmPassword"
-                class="absolute inset-y-0 right-0 flex items-center px-3 transition-opacity"
+                class="absolute inset-y-0 right-0 flex items-center px-3"
                 :class="isNightshade ? 'text-teal-400/60 hover:text-teal-400' : 'text-amber-400/60 hover:text-amber-400'"
                 tabindex="-1"
                 :title="showConfirmPassword ? 'Hide password' : 'Show password'"
@@ -413,72 +417,38 @@ async function handleSubmit(): Promise<void> {
             </div>
           </div>
 
-          <div
-            class="np-stagger-item"
-            :class="showButton ? 'np-stagger-visible' : 'np-stagger-hidden'"
+          <button
+            type="submit"
+            class="np-cyber-btn np-btn-shimmer w-full rounded-lg px-4 py-3 text-sm font-medium flex items-center justify-center gap-2"
+            :disabled="isSubmitting"
           >
-            <button
-              type="submit"
-              class="np-cyber-btn np-btn-shimmer w-full rounded-lg px-4 py-3 text-sm font-medium flex items-center justify-center gap-2"
-              :disabled="isSubmitting"
-            >
-              <svg
-                v-if="isSubmitting"
-                class="w-4 h-4 animate-spin"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-              </svg>
-              <span>{{ isSubmitting ? "Creating…" : "Create Account" }}</span>
-            </button>
-          </div>
+            <svg v-if="isSubmitting" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+            </svg>
+            <span>{{ isSubmitting ? "Resetting…" : "Reset Password" }}</span>
+          </button>
 
-          <p v-if="errorMessage" class="text-center text-sm text-red-400">
-            {{ errorMessage }}
+          <p v-if="errorMessage" class="text-center text-sm text-red-400">{{ errorMessage }}</p>
+          <p v-if="successMessage && step === 'token'" class="text-center text-sm" :class="isNightshade ? 'text-teal-300' : 'text-amber-300'">
+            {{ successMessage }}
           </p>
         </form>
 
-        <div v-if="googleEnabled" class="mt-5">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="flex-1 h-px" :class="isNightshade ? 'bg-teal-500/20' : 'bg-amber-500/20'" />
-            <span class="text-xs font-mono" :class="isNightshade ? 'text-gray-500' : 'text-slate-500'">or</span>
-            <div class="flex-1 h-px" :class="isNightshade ? 'bg-teal-500/20' : 'bg-amber-500/20'" />
-          </div>
-          <button
-            type="button"
-            @click="handleGoogleLogin"
-            class="w-full flex items-center justify-center gap-3 rounded-lg px-4 py-3 text-sm font-medium border transition-all duration-300 hover:scale-[1.01]"
-            :class="isNightshade
-              ? 'border-teal-500/30 bg-teal-500/5 text-teal-300 hover:bg-teal-500/10 hover:border-teal-400/40'
-              : 'border-amber-500/30 bg-amber-500/5 text-amber-300 hover:bg-amber-500/10 hover:border-amber-400/40'"
-          >
-            <svg class="w-5 h-5" viewBox="0 0 24 24">
-              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-            </svg>
-            Sign up with Google
-          </button>
-        </div>
-
+        <!-- Back to login -->
         <div class="mt-6 pt-5 border-t text-center" :class="isNightshade ? 'border-teal-500/20' : 'border-amber-500/20'">
-          <p class="text-xs mb-2" :class="isNightshade ? 'text-gray-500' : 'text-slate-500'">
-            Already have an account?
-          </p>
           <button
             type="button"
             @click="emit('switch-to-login')"
             class="text-sm transition-colors"
             :class="isNightshade ? 'text-teal-400 hover:text-teal-300' : 'text-amber-400 hover:text-amber-300'"
           >
-            Sign In
+            ← Back to Sign In
           </button>
         </div>
       </div>
 
+      <!-- Status bar -->
       <div
         class="np-stagger-item mt-6 flex items-center justify-center gap-2"
         :class="showStatus ? 'np-stagger-visible' : 'np-stagger-hidden'"
