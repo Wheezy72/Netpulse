@@ -53,15 +53,15 @@ interface Particle {
 
 function initParticles(canvas: HTMLCanvasElement): Particle[] {
   const particles: Particle[] = [];
-  const count = 45;
+  const count = 130;
   for (let i = 0; i < count; i++) {
     particles.push({
       x: Math.random() * canvas.width,
       y: Math.random() * canvas.height,
-      vx: (Math.random() - 0.5) * 0.4,
-      vy: (Math.random() - 0.5) * 0.4,
-      radius: Math.random() * 2 + 1,
-      opacity: Math.random() * 0.5 + 0.2,
+      vx: (Math.random() - 0.5) * 0.5,
+      vy: (Math.random() - 0.5) * 0.5,
+      radius: Math.random() * 1.8 + 0.6,
+      opacity: Math.random() * 0.35 + 0.1,
     });
   }
   return particles;
@@ -74,7 +74,7 @@ function animateCanvas() {
   if (!ctx) return;
 
   let particles = initParticles(canvas);
-  const connectionDist = 120;
+  const connectionDist = 140;
 
   const accentColor = isNightshade.value
     ? { r: 20, g: 184, b: 166 }
@@ -247,7 +247,7 @@ async function handleSubmit(): Promise<void> {
 
 <template>
   <div
-    class="min-h-screen flex items-center justify-center relative overflow-hidden bg-[#0a0f1a] dark:bg-[#030712]"
+    class="min-h-screen flex items-center justify-center relative overflow-hidden transition-colors duration-500 bg-[#0d1117] dark:bg-[#020617]"
   >
     <canvas
       ref="canvasRef"
