@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import axios from "axios";
+import { useRouter } from "vue-router";
 import { computed, onMounted, onUnmounted, ref, nextTick } from "vue";
 
 type Theme = "nightshade" | "sysadmin";
@@ -9,22 +10,15 @@ interface Props {
 }
 
 const props = defineProps<Props>();
+const router = useRouter();
 
 const email = ref("");
 const password = ref("");
+const showPassword = ref(false);
+const rememberMe = ref(true);
 const isSubmitting = ref(false);
 const errorMessage = ref<string | null>(null);
 const showContent = ref(false);
-
-const showForgotPassword = ref(false);
-const forgotEmail = ref("");
-const resetToken = ref("");
-const newPassword = ref("");
-const confirmPassword = ref("");
-const forgotStep = ref<"email" | "token">("email");
-const forgotMessage = ref<string | null>(null);
-const forgotError = ref<string | null>(null);
-const forgotLoading = ref(false);
 
 const typedTitle = ref("");
 const showCursor = ref(true);
@@ -43,7 +37,7 @@ let typingInterval: ReturnType<typeof setInterval> | null = null;
 const isNightshade = computed(() => props.theme === "nightshade");
 
 const emit = defineEmits<{
-  (e: "login-success", token: string): void;
+  (e: "login-success", payload: { token: string; rememberMe: boolean }): void;
   (e: "switch-to-register"): void;
   (e: "toggle-theme"): void;
 }>();
@@ -59,15 +53,15 @@ interface Particle {
 
 function initParticles(canvas: HTMLCanvasElement): Particle[] {
   const particles: Particle[] = [];
-  const count = 45;
+  const count = 130;
   for (let i = 0; i < count; i++) {
     particles.push({
       x: Math.random() * canvas.width,
       y: Math.random() * canvas.height,
-      vx: (Math.random() - 0.5) * 0.4,
-      vy: (Math.random() - 0.5) * 0.4,
-      radius: Math.random() * 2 + 1,
-      opacity: Math.random() * 0.5 + 0.2,
+      vx: (Math.random() - 0.5) * 0.5,
+      vy: (Math.random() - 0.5) * 0.5,
+      radius: Math.random() * 1.8 + 0.6,
+      opacity: Math.random() * 0.35 + 0.1,
     });
   }
   return particles;
@@ -80,7 +74,7 @@ function animateCanvas() {
   if (!ctx) return;
 
   let particles = initParticles(canvas);
-  const connectionDist = 120;
+  const connectionDist = 140;
 
   const accentColor = isNightshade.value
     ? { r: 20, g: 184, b: 166 }
@@ -207,74 +201,6 @@ function handleGoogleLogin(): void {
   window.location.href = url;
 }
 
-function openForgotPassword(): void {
-  showForgotPassword.value = true;
-  forgotStep.value = "email";
-  forgotEmail.value = "";
-  resetToken.value = "";
-  newPassword.value = "";
-  confirmPassword.value = "";
-  forgotMessage.value = null;
-  forgotError.value = null;
-}
-
-function closeForgotPassword(): void {
-  showForgotPassword.value = false;
-}
-
-async function handleForgotSubmit(): Promise<void> {
-  forgotError.value = null;
-  forgotMessage.value = null;
-  if (!forgotEmail.value.trim()) {
-    forgotError.value = "Enter your email address.";
-    return;
-  }
-  forgotLoading.value = true;
-  try {
-    const { data } = await axios.post<{ message: string }>("/api/auth/forgot-password", {
-      email: forgotEmail.value,
-    });
-    forgotMessage.value = data.message + " Check the server console for the reset token.";
-    forgotStep.value = "token";
-  } catch {
-    forgotError.value = "Failed to request reset. Try again.";
-  } finally {
-    forgotLoading.value = false;
-  }
-}
-
-async function handleResetSubmit(): Promise<void> {
-  forgotError.value = null;
-  forgotMessage.value = null;
-  if (!resetToken.value.trim()) {
-    forgotError.value = "Enter the reset token.";
-    return;
-  }
-  if (newPassword.value.length < 6) {
-    forgotError.value = "Password must be at least 6 characters.";
-    return;
-  }
-  if (newPassword.value !== confirmPassword.value) {
-    forgotError.value = "Passwords do not match.";
-    return;
-  }
-  forgotLoading.value = true;
-  try {
-    const { data } = await axios.post<{ message: string }>("/api/auth/reset-password", {
-      token: resetToken.value,
-      new_password: newPassword.value,
-    });
-    forgotMessage.value = data.message;
-    setTimeout(() => {
-      closeForgotPassword();
-    }, 2000);
-  } catch (e: any) {
-    forgotError.value = e.response?.data?.detail || "Reset failed. Check your token and try again.";
-  } finally {
-    forgotLoading.value = false;
-  }
-}
-
 async function handleSubmit(): Promise<void> {
   errorMessage.value = null;
 
@@ -292,7 +218,7 @@ async function handleSubmit(): Promise<void> {
         password: password.value,
       }
     );
-    emit("login-success", data.access_token);
+    emit("login-success", { token: data.access_token, rememberMe: rememberMe.value });
   } catch {
     errorMessage.value = "Access denied. Check your credentials.";
   } finally {
@@ -303,7 +229,7 @@ async function handleSubmit(): Promise<void> {
 
 <template>
   <div
-    class="min-h-screen flex items-center justify-center relative overflow-hidden bg-[#0a0f1a] dark:bg-[#030712]"
+    class="min-h-screen flex items-center justify-center relative overflow-hidden transition-colors duration-500 bg-[#0d1117] dark:bg-[#020617]"
   >
     <canvas
       ref="canvasRef"
@@ -384,13 +310,59 @@ async function handleSubmit(): Promise<void> {
             >
               Password
             </label>
-            <input
-              v-model="password"
-              type="password"
-              autocomplete="current-password"
-              class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 text-sm font-mono"
-              placeholder="••••••••••••"
-            />
+            <div class="relative">
+              <input
+                v-model="password"
+                :type="showPassword ? 'text' : 'password'"
+                autocomplete="current-password"
+                class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 pr-11 text-sm font-mono"
+                placeholder="••••••••••••"
+              />
+              <button
+                type="button"
+                @click="showPassword = !showPassword"
+                class="absolute inset-y-0 right-0 flex items-center px-3 transition-opacity"
+                :class="isNightshade ? 'text-teal-400/60 hover:text-teal-400' : 'text-amber-400/60 hover:text-amber-400'"
+                tabindex="-1"
+                :title="showPassword ? 'Hide password' : 'Show password'"
+              >
+                <!-- Eye open -->
+                <svg v-if="!showPassword" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+                <!-- Eye closed (slash) -->
+                <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Remember me + Forgot password row -->
+          <div
+            class="np-stagger-item flex items-center justify-between"
+            :class="showField2 ? 'np-stagger-visible' : 'np-stagger-hidden'"
+          >
+            <label class="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                v-model="rememberMe"
+                type="checkbox"
+                class="np-checkbox rounded"
+                :class="isNightshade ? 'accent-teal-400' : 'accent-amber-400'"
+              />
+              <span class="text-xs font-mono" :class="isNightshade ? 'text-gray-400' : 'text-slate-400'">
+                Remember me
+              </span>
+            </label>
+            <button
+              type="button"
+              @click="router.push('/forgot-password')"
+              class="text-xs transition-colors"
+              :class="isNightshade ? 'text-gray-500 hover:text-teal-400' : 'text-slate-500 hover:text-amber-400'"
+            >
+              Forgot password?
+            </button>
           </div>
 
           <div
@@ -399,106 +371,27 @@ async function handleSubmit(): Promise<void> {
           >
             <button
               type="submit"
-              class="np-cyber-btn np-btn-shimmer w-full rounded-lg px-4 py-3 text-sm font-medium"
+              class="np-cyber-btn np-btn-shimmer w-full rounded-lg px-4 py-3 text-sm font-medium flex items-center justify-center gap-2"
               :disabled="isSubmitting"
             >
-              <span v-if="!isSubmitting">Sign In</span>
-              <span v-else>Signing in...</span>
+              <!-- Spinner -->
+              <svg
+                v-if="isSubmitting"
+                class="w-4 h-4 animate-spin"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              </svg>
+              <span>{{ isSubmitting ? "Signing in…" : "Sign In" }}</span>
             </button>
           </div>
 
           <p v-if="errorMessage" class="text-center text-sm text-red-400">
             {{ errorMessage }}
           </p>
-
-          <div class="text-center">
-            <button
-              type="button"
-              @click="openForgotPassword"
-              class="text-xs transition-colors"
-              :class="isNightshade ? 'text-gray-500 hover:text-teal-400' : 'text-slate-500 hover:text-amber-400'"
-            >
-              Forgot password?
-            </button>
-          </div>
         </form>
-
-        <div v-if="showForgotPassword" class="mt-4 space-y-3">
-          <div class="border-t pt-4" :class="isNightshade ? 'border-teal-500/20' : 'border-amber-500/20'">
-            <div class="flex items-center justify-between mb-3">
-              <h3 class="text-xs uppercase tracking-wider font-mono" :class="isNightshade ? 'text-teal-400' : 'text-amber-400'">
-                Reset Password
-              </h3>
-              <button
-                type="button"
-                @click="closeForgotPassword"
-                class="text-xs transition-colors"
-                :class="isNightshade ? 'text-gray-500 hover:text-teal-300' : 'text-slate-500 hover:text-amber-300'"
-              >
-                Cancel
-              </button>
-            </div>
-
-            <div v-if="forgotStep === 'email'" class="space-y-3">
-              <p class="text-xs" :class="isNightshade ? 'text-gray-400' : 'text-slate-400'">
-                Enter your email to receive a reset token. The token will appear in the server console.
-              </p>
-              <input
-                v-model="forgotEmail"
-                type="email"
-                placeholder="your@email.com"
-                class="np-neon-input w-full rounded-lg px-4 py-2.5 text-sm font-mono"
-              />
-              <button
-                type="button"
-                @click="handleForgotSubmit"
-                :disabled="forgotLoading"
-                class="np-cyber-btn w-full rounded-lg px-4 py-2.5 text-sm font-medium"
-              >
-                {{ forgotLoading ? "Sending..." : "Request Reset Token" }}
-              </button>
-            </div>
-
-            <div v-else class="space-y-3">
-              <p class="text-xs" :class="isNightshade ? 'text-gray-400' : 'text-slate-400'">
-                Paste the reset token from the server console and set your new password.
-              </p>
-              <input
-                v-model="resetToken"
-                type="text"
-                placeholder="Paste reset token here"
-                class="np-neon-input w-full rounded-lg px-4 py-2.5 text-sm font-mono"
-              />
-              <input
-                v-model="newPassword"
-                type="password"
-                placeholder="New password"
-                class="np-neon-input w-full rounded-lg px-4 py-2.5 text-sm font-mono"
-              />
-              <input
-                v-model="confirmPassword"
-                type="password"
-                placeholder="Confirm new password"
-                class="np-neon-input w-full rounded-lg px-4 py-2.5 text-sm font-mono"
-              />
-              <button
-                type="button"
-                @click="handleResetSubmit"
-                :disabled="forgotLoading"
-                class="np-cyber-btn w-full rounded-lg px-4 py-2.5 text-sm font-medium"
-              >
-                {{ forgotLoading ? "Resetting..." : "Reset Password" }}
-              </button>
-            </div>
-
-            <p v-if="forgotMessage" class="text-xs text-center mt-2" :class="isNightshade ? 'text-teal-300' : 'text-amber-300'">
-              {{ forgotMessage }}
-            </p>
-            <p v-if="forgotError" class="text-xs text-center mt-2 text-red-400">
-              {{ forgotError }}
-            </p>
-          </div>
-        </div>
 
         <div v-if="googleEnabled" class="mt-5">
           <div class="flex items-center gap-3 mb-4">

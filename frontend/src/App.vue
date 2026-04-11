@@ -67,8 +67,10 @@ function handleLogout() {
   router.push("/login");
 }
 
-async function handleAuthSuccess(token: string) {
-  auth.setToken(token);
+async function handleAuthSuccess(arg: string | { token: string; rememberMe?: boolean }) {
+  const t = typeof arg === "string" ? arg : arg.token;
+  const persist = typeof arg === "string" ? true : (arg.rememberMe ?? true);
+  auth.setToken(t, persist);
   await auth.loadUser();
   router.push("/dashboard");
 }

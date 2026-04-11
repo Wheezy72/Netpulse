@@ -579,9 +579,11 @@ body.theme-nightshade .np-login-panel {
 body.theme-sysadmin .np-login-panel {
   position: relative;
   z-index: 10;
-  background: #111827;
+  background: rgba(17, 24, 39, 0.85);
   border: 1px solid rgba(245, 158, 11, 0.15);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border-radius: 1rem;
 }
 
