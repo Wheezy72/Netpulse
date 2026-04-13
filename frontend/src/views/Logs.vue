@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { RecycleScroller } from "vue-virtual-scroller";
+import { RecycleScroller, DynamicScroller, DynamicScrollerItem } from "vue-virtual-scroller";
 import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 
 type Theme = "nightshade" | "sysadmin";
@@ -71,18 +71,23 @@ const filteredLogs = computed(() => {
   }
   const raw = searchQuery.value.trim();
   if (!raw) return list;
-  // Try regex, fall back to substring
+  // Try regex, fall back to plain substring
   let pattern: RegExp | null = null;
   try {
     pattern = new RegExp(raw, "i");
   } catch {
-    // invalid regex — use plain text
+    // invalid regex
   }
   return list.filter((log) => {
     const haystack = `${log.message} ${log.logger} ${log.module ?? ""} ${log.function ?? ""}`;
     return pattern ? pattern.test(haystack) : haystack.toLowerCase().includes(raw.toLowerCase());
   });
 });
+
+// Add a stable index to each log entry so the virtual scroller key is unique
+const indexedLogs = computed(() =>
+  filteredLogs.value.map((log, i) => ({ ...log, _idx: i }))
+);
 
 function toggleErrorExpand(index: number): void {
   if (expandedErrorIds.value.has(index)) {
@@ -443,9 +448,9 @@ onUnmounted(() => {
         <RecycleScroller
           v-else
           class="h-[calc(100vh-28rem)] min-h-[300px]"
-          :items="filteredLogs"
+          :items="indexedLogs"
           :item-size="56"
-          key-field="timestamp"
+          key-field="_idx"
           v-slot="{ item: log, index }"
         >
           <div
