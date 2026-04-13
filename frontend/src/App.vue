@@ -114,14 +114,13 @@ onMounted(async () => {
 
   if (window.innerWidth < 768) {
     ui.sidebarExpanded = false;
+    localStorage.setItem("np-sidebar-expanded", "false");
   }
 });
 </script>
 
 <template>
-  <div
-    class="min-h-screen flex bg-[#0a0f1a] dark:bg-[#030712] text-slate-100 dark:text-sky-100"
-  >
+  <div class="min-h-screen flex bg-[#050505] text-zinc-100">
     <!-- Command palette (global) -->
     <CommandPalette />
 
@@ -148,8 +147,7 @@ onMounted(async () => {
       <button
         type="button"
         @click="mobileMenuOpen = !mobileMenuOpen"
-        class="fixed top-3 left-3 z-50 md:hidden rounded-lg p-2 transition-colors"
-        :class="isNightshade ? 'bg-gray-900/90 text-teal-400' : 'bg-slate-800/90 text-amber-400'"
+        class="fixed top-3 left-3 z-50 md:hidden rounded p-2 bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors"
       >
         <svg v-if="!mobileMenuOpen" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
@@ -167,29 +165,22 @@ onMounted(async () => {
 
       <!-- Sidebar -->
       <aside
-        class="fixed md:sticky top-0 left-0 z-40 h-screen flex flex-col border-r transition-all duration-300 shrink-0"
+        class="fixed md:sticky top-0 left-0 z-40 h-screen flex flex-col border-r transition-all duration-200 shrink-0 np-glass"
         :class="[
           mobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
-          ui.sidebarExpanded ? 'w-56' : 'w-16',
-          isNightshade ? 'bg-[#030712] border-teal-500/20' : 'bg-slate-900 border-amber-500/20',
+          ui.sidebarExpanded ? 'w-52' : 'w-14',
         ]"
+        style="border-color: var(--np-glass-border);"
       >
         <!-- Logo -->
-        <div class="flex items-center gap-3 px-3 py-4 border-b border-amber-500/15 dark:border-teal-500/20">
-          <div
-            class="h-9 w-9 rounded-lg flex items-center justify-center border shrink-0"
-            :class="isNightshade ? 'border-teal-400/60 bg-slate-900/80' : 'border-amber-500/50 bg-slate-800/50'"
-            :style="isNightshade ? { boxShadow: '0 0 8px rgba(20,184,166,0.3)' } : { boxShadow: '0 0 8px rgba(245,158,11,0.3)' }"
-          >
-            <img v-if="!logoError" src="/logo.png" alt="NP" class="h-6 w-6 object-contain" @error="logoError = true" />
-            <span v-else class="text-sm font-bold font-mono" :class="isNightshade ? 'text-teal-400' : 'text-amber-400'">NP</span>
+          <div class="flex items-center gap-3 px-3 py-4 border-b border-zinc-800">
+          <div class="h-8 w-8 rounded flex items-center justify-center border border-zinc-700 bg-zinc-900 shrink-0">
+            <img v-if="!logoError" src="/logo.png" alt="NP" class="h-5 w-5 object-contain" @error="logoError = true" />
+            <span v-else class="text-xs font-bold font-mono text-zinc-300">NP</span>
           </div>
           <div v-if="ui.sidebarExpanded" class="flex flex-col overflow-hidden">
-            <h1
-              class="text-sm font-semibold tracking-wider uppercase truncate"
-              :class="isNightshade ? 'text-teal-400' : 'text-amber-400'"
-            >NetPulse</h1>
-            <p class="text-[0.6rem] tracking-wide text-slate-400 dark:text-teal-300 truncate">Network Operations Console</p>
+            <h1 class="text-xs font-semibold tracking-widest uppercase truncate text-zinc-200">NetPulse</h1>
+            <p class="text-[0.6rem] tracking-wide text-zinc-500 truncate">Network Ops Console</p>
           </div>
         </div>
 
@@ -197,7 +188,7 @@ onMounted(async () => {
         <button
           type="button"
           @click="ui.toggleSidebar()"
-          class="hidden md:flex items-center justify-center w-full py-2 text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100 transition-colors border-b border-amber-500/15 dark:border-teal-500/20"
+          class="hidden md:flex items-center justify-center w-full py-2 text-zinc-500 hover:text-zinc-300 transition-colors border-b border-zinc-800"
         >
           <svg
             class="w-4 h-4 transition-transform duration-300"
@@ -213,7 +204,7 @@ onMounted(async () => {
           v-if="ui.sidebarExpanded"
           type="button"
           @click="ui.openCommandPalette()"
-          class="mx-2 mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs transition-colors hover:border-amber-500 dark:hover:border-teal-500 border-amber-500/15 dark:border-teal-500/20 text-slate-400 dark:text-teal-300"
+          class="mx-2 mt-2 flex items-center gap-2 px-3 py-1.5 rounded border text-xs transition-colors hover:border-zinc-600 border-zinc-800 text-zinc-500 hover:text-zinc-300"
           title="Open command palette"
         >
           <span class="flex-1 text-left">Search commands…</span>
@@ -221,17 +212,17 @@ onMounted(async () => {
         </button>
 
         <!-- Nav -->
-        <nav class="flex-1 py-3 px-2 space-y-1 overflow-y-auto">
+        <nav class="flex-1 py-2 px-1.5 space-y-0.5 overflow-y-auto">
           <button
             v-for="item in navItems"
             :key="item.id"
             type="button"
             @click="navigateTo(item.id)"
-            class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs uppercase tracking-wider font-medium transition-all duration-200"
+            class="w-full flex items-center gap-3 px-3 py-2 rounded text-xs uppercase tracking-wider font-medium transition-colors duration-150"
             :class="[
               isActive(item.id)
-                ? isNightshade ? 'bg-teal-500/15 text-teal-400' : 'bg-amber-500/15 text-amber-400'
-                : 'text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100 hover:bg-white/5',
+                ? isNightshade ? 'bg-blue-500/10 text-blue-400 border-l-2 border-blue-500' : 'bg-amber-500/10 text-amber-400 border-l-2 border-amber-500'
+                : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60 border-l-2 border-transparent',
             ]"
             :title="item.label"
           >
@@ -266,33 +257,30 @@ onMounted(async () => {
         </nav>
 
         <!-- Footer: theme toggle + user info + logout -->
-        <div class="border-t px-2 py-3 space-y-2 border-amber-500/15 dark:border-teal-500/20">
+        <div class="border-t border-zinc-800 px-1.5 py-2 space-y-0.5">
           <button
             type="button"
             @click="toggleTheme"
-            class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs transition-colors hover:bg-white/5"
+            class="w-full flex items-center gap-3 px-3 py-2 rounded text-xs transition-colors hover:bg-zinc-800/60 text-zinc-500 hover:text-zinc-300"
           >
-            <svg v-if="isNightshade" class="w-5 h-5 shrink-0 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg v-if="isNightshade" class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
             </svg>
-            <svg v-else class="w-5 h-5 shrink-0 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg v-else class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
             </svg>
-            <span v-if="ui.sidebarExpanded" class="truncate text-slate-400 dark:text-teal-300">
+            <span v-if="ui.sidebarExpanded" class="truncate">
               {{ isNightshade ? "Nightshade" : "SysAdmin" }}
             </span>
           </button>
 
           <div class="flex items-center gap-3 px-3 py-2">
-            <div
-              class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-              :class="isNightshade ? 'bg-teal-500/20 text-teal-400' : 'bg-amber-500/20 text-amber-400'"
-            >
+            <div class="w-7 h-7 rounded flex items-center justify-center text-xs font-bold shrink-0 bg-zinc-800 text-zinc-300">
               {{ (auth.user?.email?.[0] || "U").toUpperCase() }}
             </div>
             <div v-if="ui.sidebarExpanded" class="flex-1 min-w-0">
-              <p class="text-xs truncate text-slate-100 dark:text-sky-100">{{ auth.user?.email || "Operator" }}</p>
-              <p :class="['text-[0.6rem] uppercase tracking-widest', isNightshade ? 'text-emerald-400' : 'text-amber-400']">
+              <p class="text-xs truncate text-zinc-300">{{ auth.user?.email || "Operator" }}</p>
+              <p class="text-[0.6rem] uppercase tracking-widest" :class="isNightshade ? 'text-blue-400' : 'text-amber-400'">
                 {{ auth.user?.role === "admin" ? "Admin" : "Operator" }}
               </p>
             </div>
@@ -301,7 +289,7 @@ onMounted(async () => {
           <button
             type="button"
             @click="handleLogout"
-            class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs transition-colors text-red-400 hover:bg-red-400/10"
+            class="w-full flex items-center gap-3 px-3 py-2 rounded text-xs transition-colors text-zinc-500 hover:text-red-400 hover:bg-red-400/5"
           >
             <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
@@ -312,8 +300,7 @@ onMounted(async () => {
       </aside>
 
       <!-- Main content via Vue Router -->
-      <main class="flex-1 p-6 relative overflow-auto min-h-screen">
-        <div class="np-pulse-bg opacity-30" />
+      <main class="flex-1 p-4 relative overflow-auto min-h-screen bg-[#050505]">
         <RouterView v-slot="{ Component }">
           <component
             :is="Component"
@@ -333,13 +320,12 @@ onMounted(async () => {
       <button
         type="button"
         @click="aiDrawerOpen = !aiDrawerOpen"
-        class="fixed bottom-6 right-6 z-[70] w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-110"
+        class="fixed bottom-5 right-5 z-[70] w-12 h-12 rounded border flex items-center justify-center transition-colors duration-200"
         :class="[
           isNightshade
-            ? 'bg-teal-500/20 border-2 border-teal-400 text-teal-400 hover:bg-teal-500/30'
-            : 'bg-amber-500/20 border-2 border-amber-400 text-amber-400 hover:bg-amber-500/30',
+            ? 'bg-zinc-900 border-blue-500/40 text-blue-400 hover:bg-blue-500/10 hover:border-blue-400'
+            : 'bg-zinc-900 border-amber-500/40 text-amber-400 hover:bg-amber-500/10 hover:border-amber-400',
         ]"
-        :style="isNightshade ? { boxShadow: '0 0 20px rgba(20,184,166,0.4)' } : { boxShadow: '0 0 20px rgba(245,158,11,0.4)' }"
       >
         <svg v-if="!aiDrawerOpen" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />

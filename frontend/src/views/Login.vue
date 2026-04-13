@@ -77,8 +77,8 @@ function animateCanvas() {
   const connectionDist = 140;
 
   const accentColor = isNightshade.value
-    ? { r: 20, g: 184, b: 166 }
-    : { r: 245, g: 158, b: 11 };
+    ? { r: 59, g: 130, b: 246 }   // blue-500
+    : { r: 245, g: 158, b: 11 };  // amber-500
 
   function draw() {
     if (!canvas || !ctx) return;
@@ -229,7 +229,7 @@ async function handleSubmit(): Promise<void> {
 
 <template>
   <div
-    class="min-h-screen flex items-center justify-center relative overflow-hidden transition-colors duration-500 bg-[#0d1117] dark:bg-[#020617]"
+    class="min-h-screen flex items-center justify-center relative overflow-hidden bg-[#09090b]"
   >
     <canvas
       ref="canvasRef"
@@ -461,8 +461,8 @@ async function handleSubmit(): Promise<void> {
   z-index: 1;
 }
 .np-pulse-ring--nightshade {
-  border: 1px solid rgba(20, 184, 166, 0.1);
-  box-shadow: 0 0 60px rgba(20, 184, 166, 0.05), inset 0 0 60px rgba(20, 184, 166, 0.03);
+  border: 1px solid rgba(59, 130, 246, 0.1);
+  box-shadow: 0 0 40px rgba(59, 130, 246, 0.04), inset 0 0 40px rgba(59, 130, 246, 0.02);
   animation: pulseRingNight 4s ease-in-out infinite;
 }
 .np-pulse-ring--sysadmin {
@@ -498,8 +498,7 @@ async function handleSubmit(): Promise<void> {
   border-radius: 50%;
 }
 .np-status-dot--nightshade {
-  background: #14b8a6;
-  box-shadow: 0 0 6px rgba(20, 184, 166, 0.6);
+  background: #3b82f6;
   animation: statusPulseNight 2s ease-in-out infinite;
 }
 .np-status-dot--sysadmin {
@@ -508,8 +507,8 @@ async function handleSubmit(): Promise<void> {
   animation: statusPulseSys 2s ease-in-out infinite;
 }
 @keyframes statusPulseNight {
-  0%, 100% { box-shadow: 0 0 4px rgba(20, 184, 166, 0.4); }
-  50% { box-shadow: 0 0 12px rgba(20, 184, 166, 0.8); }
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
 }
 @keyframes statusPulseSys {
   0%, 100% { box-shadow: 0 0 4px rgba(245, 158, 11, 0.4); }
