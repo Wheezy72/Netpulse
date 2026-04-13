@@ -425,14 +425,14 @@ input[type="time"].np-neon-input::-webkit-calendar-picker-indicator {
 }
 
 .sp-card:hover {
-  border-color: var(--np-accent-primary);
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
 /* Status badges — square-ish for tactical look */
 .sp-badge {
-  background: color-mix(in srgb, var(--np-accent-primary) 12%, transparent);
+  background: rgba(100, 100, 120, 0.12);
   color: var(--np-accent-primary);
-  border: 1px solid color-mix(in srgb, var(--np-accent-primary) 25%, transparent);
+  border: 1px solid rgba(100, 100, 120, 0.25);
   border-radius: 2px;
   padding: 0.125rem 0.5rem;
   font-size: 0.65rem;
@@ -510,7 +510,7 @@ tbody tr {
 }
 
 tbody tr:hover {
-  background: color-mix(in srgb, var(--np-accent-primary) 4%, transparent);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 /* ============================================

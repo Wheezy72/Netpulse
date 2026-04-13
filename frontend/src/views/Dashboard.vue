@@ -5,7 +5,6 @@ import PulsePanel from "../components/features/PulsePanel.vue";
 import TopologyPanel from "../components/features/TopologyPanel.vue";
 
 interface Props {
-  infoMode?: "full" | "compact";
   isAdmin: boolean;
   theme: "nightshade" | "sysadmin";
 }
@@ -94,7 +93,7 @@ function statColor(item: (typeof headerStats)[number]) {
     </header>
 
     <!-- Bento grid: PulsePanel (2/3) + Topology (1/3) -->
-    <div class="grid gap-3 flex-1 min-h-0" style="grid-template-columns: 1fr 340px;">
+    <div class="grid gap-3 flex-1 min-h-0 grid-cols-[1fr_340px]">
       <PulsePanel class="min-h-0" />
       <TopologyPanel class="min-h-0" :is-admin="props.isAdmin" />
     </div>
