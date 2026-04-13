@@ -13,11 +13,14 @@ module.exports = {
         },
       },
       fontFamily: {
-        sans: ["Inter", "system-ui", "-apple-system", "sans-serif"],
-        mono: ["JetBrains Mono", "ui-monospace", "monospace"],
+        sans: ["Geist", "Inter", "system-ui", "-apple-system", "sans-serif"],
+        mono: ["Geist Mono", "JetBrains Mono", "ui-monospace", "monospace"],
       },
       borderRadius: {
         DEFAULT: "0.25rem",
+      },
+      backdropBlur: {
+        xs: "4px",
       },
     },
   },

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { RecycleScroller } from "vue-virtual-scroller";
+import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 
 type Theme = "nightshade" | "sysadmin";
 
@@ -63,10 +65,23 @@ const showSystemErrors = ref(false);
 const expandedErrorIds = ref<Set<number>>(new Set());
 
 const filteredLogs = computed(() => {
-  if (showSystemErrors.value) return logs.value;
-  return logs.value.filter(
-    (log) => log.level !== "error" && log.level !== "critical"
-  );
+  let list = logs.value;
+  if (!showSystemErrors.value) {
+    list = list.filter((log) => log.level !== "error" && log.level !== "critical");
+  }
+  const raw = searchQuery.value.trim();
+  if (!raw) return list;
+  // Try regex, fall back to substring
+  let pattern: RegExp | null = null;
+  try {
+    pattern = new RegExp(raw, "i");
+  } catch {
+    // invalid regex — use plain text
+  }
+  return list.filter((log) => {
+    const haystack = `${log.message} ${log.logger} ${log.module ?? ""} ${log.function ?? ""}`;
+    return pattern ? pattern.test(haystack) : haystack.toLowerCase().includes(raw.toLowerCase());
+  });
 });
 
 function toggleErrorExpand(index: number): void {
@@ -320,161 +335,72 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-4 p-4">
-    <div class="flex items-center gap-1 rounded-lg border p-1"
-      :class="isNightshade ? 'border-teal-400/20 bg-black/30' : 'border-slate-700 bg-slate-900/50'"
-    >
+  <div class="space-y-4">
+    <!-- Tab bar -->
+    <div class="flex items-center gap-1 border-b" style="border-color: var(--np-border);">
       <button
-        @click="activeTab = 'application'"
-        class="flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors"
-        :class="activeTab === 'application'
-          ? isNightshade
-            ? 'bg-teal-500/20 text-teal-300 border border-teal-400/30'
-            : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-          : isNightshade
-            ? 'text-teal-100/50 hover:text-teal-100/80 hover:bg-white/5 border border-transparent'
-            : 'text-slate-400 hover:text-slate-300 hover:bg-white/5 border border-transparent'
-        "
+        v-for="tab in ['application', 'syslog']"
+        :key="tab"
+        @click="activeTab = (tab as 'application' | 'syslog')"
+        class="px-4 py-2.5 text-xs font-semibold tracking-wider uppercase border-b-2 -mb-px transition-colors"
+        :class="activeTab === tab
+          ? isNightshade ? 'border-blue-500 text-blue-400' : 'border-amber-500 text-amber-400'
+          : 'border-transparent text-zinc-500 hover:text-zinc-200 hover:border-zinc-600'"
       >
-        Application Logs
-      </button>
-      <button
-        @click="activeTab = 'syslog'"
-        class="flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors"
-        :class="activeTab === 'syslog'
-          ? isNightshade
-            ? 'bg-teal-500/20 text-teal-300 border border-teal-400/30'
-            : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-          : isNightshade
-            ? 'text-teal-100/50 hover:text-teal-100/80 hover:bg-white/5 border border-transparent'
-            : 'text-slate-400 hover:text-slate-300 hover:bg-white/5 border border-transparent'
-        "
-      >
-        Syslog Receiver
+        {{ tab === 'application' ? 'Application Logs' : 'Syslog Receiver' }}
       </button>
     </div>
 
+    <!-- Application Logs tab -->
     <template v-if="activeTab === 'application'">
-      <header class="flex items-center justify-between">
+      <header class="flex flex-wrap items-center gap-3 justify-between">
         <div>
-          <h1
-            class="text-xl font-semibold"
-            :class="isNightshade ? 'text-teal-400' : 'text-amber-400'"
-          >
-            Log Viewer
-          </h1>
-          <p class="text-xs" :class="isNightshade ? 'text-teal-100/60' : 'text-slate-400'">
-            Real-time application logs and diagnostics
-          </p>
+          <h1 class="text-sm font-semibold text-zinc-200">Log Viewer</h1>
+          <p class="text-xs text-zinc-500">Real-time application logs and diagnostics</p>
         </div>
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center gap-2">
           <button
             @click="showSystemErrors = !showSystemErrors"
-            class="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition-colors"
-            :class="
-              showSystemErrors
-                ? isNightshade
-                  ? 'border-rose-500/50 bg-rose-500/10 text-rose-400'
-                  : 'border-rose-500/50 bg-rose-500/10 text-rose-500'
-                : isNightshade
-                ? 'border-teal-400/30 bg-black/30 text-teal-200/70'
-                : 'border-slate-500/30 bg-slate-800/50 text-slate-400'
-            "
+            class="np-cyber-btn"
+            :class="showSystemErrors ? 'border-red-500/50 text-red-400' : ''"
           >
-            {{ showSystemErrors ? 'Hide System Errors' : 'Show System Errors' }}
+            {{ showSystemErrors ? 'Hide Errors' : 'Show Errors' }}
           </button>
-          <button
-            @click="downloadLogsPDF"
-            class="rounded-md border px-3 py-1.5 text-xs transition-colors"
-            :class="
-              isNightshade
-                ? 'border-teal-400/30 bg-black/30 text-teal-200 hover:bg-teal-500/10'
-                : 'border-amber-500/30 bg-slate-800/50 text-slate-300 hover:bg-amber-500/10'
-            "
-            title="Download Logs PDF"
-          >
-            Download PDF
-          </button>
+          <button @click="downloadLogsPDF" class="np-cyber-btn">PDF</button>
           <button
             @click="toggleAutoRefresh"
-            class="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition-colors"
-            :class="
-              autoRefresh
-                ? isNightshade
-                  ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400'
-                  : 'border-green-500/50 bg-green-500/10 text-green-500'
-                : isNightshade
-                ? 'border-teal-400/30 bg-black/30 text-teal-200/70'
-                : 'border-slate-500/30 bg-slate-800/50 text-slate-400'
-            "
+            class="np-cyber-btn flex items-center gap-1.5"
+            :class="autoRefresh ? 'border-emerald-500/50 text-emerald-400' : ''"
           >
-            <span
-              class="h-2 w-2 rounded-full"
-              :class="autoRefresh ? (isNightshade ? 'bg-emerald-400 animate-pulse' : 'bg-green-500 animate-pulse') : 'bg-slate-500'"
-            ></span>
-            {{ autoRefresh ? "Live" : "Paused" }}
+            <span class="w-1.5 h-1.5 rounded-full" :class="autoRefresh ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'"></span>
+            {{ autoRefresh ? 'Live' : 'Paused' }}
           </button>
-          <button
-            @click="loadLogs"
-            :disabled="loading"
-            class="rounded-md border px-3 py-1.5 text-xs transition-colors"
-            :class="
-              isNightshade
-                ? 'border-teal-400/30 bg-black/30 text-teal-200 hover:bg-teal-500/10'
-                : 'border-amber-500/30 bg-slate-800/50 text-slate-300 hover:bg-amber-500/10'
-            "
-          >
-            {{ loading ? "Loading..." : "Refresh" }}
+          <button @click="loadLogs" :disabled="loading" class="np-cyber-btn disabled:opacity-40">
+            {{ loading ? '…' : 'Refresh' }}
           </button>
-          <button
-            @click="clearLogs"
-            class="rounded-md border px-3 py-1.5 text-xs transition-colors"
-            :class="
-              isNightshade
-                ? 'border-rose-400/30 bg-black/30 text-rose-300 hover:bg-rose-500/10'
-                : 'border-rose-500/30 bg-slate-800/50 text-rose-400 hover:bg-rose-500/10'
-            "
-          >
-            Clear
-          </button>
+          <button @click="clearLogs" class="np-cyber-btn border-red-500/30 text-red-400 hover:border-red-400">Clear</button>
         </div>
       </header>
 
+      <!-- Stat chips -->
       <div class="grid gap-2 sm:grid-cols-5">
         <div
           v-for="(count, level) in { debug: stats.debug, info: stats.info, warning: stats.warning, error: stats.error, critical: stats.critical }"
           :key="level"
-          class="flex items-center justify-between rounded-md border px-3 py-2"
-          :class="[
-            (levelColors as any)[level].bg,
-            (levelColors as any)[level].border,
-          ]"
+          class="flex items-center justify-between rounded border px-3 py-2"
+          :class="[(levelColors as any)[level].bg, (levelColors as any)[level].border]"
         >
-          <span
-            class="text-xs font-medium uppercase"
-            :class="(levelColors as any)[level].text"
-          >
-            {{ level }}
-          </span>
-          <span
-            class="font-mono text-sm font-bold"
-            :class="(levelColors as any)[level].text"
-          >
-            {{ count }}
-          </span>
+          <span class="text-[0.65rem] font-semibold uppercase tracking-widest" :class="(levelColors as any)[level].text">{{ level }}</span>
+          <span class="font-mono text-sm font-bold" :class="(levelColors as any)[level].text">{{ count }}</span>
         </div>
       </div>
 
-      <div class="flex items-center gap-3">
+      <!-- Filters -->
+      <div class="flex flex-wrap items-center gap-2">
         <select
           v-model="levelFilter"
           @change="loadLogs"
-          class="rounded-md border px-3 py-2 text-xs"
-          :class="
-            isNightshade
-              ? 'border-teal-400/30 bg-black/50 text-teal-100'
-              : 'border-slate-600 bg-slate-800 text-slate-200'
-          "
+          class="np-neon-input px-3 py-1.5 text-xs"
         >
           <option value="">Network Activity</option>
           <option value="all">All Levels</option>
@@ -484,369 +410,190 @@ onUnmounted(() => {
           <option value="error">Error</option>
           <option value="critical">Critical</option>
         </select>
-        <div class="relative flex-1">
+        <div class="relative flex-1 min-w-[200px]">
+          <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
           <input
             v-model="searchQuery"
-            @keyup.enter="loadLogs"
             type="text"
-            placeholder="Search logs..."
-            class="w-full rounded-md border px-3 py-2 text-xs"
-            :class="
-              isNightshade
-                ? 'border-teal-400/30 bg-black/50 text-teal-100 placeholder-teal-100/40'
-                : 'border-slate-600 bg-slate-800 text-slate-200 placeholder-slate-500'
-            "
+            placeholder="Search or regex (e.g. ERROR|WARN, ^user.*failed)…"
+            class="np-neon-input w-full pl-8 pr-8 py-1.5 text-xs"
           />
           <button
             v-if="searchQuery"
-            @click="searchQuery = ''; loadLogs()"
-            class="absolute right-2 top-1/2 -translate-y-1/2 text-xs"
-            :class="isNightshade ? 'text-teal-400' : 'text-slate-400'"
-          >
-            ×
-          </button>
+            @click="searchQuery = ''"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+          >×</button>
         </div>
       </div>
 
-      <div
-        v-if="error"
-        class="rounded-md border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-400"
-      >
+      <div v-if="error" class="rounded border border-red-500/40 bg-red-500/5 px-4 py-3 text-xs text-red-400">
         {{ error }}
       </div>
 
-      <div
-        class="overflow-hidden rounded-lg border"
-        :class="
-          isNightshade
-            ? 'border-teal-400/30 bg-black/40'
-            : 'border-slate-700 bg-slate-900/50'
-        "
-      >
-        <div
-          v-if="filteredLogs.length === 0 && !loading"
-          class="p-8 text-center text-sm"
-          :class="isNightshade ? 'text-teal-100/50' : 'text-slate-500'"
-        >
+      <!-- Virtualized log list -->
+      <div class="rounded border overflow-hidden" style="border-color: var(--np-border); background: var(--np-surface);">
+        <div v-if="filteredLogs.length === 0 && !loading" class="p-8 text-center text-sm text-zinc-600">
           No logs found
         </div>
-
-        <div v-else class="divide-y" :class="isNightshade ? 'divide-teal-400/10' : 'divide-slate-700/50'">
+        <div v-else-if="loading" class="space-y-1.5 p-2">
+          <div v-for="i in 8" :key="i" class="np-skeleton h-9 rounded"></div>
+        </div>
+        <RecycleScroller
+          v-else
+          class="h-[calc(100vh-28rem)] min-h-[300px]"
+          :items="filteredLogs"
+          :item-size="56"
+          key-field="timestamp"
+          v-slot="{ item: log, index }"
+        >
           <div
-            v-for="(log, index) in filteredLogs"
-            :key="index"
-            class="px-4 py-2 transition-colors hover:bg-white/5"
+            class="flex items-start gap-3 px-4 py-2.5 border-b transition-colors hover:bg-white/[0.025]"
+            style="border-color: var(--np-border-subtle);"
             :class="{ 'cursor-pointer': isErrorLevel(log.level) }"
             @click="isErrorLevel(log.level) ? toggleErrorExpand(index) : undefined"
           >
-            <template v-if="isErrorLevel(log.level) && !expandedErrorIds.has(index)">
-              <div class="flex items-center gap-3">
-                <span
-                  class="shrink-0 rounded px-1.5 py-0.5 text-[0.65rem] font-bold uppercase"
-                  :class="[
-                    (levelColors as any)[log.level]?.bg || levelColors.info.bg,
-                    (levelColors as any)[log.level]?.text || levelColors.info.text,
-                  ]"
-                >
-                  {{ log.level }}
-                </span>
-                <span class="font-mono text-xs" :class="isNightshade ? 'text-teal-300' : 'text-slate-300'">
-                  {{ formatTimestamp(log.timestamp) }}
-                </span>
-                <span
-                  class="min-w-0 flex-1 truncate font-mono text-xs"
-                  :class="isNightshade ? 'text-teal-100/60' : 'text-slate-400'"
-                >
-                  {{ truncateMessage(log.message) }}
-                </span>
-                <span class="shrink-0 text-[0.6rem]" :class="isNightshade ? 'text-teal-100/30' : 'text-slate-500'">▶</span>
-              </div>
-            </template>
+            <!-- Level badge -->
+            <span
+              class="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[0.6rem] font-bold uppercase"
+              :class="[(levelColors as any)[log.level]?.bg || levelColors.info.bg, (levelColors as any)[log.level]?.text || levelColors.info.text]"
+            >{{ log.level }}</span>
 
-            <template v-else>
-              <div class="flex items-start gap-3">
-                <span
-                  class="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[0.65rem] font-bold uppercase"
-                  :class="[
-                    (levelColors as any)[log.level]?.bg || levelColors.info.bg,
-                    (levelColors as any)[log.level]?.text || levelColors.info.text,
-                  ]"
-                >
-                  {{ log.level }}
+            <div class="min-w-0 flex-1">
+              <div class="flex items-baseline gap-2 text-[0.7rem]">
+                <span class="font-mono text-zinc-400 shrink-0">{{ formatTimestamp(log.timestamp) }}</span>
+                <span class="font-mono text-zinc-600 text-[0.6rem] shrink-0">{{ formatDate(log.timestamp) }}</span>
+                <span class="font-mono text-zinc-600 truncate">{{ log.logger }}</span>
+                <span v-if="isErrorLevel(log.level)" class="shrink-0 text-zinc-600">
+                  {{ expandedErrorIds.has(index) ? '▼' : '▶' }}
                 </span>
-                <div class="min-w-0 flex-1">
-                  <div class="flex items-baseline gap-2 text-xs">
-                    <span class="font-mono" :class="isNightshade ? 'text-teal-300' : 'text-slate-300'">
-                      {{ formatTimestamp(log.timestamp) }}
-                    </span>
-                    <span class="text-[0.65rem]" :class="isNightshade ? 'text-teal-100/40' : 'text-slate-500'">
-                      {{ formatDate(log.timestamp) }}
-                    </span>
-                    <span
-                      class="truncate text-[0.65rem] font-mono"
-                      :class="isNightshade ? 'text-purple-400/70' : 'text-amber-400/70'"
-                    >
-                      {{ log.logger }}
-                    </span>
-                    <span
-                      v-if="isErrorLevel(log.level)"
-                      class="shrink-0 text-[0.6rem]"
-                      :class="isNightshade ? 'text-teal-100/30' : 'text-slate-500'"
-                    >▼</span>
-                  </div>
-                  <p
-                    class="mt-1 break-words font-mono text-xs leading-relaxed"
-                    :class="isNightshade ? 'text-teal-100/90' : 'text-slate-200'"
-                  >
-                    {{ log.message }}
-                  </p>
-                  <div
-                    v-if="log.module || log.function"
-                    class="mt-1 flex items-center gap-2 text-[0.65rem]"
-                    :class="isNightshade ? 'text-teal-100/40' : 'text-slate-500'"
-                  >
-                    <span v-if="log.module">{{ log.module }}</span>
-                    <span v-if="log.function">→ {{ log.function }}()</span>
-                    <span v-if="log.line">:{{ log.line }}</span>
-                  </div>
-                </div>
               </div>
-            </template>
+              <p
+                class="mt-0.5 font-mono text-xs text-zinc-300 leading-relaxed"
+                :class="isErrorLevel(log.level) && !expandedErrorIds.has(index) ? 'truncate' : 'break-words'"
+              >{{ log.message }}</p>
+              <div
+                v-if="expandedErrorIds.has(index) && (log.module || log.function)"
+                class="mt-0.5 flex items-center gap-1.5 text-[0.6rem] text-zinc-600 font-mono"
+              >
+                <span v-if="log.module">{{ log.module }}</span>
+                <span v-if="log.function">→ {{ log.function }}()</span>
+                <span v-if="log.line">:{{ log.line }}</span>
+              </div>
+            </div>
           </div>
-        </div>
+        </RecycleScroller>
       </div>
 
-      <p
-        class="text-center text-xs"
-        :class="isNightshade ? 'text-teal-100/40' : 'text-slate-500'"
-      >
-        Showing {{ filteredLogs.length }} of {{ stats.total }} logs
+      <p class="text-center text-[0.65rem] text-zinc-600">
+        Showing {{ filteredLogs.length }} of {{ stats.total }} log entries
       </p>
     </template>
 
+    <!-- Syslog tab -->
     <template v-if="activeTab === 'syslog'">
-      <header class="flex items-center justify-between">
+      <header class="flex flex-wrap items-center gap-3 justify-between">
         <div>
-          <h1
-            class="text-xl font-semibold"
-            :class="isNightshade ? 'text-teal-400' : 'text-amber-400'"
-          >
-            Syslog Receiver
-          </h1>
-          <p class="text-xs" :class="isNightshade ? 'text-teal-100/60' : 'text-slate-400'">
-            UDP syslog listener on port {{ syslogStatus.port }}
-          </p>
+          <h1 class="text-sm font-semibold text-zinc-200">Syslog Receiver</h1>
+          <p class="text-xs text-zinc-500">UDP syslog listener — port {{ syslogStatus.port }}</p>
         </div>
-        <div class="flex items-center gap-3">
-          <div class="flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs"
-            :class="isNightshade ? 'border-teal-400/20 bg-black/30' : 'border-slate-700 bg-slate-900/50'"
-          >
-            <span class="h-2 w-2 rounded-full"
-              :class="syslogStatus.running ? (isNightshade ? 'bg-emerald-400 animate-pulse' : 'bg-green-500 animate-pulse') : 'bg-slate-500'"
-            ></span>
-            <span :class="isNightshade ? 'text-teal-100/70' : 'text-slate-400'">
-              {{ syslogStatus.running ? 'Running' : 'Stopped' }}
-            </span>
-            <span class="font-mono" :class="isNightshade ? 'text-teal-300' : 'text-slate-300'">
-              {{ syslogStatus.message_count }} msgs
-            </span>
+        <div class="flex flex-wrap items-center gap-2">
+          <!-- Status pip -->
+          <div class="flex items-center gap-2 rounded border px-3 py-1.5 text-xs" style="border-color: var(--np-border);">
+            <span class="w-1.5 h-1.5 rounded-full" :class="syslogStatus.running ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'"></span>
+            <span class="text-zinc-400">{{ syslogStatus.running ? 'Running' : 'Stopped' }}</span>
+            <span class="font-mono text-zinc-300">{{ syslogStatus.message_count }} msgs</span>
           </div>
           <button
             @click="toggleSyslogListener"
             :disabled="syslogToggling"
-            class="rounded-md border px-3 py-1.5 text-xs font-medium transition-colors"
-            :class="syslogStatus.running
-              ? isNightshade
-                ? 'border-rose-400/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20'
-                : 'border-rose-500/30 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'
-              : isNightshade
-                ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
-                : 'border-green-500/30 bg-green-500/10 text-green-400 hover:bg-green-500/20'
-            "
+            class="np-cyber-btn"
+            :class="syslogStatus.running ? 'border-red-500/40 text-red-400' : 'border-emerald-500/40 text-emerald-400'"
           >
-            {{ syslogToggling ? '...' : syslogStatus.running ? 'Stop Listener' : 'Start Listener' }}
+            {{ syslogToggling ? '…' : syslogStatus.running ? 'Stop' : 'Start' }}
           </button>
-          <button
-            @click="loadSyslogMessages"
-            :disabled="syslogLoading"
-            class="rounded-md border px-3 py-1.5 text-xs transition-colors"
-            :class="
-              isNightshade
-                ? 'border-teal-400/30 bg-black/30 text-teal-200 hover:bg-teal-500/10'
-                : 'border-amber-500/30 bg-slate-800/50 text-slate-300 hover:bg-amber-500/10'
-            "
-          >
-            {{ syslogLoading ? "Loading..." : "Refresh" }}
+          <button @click="loadSyslogMessages" :disabled="syslogLoading" class="np-cyber-btn disabled:opacity-40">
+            {{ syslogLoading ? '…' : 'Refresh' }}
           </button>
-          <button
-            @click="clearSyslogMessages"
-            class="rounded-md border px-3 py-1.5 text-xs transition-colors"
-            :class="
-              isNightshade
-                ? 'border-rose-400/30 bg-black/30 text-rose-300 hover:bg-rose-500/10'
-                : 'border-rose-500/30 bg-slate-800/50 text-rose-400 hover:bg-rose-500/10'
-            "
-          >
-            Clear All
-          </button>
+          <button @click="clearSyslogMessages" class="np-cyber-btn border-red-500/30 text-red-400 hover:border-red-400">Clear All</button>
         </div>
       </header>
 
-      <div class="flex items-center gap-3">
-        <select
-          v-model="syslogSeverityFilter"
-          @change="syslogApplyFilters"
-          class="rounded-md border px-3 py-2 text-xs"
-          :class="
-            isNightshade
-              ? 'border-teal-400/30 bg-black/50 text-teal-100'
-              : 'border-slate-600 bg-slate-800 text-slate-200'
-          "
-        >
+      <!-- Syslog filters -->
+      <div class="flex flex-wrap items-center gap-2">
+        <select v-model="syslogSeverityFilter" @change="syslogApplyFilters" class="np-neon-input px-3 py-1.5 text-xs">
           <option value="">All Severities</option>
-          <option value="Emergency">Emergency</option>
-          <option value="Alert">Alert</option>
-          <option value="Critical">Critical</option>
-          <option value="Error">Error</option>
-          <option value="Warning">Warning</option>
-          <option value="Notice">Notice</option>
-          <option value="Info">Info</option>
-          <option value="Debug">Debug</option>
+          <option v-for="s in ['Emergency','Alert','Critical','Error','Warning','Notice','Info','Debug']" :key="s" :value="s">{{ s }}</option>
         </select>
         <input
           v-model="syslogSourceFilter"
           @keyup.enter="syslogApplyFilters"
           type="text"
-          placeholder="Source IP..."
-          class="rounded-md border px-3 py-2 text-xs w-40"
-          :class="
-            isNightshade
-              ? 'border-teal-400/30 bg-black/50 text-teal-100 placeholder-teal-100/40'
-              : 'border-slate-600 bg-slate-800 text-slate-200 placeholder-slate-500'
-          "
+          placeholder="Source IP…"
+          class="np-neon-input px-3 py-1.5 text-xs w-36"
         />
-        <div class="relative flex-1">
+        <div class="relative flex-1 min-w-[160px]">
           <input
             v-model="syslogSearchFilter"
             @keyup.enter="syslogApplyFilters"
             type="text"
-            placeholder="Search messages..."
-            class="w-full rounded-md border px-3 py-2 text-xs"
-            :class="
-              isNightshade
-                ? 'border-teal-400/30 bg-black/50 text-teal-100 placeholder-teal-100/40'
-                : 'border-slate-600 bg-slate-800 text-slate-200 placeholder-slate-500'
-            "
+            placeholder="Search messages…"
+            class="np-neon-input w-full px-3 pr-8 py-1.5 text-xs"
           />
           <button
             v-if="syslogSearchFilter"
             @click="syslogSearchFilter = ''; syslogApplyFilters()"
-            class="absolute right-2 top-1/2 -translate-y-1/2 text-xs"
-            :class="isNightshade ? 'text-teal-400' : 'text-slate-400'"
-          >
-            ×
-          </button>
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+          >×</button>
         </div>
       </div>
 
-      <div
-        v-if="syslogError"
-        class="rounded-md border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-400"
-      >
+      <div v-if="syslogError" class="rounded border border-red-500/40 bg-red-500/5 px-4 py-3 text-xs text-red-400">
         {{ syslogError }}
       </div>
 
-      <div
-        class="overflow-hidden rounded-lg border"
-        :class="
-          isNightshade
-            ? 'border-teal-400/30 bg-black/40'
-            : 'border-slate-700 bg-slate-900/50'
-        "
-      >
-        <div
-          v-if="syslogMessages.length === 0 && !syslogLoading"
-          class="p-8 text-center text-sm"
-          :class="isNightshade ? 'text-teal-100/50' : 'text-slate-500'"
-        >
+      <!-- Syslog table -->
+      <div class="overflow-x-auto rounded border" style="border-color: var(--np-border); background: var(--np-surface);">
+        <div v-if="syslogMessages.length === 0 && !syslogLoading" class="p-8 text-center text-sm text-zinc-600">
           No syslog messages found
         </div>
-
         <table v-else class="w-full text-left text-xs">
           <thead>
-            <tr class="border-b" :class="isNightshade ? 'border-teal-400/20' : 'border-slate-700'">
-              <th class="px-4 py-2.5 font-medium" :class="isNightshade ? 'text-teal-300/80' : 'text-slate-400'">Timestamp</th>
-              <th class="px-4 py-2.5 font-medium" :class="isNightshade ? 'text-teal-300/80' : 'text-slate-400'">Source IP</th>
-              <th class="px-4 py-2.5 font-medium" :class="isNightshade ? 'text-teal-300/80' : 'text-slate-400'">Severity</th>
-              <th class="px-4 py-2.5 font-medium" :class="isNightshade ? 'text-teal-300/80' : 'text-slate-400'">Hostname</th>
-              <th class="px-4 py-2.5 font-medium" :class="isNightshade ? 'text-teal-300/80' : 'text-slate-400'">Message</th>
+            <tr>
+              <th class="px-4 py-2.5">Timestamp</th>
+              <th class="px-4 py-2.5">Source IP</th>
+              <th class="px-4 py-2.5">Severity</th>
+              <th class="px-4 py-2.5">Hostname</th>
+              <th class="px-4 py-2.5">Message</th>
             </tr>
           </thead>
-          <tbody class="divide-y" :class="isNightshade ? 'divide-teal-400/10' : 'divide-slate-700/50'">
-            <tr
-              v-for="(msg, idx) in syslogMessages"
-              :key="idx"
-              class="transition-colors hover:bg-white/5"
-            >
-              <td class="whitespace-nowrap px-4 py-2 font-mono" :class="isNightshade ? 'text-teal-300' : 'text-slate-300'">
-                {{ msg.timestamp }}
-              </td>
-              <td class="whitespace-nowrap px-4 py-2 font-mono" :class="isNightshade ? 'text-purple-400/80' : 'text-amber-400/80'">
-                {{ msg.source_ip }}
-              </td>
+          <tbody>
+            <tr v-for="(msg, idx) in syslogMessages" :key="idx" class="transition-colors hover:bg-white/[0.025]">
+              <td class="whitespace-nowrap px-4 py-2 font-mono text-zinc-400">{{ msg.timestamp }}</td>
+              <td class="whitespace-nowrap px-4 py-2 font-mono" style="color: var(--np-accent-secondary);">{{ msg.source_ip }}</td>
               <td class="whitespace-nowrap px-4 py-2">
-                <span
-                  class="rounded px-1.5 py-0.5 text-[0.65rem] font-bold uppercase"
-                  :class="[getSeverityStyle(msg.severity).bg, getSeverityStyle(msg.severity).text]"
-                >
+                <span class="rounded px-1.5 py-0.5 text-[0.6rem] font-bold uppercase"
+                  :class="[getSeverityStyle(msg.severity).bg, getSeverityStyle(msg.severity).text]">
                   {{ msg.severity }}
                 </span>
               </td>
-              <td class="whitespace-nowrap px-4 py-2 font-mono" :class="isNightshade ? 'text-teal-100/70' : 'text-slate-400'">
-                {{ msg.hostname }}
-              </td>
-              <td class="max-w-md truncate px-4 py-2 font-mono" :class="isNightshade ? 'text-teal-100/90' : 'text-slate-200'" :title="msg.message">
-                {{ msg.message }}
-              </td>
+              <td class="whitespace-nowrap px-4 py-2 font-mono text-zinc-500">{{ msg.hostname }}</td>
+              <td class="max-w-md truncate px-4 py-2 font-mono text-zinc-200" :title="msg.message">{{ msg.message }}</td>
             </tr>
           </tbody>
         </table>
       </div>
 
       <div class="flex items-center justify-between">
-        <p class="text-xs" :class="isNightshade ? 'text-teal-100/40' : 'text-slate-500'">
-          Showing {{ syslogMessages.length }} of {{ syslogTotal }} messages
-        </p>
+        <p class="text-[0.65rem] text-zinc-600">Showing {{ syslogMessages.length }} of {{ syslogTotal }} messages</p>
         <div class="flex items-center gap-2">
-          <button
-            @click="syslogPrevPage"
-            :disabled="syslogPage === 0"
-            class="rounded-md border px-3 py-1 text-xs transition-colors disabled:opacity-30"
-            :class="
-              isNightshade
-                ? 'border-teal-400/30 bg-black/30 text-teal-200 hover:bg-teal-500/10'
-                : 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
-            "
-          >
-            Prev
-          </button>
-          <span class="text-xs font-mono" :class="isNightshade ? 'text-teal-100/60' : 'text-slate-400'">
-            {{ syslogPage + 1 }} / {{ syslogTotalPages }}
-          </span>
-          <button
-            @click="syslogNextPage"
-            :disabled="syslogPage >= syslogTotalPages - 1"
-            class="rounded-md border px-3 py-1 text-xs transition-colors disabled:opacity-30"
-            :class="
-              isNightshade
-                ? 'border-teal-400/30 bg-black/30 text-teal-200 hover:bg-teal-500/10'
-                : 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
-            "
-          >
-            Next
-          </button>
+          <button @click="syslogPrevPage" :disabled="syslogPage === 0" class="np-cyber-btn disabled:opacity-30 text-xs px-2 py-1">Prev</button>
+          <span class="font-mono text-xs text-zinc-500">{{ syslogPage + 1 }} / {{ syslogTotalPages }}</span>
+          <button @click="syslogNextPage" :disabled="syslogPage >= syslogTotalPages - 1" class="np-cyber-btn disabled:opacity-30 text-xs px-2 py-1">Next</button>
         </div>
       </div>
     </template>
   </div>
 </template>
+

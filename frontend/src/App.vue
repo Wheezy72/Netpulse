@@ -114,12 +114,13 @@ onMounted(async () => {
 
   if (window.innerWidth < 768) {
     ui.sidebarExpanded = false;
+    localStorage.setItem("np-sidebar-expanded", "false");
   }
 });
 </script>
 
 <template>
-  <div class="min-h-screen flex bg-[#09090b] text-zinc-100">
+  <div class="min-h-screen flex bg-[#050505] text-zinc-100">
     <!-- Command palette (global) -->
     <CommandPalette />
 
@@ -164,11 +165,12 @@ onMounted(async () => {
 
       <!-- Sidebar -->
       <aside
-        class="fixed md:sticky top-0 left-0 z-40 h-screen flex flex-col border-r border-zinc-800 bg-[#0c0c0e] transition-all duration-200 shrink-0"
+        class="fixed md:sticky top-0 left-0 z-40 h-screen flex flex-col border-r transition-all duration-200 shrink-0 np-glass"
         :class="[
           mobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
           ui.sidebarExpanded ? 'w-52' : 'w-14',
         ]"
+        style="border-color: var(--np-glass-border);"
       >
         <!-- Logo -->
           <div class="flex items-center gap-3 px-3 py-4 border-b border-zinc-800">
@@ -298,7 +300,7 @@ onMounted(async () => {
       </aside>
 
       <!-- Main content via Vue Router -->
-      <main class="flex-1 p-4 relative overflow-auto min-h-screen bg-[#09090b]">
+      <main class="flex-1 p-4 relative overflow-auto min-h-screen bg-[#050505]">
         <RouterView v-slot="{ Component }">
           <component
             :is="Component"
