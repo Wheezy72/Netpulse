@@ -354,11 +354,11 @@ onBeforeUnmount(() => {
 
 <template>
   <section
-    class="np-panel relative grid gap-4 p-4 np-scanlines overflow-hidden"
+    class="np-panel relative grid gap-4 p-4 overflow-hidden"
   >
     <header class="np-panel-header">
       <div class="flex items-center gap-2">
-        <span class="np-panel-title np-text-glow">Pulse: Internet Health</span>
+        <span class="np-panel-title">Pulse: Internet Health</span>
         <span class="text-[0.6rem] uppercase tracking-[0.18em] text-slate-400 dark:text-teal-300">
           Latency · Jitter · Packet Loss
         </span>

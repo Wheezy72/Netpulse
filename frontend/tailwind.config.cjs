@@ -1,13 +1,25 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: ["./index.html", "./src/**/*.{vue,ts,js,jsx,tsx}"],
-  // Tailwind v3 supports an array for darkMode: the first element is the
-  // strategy ("class") and subsequent elements are additional selectors that
-  // also activate dark: utilities. ".theme-nightshade" enables dark: classes
-  // when the Nightshade theme is active (applied to <html> by the uiStore).
+  // Use "class" strategy — ".theme-nightshade" activates dark: utilities.
   darkMode: ["class", ".theme-nightshade"],
   theme: {
-    extend: {}
+    extend: {
+      colors: {
+        // Tactical Industrial accent palette
+        brand: {
+          blue: "#3b82f6",
+          amber: "#f59e0b",
+        },
+      },
+      fontFamily: {
+        sans: ["Inter", "system-ui", "-apple-system", "sans-serif"],
+        mono: ["JetBrains Mono", "ui-monospace", "monospace"],
+      },
+      borderRadius: {
+        DEFAULT: "0.25rem",
+      },
+    },
   },
-  plugins: []
+  plugins: [],
 };
