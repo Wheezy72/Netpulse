@@ -9,7 +9,7 @@ COPY frontend ./
 RUN npm run build
 
 # Runtime stage
-FROM nginx:1.27-alpine
+FROM nginx:1.29-alpine
 
 COPY --from=build /frontend/dist /usr/share/nginx/html
 
