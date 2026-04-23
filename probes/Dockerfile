@@ -1,5 +1,5 @@
 # Dockerfile
 
-FROM rust:1.88-bookworm
+FROM rust:1.95-bookworm
 
 # Other instructions remain unchanged...
