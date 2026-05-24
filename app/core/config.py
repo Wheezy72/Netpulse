@@ -82,6 +82,8 @@ class Settings(BaseSettings):
 
     # Packet capture storage
     pcap_storage_dir: str = "/tmp/pcaps"
+    passive_monitor_iface: str = "eth0"
+    enable_passive_monitor: bool = False
 
     # Security / auth
     secret_key: str = "CHANGE_ME_IN_PRODUCTION"
@@ -121,6 +123,23 @@ class Settings(BaseSettings):
     whatsapp_report_template: str = "[NetPulse] Report Generated\n\n{subject}\n\n{body}\n\nTime: {timestamp}"
     whatsapp_health_template: str = "[NetPulse] Health Alert\n\n{subject}\n\nDevice: {device_name} ({device_ip})\nSegment: {segment_name}\n\n{body}\n\nTime: {timestamp}"
     whatsapp_device_template: str = "[NetPulse] Device Alert\n\nDevice: {device_name}\nIP: {device_ip}\nMAC: {device_mac}\nSegment: {segment_name}\n\n{body}\n\nTime: {timestamp}"
+
+    # Splunk HEC telemetry
+    enable_splunk_hec: bool = False
+    splunk_hec_url: str | None = None
+    splunk_hec_token: str | None = None
+    splunk_hec_index: str = "main"
+    splunk_hec_source: str = "netpulse"
+    splunk_hec_sourcetype: str = "_json"
+    splunk_hec_verify_ssl: bool = True
+
+    # Switch isolation / containment
+    switch_mgmt_host: str | None = None
+    switch_mgmt_user: str | None = None
+    switch_mgmt_password: str | None = None
+    switch_mgmt_enable_secret: str | None = None
+    switch_mgmt_device_type: str = "cisco_ios"
+    switch_mgmt_port: int = 22
 
     # Email templates (same variables available)
     email_vuln_template: str = "Device: {device_name} ({device_ip})\nMAC: {device_mac}\nSegment: {segment_name}\n\n{body}"

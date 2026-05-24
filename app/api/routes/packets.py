@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, require_role
+from app.api.deps import db_session, require_compliance_role
 from app.models.packet_capture import PacketHeader
 
 router = APIRouter()
@@ -36,7 +36,7 @@ class PacketQueryResponse(BaseModel):
     "/query",
     response_model=PacketQueryResponse,
     summary="Query packet headers with cursor pagination",
-    dependencies=[Depends(require_role())],
+    dependencies=[Depends(require_compliance_role())],
 )
 async def query_packets(
     db: AsyncSession = Depends(db_session),

@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, require_role
+from app.api.deps import db_session, require_compliance_role
 from app.models.pcap_meta import PcapFile, PcapPacket
 
 router = APIRouter()
@@ -78,7 +78,7 @@ class PcapZeekSummaryResponse(BaseModel):
     "/",
     response_model=List[PcapFileResponse],
     summary="List PCAP files",
-    dependencies=[Depends(require_role())],
+    dependencies=[Depends(require_compliance_role())],
 )
 async def list_pcap_files(
     db: AsyncSession = Depends(db_session),
@@ -114,7 +114,7 @@ async def list_pcap_files(
     "/{pcap_file_id}/packets",
     response_model=PacketQueryResponse,
     summary="Query packets for a PCAP file (cursor pagination)",
-    dependencies=[Depends(require_role())],
+    dependencies=[Depends(require_compliance_role())],
 )
 async def query_pcap_packets(
     pcap_file_id: int,
@@ -200,7 +200,7 @@ async def query_pcap_packets(
     "/{pcap_file_id}/zeek-summary",
     response_model=PcapZeekSummaryResponse,
     summary="Get Zeek summary for a PCAP file",
-    dependencies=[Depends(require_role())],
+    dependencies=[Depends(require_compliance_role())],
 )
 async def get_pcap_zeek_summary(
     pcap_file_id: int,

@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, require_role
+from app.api.deps import db_session, require_compliance_role
 from app.models.device import Device
 from app.models.metric import Metric
 from app.models.script_job import ScriptJob
@@ -95,7 +95,7 @@ class DeviceDetail(BaseModel):
     "",
     response_model=List[DeviceOut],
     summary="List discovered devices",
-    dependencies=[Depends(require_role())],
+    dependencies=[Depends(require_compliance_role())],
 )
 async def list_devices(
     db: AsyncSession = Depends(db_session),
@@ -114,7 +114,7 @@ async def list_devices(
     "/zones",
     response_model=ZoneListResponse,
     summary="List distinct device zones",
-    dependencies=[Depends(require_role())],
+    dependencies=[Depends(require_compliance_role())],
 )
 async def list_zones(db: AsyncSession = Depends(db_session)) -> ZoneListResponse:
     """
@@ -130,7 +130,7 @@ async def list_zones(db: AsyncSession = Depends(db_session)) -> ZoneListResponse
     "/topology",
     response_model=TopologyResponse,
     summary="Get a simple device topology for visualization",
-    dependencies=[Depends(require_role())],
+    dependencies=[Depends(require_compliance_role())],
 )
 async def get_topology(
     db: AsyncSession = Depends(db_session),
@@ -246,7 +246,7 @@ def _guess_device_type(device: Device) -> tuple[Optional[str], Optional[float]]:
     "/{device_id}/detail",
     response_model=DeviceDetail,
     summary="Get detailed view of a device (vulns, scripts, metrics)",
-    dependencies=[Depends(require_role())],
+    dependencies=[Depends(require_compliance_role())],
 )
 async def get_device_detail(
     device_id: int,

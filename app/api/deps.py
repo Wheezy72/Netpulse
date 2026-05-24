@@ -148,6 +148,14 @@ def require_role(*allowed_roles: UserRole):
     return _require
 
 
+def require_compliance_role():
+    return require_role(UserRole.ADMIN, UserRole.OPERATOR, UserRole.AUDITOR)
+
+
+def require_scan_role():
+    return require_role(UserRole.ADMIN, UserRole.OPERATOR)
+
+
 async def require_admin(
     request: Request,
     user: User = Depends(get_current_user),
@@ -178,4 +186,3 @@ async def require_admin(
         pass
 
     return user
-

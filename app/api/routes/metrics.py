@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, require_role
+from app.api.deps import db_session, require_compliance_role
 from app.core.config import settings
 from app.models.metric import Metric
 
@@ -47,7 +47,7 @@ class PulseSummaryResponse(BaseModel):
     "/internet-health-recent",
     response_model=InternetHealthResponse,
     summary="Return recent Internet Health metrics for the Pulse panel",
-    dependencies=[Depends(require_role())],
+    dependencies=[Depends(require_compliance_role())],
 )
 async def internet_health_recent(
     db: AsyncSession = Depends(db_session),
@@ -74,7 +74,7 @@ async def internet_health_recent(
     "/pulse-latest",
     response_model=PulseSummaryResponse,
     summary="Return latest per-target latency/jitter/loss values for the Pulse panel",
-    dependencies=[Depends(require_role())],
+    dependencies=[Depends(require_compliance_role())],
 )
 async def pulse_latest(
     db: AsyncSession = Depends(db_session),

@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.script_job import ScriptJob, ScriptJobStatus
 
 
@@ -35,6 +36,18 @@ def _validate_ping_target(target: str) -> bool:
         return True
     except ValueError:
         return bool(_HOSTNAME_PATTERN.match(target))
+
+
+def _is_allowed_script_path(script_path: Path) -> bool:
+    allowed_roots = [
+        (Path(settings.scripts_base_dir) / settings.scripts_uploads_subdir).resolve(),
+        (Path(settings.scripts_base_dir) / settings.scripts_prebuilt_subdir).resolve(),
+    ]
+    try:
+        resolved = script_path.resolve(strict=True)
+    except Exception:
+        return False
+    return any(resolved == root or root in resolved.parents for root in allowed_roots)
 
 
 @dataclass
@@ -80,7 +93,7 @@ class NetworkTools:
             except Exception:
                 pass
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, _send_rst)
 
     async def ping(self, target: str, count: int = 4, timeout: int = 2) -> dict:
@@ -140,7 +153,7 @@ class NetworkTools:
             except Exception as e:
                 return {"target": target, "success": False, "error": str(e)}
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _ping_sync)
 
     async def port_scan(
@@ -169,7 +182,7 @@ class NetworkTools:
                 except Exception:
                     return False
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             is_open = await loop.run_in_executor(None, _check)
             return (port, is_open)
 
@@ -197,6 +210,8 @@ async def _load_script_callable(script_path: Path) -> Callable[[ScriptContext], 
     """Load the `run` callable from a Python module located at script_path."""
     if not script_path.exists():
         raise FileNotFoundError(f"Script not found at {script_path}")
+    if not _is_allowed_script_path(script_path):
+        raise PermissionError("Script path is outside of the allowed directories")
 
     module_name = f"netpulse_script_{script_path.stem}"
     spec = importlib.util.spec_from_file_location(module_name, str(script_path))

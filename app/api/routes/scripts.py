@@ -9,7 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFi
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, require_admin, require_role
+from app.api.deps import db_session, require_admin, require_compliance_role
 from app.core.config import settings
 from app.models.script_job import ScriptJob, ScriptJobStatus
 from app.models.user import User
@@ -86,7 +86,7 @@ async def upload_script(
     summary="Get prebuilt script allowlist configuration",
 )
 async def get_prebuilt_script_settings(
-    _user: User = Depends(require_role()),
+    _user: User = Depends(require_compliance_role()),
 ) -> PrebuiltScriptSettingsResponse:
     scripts_dir = Path(settings.scripts_base_dir) / settings.scripts_prebuilt_subdir
     scripts_dir.mkdir(parents=True, exist_ok=True)
@@ -158,7 +158,7 @@ async def run_prebuilt_script(
 async def get_script_job(
     job_id: int,
     db: AsyncSession = Depends(db_session),
-    _user: User = Depends(require_role()),
+    _user: User = Depends(require_compliance_role()),
 ) -> dict[str, Any]:
     job = await db.get(ScriptJob, job_id)
     if job is None:
