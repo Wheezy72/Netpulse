@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import deque
 from typing import Any, Iterable, List
 
@@ -29,7 +29,7 @@ probe_telemetry: deque[dict[str, Any]] = deque(maxlen=1024)
 async def record_probe_telemetry(payload: dict[str, Any], source: str = "recon") -> None:
     entry = {
         "source": source,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         **payload,
     }
     probe_telemetry.append(entry)
@@ -114,7 +114,7 @@ async def passive_arp_discovery(db: AsyncSession, iface: str = "eth0", duration:
         return observed
 
     pairs = await asyncio.to_thread(_capture)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     await record_probe_telemetry(
         {

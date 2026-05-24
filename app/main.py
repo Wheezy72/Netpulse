@@ -95,12 +95,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     setup_logging()
     await init_pool()
-    passive_monitor_task: asyncio.Task[None] | None = None
-    if settings.enable_passive_monitor:
-        passive_monitor_task = asyncio.create_task(run_passive_monitor())
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    passive_monitor_task: asyncio.Task[None] | None = None
     try:
+        if settings.enable_passive_monitor:
+            passive_monitor_task = asyncio.create_task(run_passive_monitor())
         yield
     finally:
         if passive_monitor_task is not None:

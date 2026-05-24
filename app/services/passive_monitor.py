@@ -50,7 +50,7 @@ def _signature_for_packet(packet: Packet) -> DiscoveryEvent | None:
     if packet.haslayer(DHCP) and packet.haslayer(BOOTP):
         bootp = packet[BOOTP]
         for option in packet[DHCP].options:
-            if isinstance(option, tuple) and option[0] == "message-type" and option[1] in {1, "discover"}:
+            if isinstance(option, tuple) and option[0] == "message-type" and option[1] == 1:
                 chaddr = ":".join(f"{b:02x}" for b in bytes(bootp.chaddr[:6]))
                 signature = f"dhcp.discover:{chaddr}"
                 return DiscoveryEvent(

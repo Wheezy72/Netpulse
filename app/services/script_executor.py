@@ -44,7 +44,7 @@ def _is_allowed_script_path(script_path: Path) -> bool:
         (Path(settings.scripts_base_dir) / settings.scripts_prebuilt_subdir).resolve(),
     ]
     try:
-        resolved = script_path.resolve(strict=False)
+        resolved = script_path.resolve(strict=True)
     except Exception:
         return False
     return any(resolved == root or root in resolved.parents for root in allowed_roots)

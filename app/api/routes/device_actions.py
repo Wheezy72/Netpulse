@@ -328,7 +328,9 @@ async def isolate_switch_port_endpoint(
     try:
         result = await isolate_switch_port(request.port, reason=request.reason)
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        logger.exception("Switch port isolation failed")
+        raise HTTPException(status_code=503, detail="Switch management operation failed") from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.exception("Invalid switch port isolation request")
+        raise HTTPException(status_code=400, detail="Invalid switch port isolation request") from exc
     return {"status": "isolated", "port": request.port, "result": result}
