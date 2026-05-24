@@ -16,8 +16,9 @@ Alembic is still used for production schema migrations; ``create_all`` is
 idempotent and safe to run on every boot.
 """
 
+import asyncio
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -35,6 +36,7 @@ from app.core.config import settings
 from app.core.redis import close_pool, init_pool
 from app.db.base import Base
 from app.db.session import engine
+from app.services.passive_monitor import run_passive_monitor
 from app.services.logging_service import setup_logging
 
 import app.models  # noqa: F401 – ensure all models are registered with SQLAlchemy
@@ -93,11 +95,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     setup_logging()
     await init_pool()
+    passive_monitor_task: asyncio.Task[None] | None = None
+    if settings.enable_passive_monitor:
+        passive_monitor_task = asyncio.create_task(run_passive_monitor())
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     try:
         yield
     finally:
+        if passive_monitor_task is not None:
+            passive_monitor_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await passive_monitor_task
         await engine.dispose()
         await close_pool()
 

@@ -15,10 +15,12 @@ class UserRole(str, Enum):
     Roles are intentionally minimal:
       - admin: can perform destructive operations.
       - operator: read-only / non-destructive access.
+      - auditor: compliance-only read access.
     """
 
     ADMIN = "admin"
     OPERATOR = "operator"
+    AUDITOR = "auditor"
 
 
 class User(Base):

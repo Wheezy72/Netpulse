@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable, List
+from collections import deque
+from typing import Any, Iterable, List
 
 import nmap  # type: ignore[import-untyped]
 from scapy.all import ARP, Ether, sniff  # type: ignore[import-untyped]
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.device import Device
 from app.models.vulnerability import Vulnerability, VulnerabilitySeverity
+from app.services.splunk_service import get_splunk_service
 
 
 @dataclass
@@ -19,6 +21,25 @@ class DetectedService:
     port: int
     protocol: str
     service: str
+
+
+probe_telemetry: deque[dict[str, Any]] = deque(maxlen=1024)
+
+
+async def record_probe_telemetry(payload: dict[str, Any], source: str = "recon") -> None:
+    entry = {
+        "source": source,
+        "timestamp": datetime.utcnow().isoformat(),
+        **payload,
+    }
+    probe_telemetry.append(entry)
+    await get_splunk_service().emit(
+        {
+            "type": "probe.telemetry",
+            "severity": payload.get("severity", "info"),
+            "event": entry,
+        }
+    )
 
 
 async def run_nmap_scan(db: AsyncSession, target: str) -> List[DetectedService]:
@@ -51,6 +72,14 @@ async def run_nmap_scan(db: AsyncSession, target: str) -> List[DetectedService]:
         return services
 
     services = await asyncio.to_thread(_scan)
+    await record_probe_telemetry(
+        {
+            "event_type": "nmap.scan",
+            "target": target,
+            "service_count": len(services),
+            "services": [service.__dict__ for service in services],
+        }
+    )
 
     # Optionally, we could upsert the Device and create basic Vulnerability stubs
     # here based on service fingerprints. For now, this function focuses on
@@ -86,6 +115,16 @@ async def passive_arp_discovery(db: AsyncSession, iface: str = "eth0", duration:
 
     pairs = await asyncio.to_thread(_capture)
     now = datetime.utcnow()
+
+    await record_probe_telemetry(
+        {
+            "event_type": "passive.arp.discovery",
+            "iface": iface,
+            "observed_pairs": len(pairs),
+            "severity": "info",
+        },
+        source="passive_arp",
+    )
 
     for ip, mac in pairs:
         # Upsert behaviour: try to find an existing device by IP, else create new.

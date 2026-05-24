@@ -4,7 +4,6 @@ from app.api.routes import (
     auth,
     backup,
     captures,
-    chatbot,
     device_actions,
     devices,
     google_auth,
@@ -47,7 +46,6 @@ api_router.include_router(network_segments.router, prefix="/network-segments", t
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
 api_router.include_router(playbooks.router, prefix="/playbooks", tags=["playbooks"])
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
-api_router.include_router(chatbot.router, prefix="/chatbot", tags=["chatbot"])
 api_router.include_router(insights.router, prefix="/insights", tags=["insights"])
 api_router.include_router(threat_intel.router, prefix="/threat-intel", tags=["threat-intel"])
 api_router.include_router(logs.router, prefix="/logs", tags=["logs"])

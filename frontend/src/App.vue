@@ -12,7 +12,6 @@ import { useRouter, useRoute } from "vue-router";
 import { useMagicKeys } from "@vueuse/core";
 
 import CommandPalette from "./components/features/CommandPalette.vue";
-import ChatBot from "./components/features/ChatBot.vue";
 import Toast from "./components/ui/Toast.vue";
 
 import { useAuthStore } from "./stores/auth";
@@ -24,7 +23,6 @@ const auth = useAuthStore();
 const ui = useUiStore();
 
 const toastRef = ref<InstanceType<typeof Toast> | null>(null);
-const aiDrawerOpen = ref(false);
 const mobileMenuOpen = ref(false);
 const logoError = ref(false);
 
@@ -281,7 +279,7 @@ onMounted(async () => {
             <div v-if="ui.sidebarExpanded" class="flex-1 min-w-0">
               <p class="text-xs truncate text-zinc-300">{{ auth.user?.email || "Operator" }}</p>
               <p class="text-[0.6rem] uppercase tracking-widest" :class="isNightshade ? 'text-blue-400' : 'text-amber-400'">
-                {{ auth.user?.role === "admin" ? "Admin" : "Operator" }}
+                {{ auth.user?.role === "admin" ? "Admin" : auth.user?.role === "auditor" ? "Auditor" : "Operator" }}
               </p>
             </div>
           </div>
@@ -316,38 +314,6 @@ onMounted(async () => {
         </RouterView>
       </main>
 
-      <!-- AI chatbot FAB -->
-      <button
-        type="button"
-        @click="aiDrawerOpen = !aiDrawerOpen"
-        class="fixed bottom-5 right-5 z-[70] w-12 h-12 rounded border flex items-center justify-center transition-colors duration-200"
-        :class="[
-          isNightshade
-            ? 'bg-zinc-900 border-blue-500/40 text-blue-400 hover:bg-blue-500/10 hover:border-blue-400'
-            : 'bg-zinc-900 border-amber-500/40 text-amber-400 hover:bg-amber-500/10 hover:border-amber-400',
-        ]"
-      >
-        <svg v-if="!aiDrawerOpen" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-        </svg>
-        <svg v-else class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
-
-      <div
-        class="fixed inset-0 z-[55] bg-black/60 transition-opacity duration-300"
-        :class="aiDrawerOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'"
-        @click="aiDrawerOpen = false"
-      />
-      <div
-        class="fixed inset-y-0 right-0 z-[60] w-full max-w-md transform transition-transform duration-300"
-        :class="aiDrawerOpen ? 'translate-x-0' : 'translate-x-full'"
-      >
-        <div class="h-full p-4">
-          <ChatBot class="h-full" :theme="ui.theme" @close="aiDrawerOpen = false" />
-        </div>
-      </div>
     </template>
 
     <Toast ref="toastRef" :theme="ui.theme" />

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, require_admin, require_role
+from app.api.deps import db_session, require_admin, require_scan_role
 from app.services.alerts import send_system_alert
 from app.services.recon import DetectedService, run_nmap_scan
 
@@ -191,7 +191,7 @@ def build_recommendations(services: List[ServicePort]) -> List[NmapRecommendatio
     "/nmap-recommendations",
     response_model=NmapRecommendationResponse,
     summary="Get context-aware Nmap script recommendations for a target",
-    dependencies=[Depends(require_role())],
+    dependencies=[Depends(require_scan_role())],
 )
 async def nmap_recommendations(services: List[ServicePort]) -> NmapRecommendationResponse:
     """Return suggested Nmap scripts based on detected services/ports."""

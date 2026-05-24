@@ -13,10 +13,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, require_admin, require_role
+from app.api.deps import db_session, require_admin, require_compliance_role
 from app.core.config import settings
 from app.models.enforcement_action import EnforcementAction
 from app.models.user import User
+from app.services.enforcement import isolate_switch_port
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -72,6 +73,11 @@ class ArpFixRequest(BaseModel):
 class AttemptKickRequest(BaseModel):
     ip: str
     duration_s: float = Field(8.0, ge=1.0, le=60.0)
+
+
+class IsolateSwitchPortRequest(BaseModel):
+    port: str
+    reason: str | None = None
 
 
 @router.post("/block")
@@ -154,7 +160,7 @@ async def unblock_device(
 @router.get("/blocked")
 async def get_blocked_devices(
     db: AsyncSession = Depends(db_session),
-    _user: User = Depends(require_role()),
+    _user: User = Depends(require_compliance_role()),
 ) -> List[Dict[str, Any]]:
     stmt = select(EnforcementAction).order_by(EnforcementAction.created_at.desc())
     actions = (await db.execute(stmt)).scalars().all()
@@ -312,3 +318,17 @@ async def attempt_kick(
 
     asyncio.create_task(_attempt_kick_worker(request.ip, request.duration_s))
     return {"status": "kick_scheduled", "ip": request.ip, "duration_s": request.duration_s}
+
+
+@router.post("/switch-port/isolate")
+async def isolate_switch_port_endpoint(
+    request: IsolateSwitchPortRequest,
+    _user: User = Depends(require_admin),
+) -> Dict[str, Any]:
+    try:
+        result = await isolate_switch_port(request.port, reason=request.reason)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "isolated", "port": request.port, "result": result}
