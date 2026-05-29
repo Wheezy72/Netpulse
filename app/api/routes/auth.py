@@ -8,7 +8,8 @@ from datetime import datetime, timedelta
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, EmailStr
+from email_validator import EmailNotValidError, validate_email
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,20 +46,48 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
-class LoginRequest(BaseModel):
-    email: EmailStr
+def _normalize_email(value: str) -> str:
+    if not value:
+        raise ValueError("Email is required")
+    try:
+        validated = validate_email(
+            value,
+            check_deliverability=False,
+        )
+        return validated.normalized
+    except EmailNotValidError as exc:
+        # In non-production environments, allow common local/reserved domains
+        # (e.g., admin@netpulse.local) to reduce friction in dev/demo setups.
+        if settings.environment.lower() != "production":
+            normalized = value.strip().lower()
+            if "@" in normalized:
+                domain = normalized.split("@", 1)[1]
+                if domain in {"local", "localhost"} or domain.endswith(".local") or domain.endswith(".localhost"):
+                    return normalized
+        raise ValueError(str(exc)) from exc
+
+
+class EmailRequest(BaseModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return _normalize_email(value)
+
+
+class LoginRequest(EmailRequest):
     password: str
 
 
-class CreateUserRequest(BaseModel):
-    email: EmailStr
+class CreateUserRequest(EmailRequest):
     password: str
     full_name: str | None = None
 
 
 class UserMeResponse(BaseModel):
     id: int
-    email: EmailStr
+    email: str
     full_name: str | None = None
     role: UserRole
 
@@ -171,8 +200,8 @@ async def create_user(
     return {"id": user.id, "email": user.email, "role": user.role.value}
 
 
-class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
+class ForgotPasswordRequest(EmailRequest):
+    pass
 
 
 class ResetPasswordRequest(BaseModel):
