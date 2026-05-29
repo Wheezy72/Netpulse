@@ -445,7 +445,7 @@ class RunGeneratedScriptRequest(BaseModel):
 
 @router.post(
     "/run-generated",
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_200_OK,
     summary="Return an AI-generated script for review (execution disabled)",
 )
 async def run_generated_script(

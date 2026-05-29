@@ -39,7 +39,8 @@ pub fn get_fragile_device_bpf_filter() -> String {
     let ports = get_excluded_ports();
     if ports.is_empty() {
         // If no ports are excluded, return a filter that allows everything
-        "not (tcp port 0)".to_string()
+        // Using "tcp or udp" is more explicit than "not (tcp port 0)"
+        "tcp or udp".to_string()
     } else {
         let port_conditions = ports
             .iter()
@@ -50,7 +51,12 @@ pub fn get_fragile_device_bpf_filter() -> String {
     }
 }
 
-/// Legacy constant name for backward compatibility
+/// Legacy constant name for backward compatibility.
+/// 
+/// **NOTE**: This constant uses hardcoded ports and will NOT reflect custom EXCLUDED_PORTS
+/// environment variable values. Use get_fragile_device_bpf_filter() at runtime to get
+/// the configured BPF filter that respects EXCLUDED_PORTS. This constant is provided
+/// only for legacy compatibility and should be avoided in new code.
 pub const FRAGILE_DEVICE_BPF_FILTER: &str =
     "not (tcp port 2575 or tcp port 104 or tcp port 2762)";
 

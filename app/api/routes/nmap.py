@@ -229,12 +229,18 @@ def _is_restricted_segment(target: str) -> bool:
 
     These ranges must never be scanned with active techniques (SYN probes, etc.).
     Passive ARP / Zeek is the only allowed discovery method for these segments.
+    
+    Supports both new (restricted_vlan_cidrs) and legacy (medical_iot_vlan_cidrs)
+    configuration variables for backward compatibility. Deduplicates CIDRs to avoid
+    redundant checks during migration.
     """
-    if not settings.restricted_vlan_cidrs and not settings.medical_iot_vlan_cidrs:
-        # Support both old and new environment variable names
+    # Merge and deduplicate both old and new config for backward compatibility
+    cidrs_set = set(settings.restricted_vlan_cidrs or [])
+    if settings.medical_iot_vlan_cidrs:
+        cidrs_set.update(settings.medical_iot_vlan_cidrs)
+    
+    if not cidrs_set:
         return False
-
-    cidrs = settings.restricted_vlan_cidrs or settings.medical_iot_vlan_cidrs
 
     try:
         # Handle plain IP or CIDR notation from the target string.
@@ -244,7 +250,7 @@ def _is_restricted_segment(target: str) -> bool:
         # Operators must ensure restricted/fragile VLANs are not reachable by hostname.
         return False  # Allow the scan; hostname safety must be enforced at network level.
 
-    for cidr in cidrs:
+    for cidr in cidrs_set:
         try:
             if addr in ipaddress.ip_network(cidr, strict=False):
                 return True

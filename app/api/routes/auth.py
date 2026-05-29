@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 from datetime import datetime, timedelta
 from typing import Any, Dict
@@ -197,8 +198,6 @@ async def create_user(
         open signups entirely; additional users must be created by an admin
         through a controlled path (e.g. internal tooling or SSO provisioning).
     """
-    import os
-    
     existing_any = await db.execute(select(User).limit(1))
     first_user = existing_any.scalar_one_or_none()
 
