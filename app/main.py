@@ -36,7 +36,7 @@ from app.api.routes import api_router
 from app.core.config import settings
 from app.core.redis import close_pool, init_pool
 from app.db.base import Base
-from app.db.session import engine, async_session_factory
+from app.db.session import engine, async_session_factory, get_db
 from app.services.passive_monitor import run_passive_monitor
 from app.services.logging_service import setup_logging
 from app.api.deps import get_password_hash
@@ -101,10 +101,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     if settings.environment.lower() != "production" and settings.bootstrap_admin_enabled:
-        session = async_session_factory()
-        try:
-            existing_any = await session.execute(select(User).limit(1))
-            if existing_any.scalar_one_or_none() is None:
+        async with async_session_factory() as session:  # type: ignore
+            result = await session.execute(select(User).limit(1))  # type: ignore
+            if result.scalar_one_or_none() is None:
                 bootstrap_user = User(
                     email=settings.bootstrap_admin_email,
                     full_name=settings.bootstrap_admin_full_name,
@@ -112,9 +111,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     role=UserRole.ADMIN,
                 )
                 session.add(bootstrap_user)
-                await session.commit()
-        finally:
-            await session.close()
+                await session.commit()  # type: ignore
     passive_monitor_task: asyncio.Task[None] | None = None
     try:
         if settings.enable_passive_monitor:
@@ -138,7 +135,7 @@ app = FastAPI(
 )
 
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore
 
 from slowapi.middleware import SlowAPIMiddleware
 app.add_middleware(SlowAPIMiddleware)
