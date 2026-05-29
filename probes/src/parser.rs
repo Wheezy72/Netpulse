@@ -8,13 +8,56 @@ use pnet_packet::{
     udp::UdpPacket,
     Packet,
 };
+use std::env;
+use std::sync::OnceLock;
 
 use crate::event::PacketEvent;
 
-/// BPF deny-list that drops HL7 (2575), DICOM (104), and DICOM-TLS (2762)
-/// before packets reach userspace — prevents passive capture from touching
-/// medical-grade devices.
-pub const MEDICAL_PORT_BPF_DENY_FILTER: &str =
+/// Get the list of excluded TCP ports from environment variable or use defaults.
+/// Defaults to TCP ports 2575 (HL7), 104 (DICOM), and 2762 (DICOM-TLS).
+/// Can be overridden via EXCLUDED_PORTS environment variable (comma-separated).
+fn get_excluded_ports() -> &'static Vec<u16> {
+    static EXCLUDED_PORTS: OnceLock<Vec<u16>> = OnceLock::new();
+    EXCLUDED_PORTS.get_or_init(|| {
+        if let Ok(env_var) = env::var("EXCLUDED_PORTS") {
+            env_var
+                .split(',')
+                .filter_map(|s| s.trim().parse::<u16>().ok())
+                .collect()
+        } else {
+            // Default fragile device ports
+            vec![2575, 104, 2762]
+        }
+    })
+}
+
+/// Generate a BPF deny-list filter that excludes fragile device ports.
+/// This filter drops packets on fragile/restricted device ports before
+/// they reach userspace — prevents passive capture from interfering with
+/// critical devices.
+pub fn get_fragile_device_bpf_filter() -> String {
+    let ports = get_excluded_ports();
+    if ports.is_empty() {
+        // If no ports are excluded, return a filter that allows everything
+        // Using "tcp or udp" is more explicit than "not (tcp port 0)"
+        "tcp or udp".to_string()
+    } else {
+        let port_conditions = ports
+            .iter()
+            .map(|p| format!("tcp port {}", p))
+            .collect::<Vec<_>>()
+            .join(" or ");
+        format!("not ({})", port_conditions)
+    }
+}
+
+/// Legacy constant name for backward compatibility.
+/// 
+/// **NOTE**: This constant uses hardcoded ports and will NOT reflect custom EXCLUDED_PORTS
+/// environment variable values. Use get_fragile_device_bpf_filter() at runtime to get
+/// the configured BPF filter that respects EXCLUDED_PORTS. This constant is provided
+/// only for legacy compatibility and should be avoided in new code.
+pub const FRAGILE_DEVICE_BPF_FILTER: &str =
     "not (tcp port 2575 or tcp port 104 or tcp port 2762)";
 
 /// Parse a raw libpcap frame into a [`PacketEvent`].
@@ -88,20 +131,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bpf_deny_filter_contains_all_medical_ports() {
+    fn bpf_deny_filter_contains_all_fragile_device_ports() {
+        let filter = get_fragile_device_bpf_filter();
         for protected_port in &["2575", "104", "2762"] {
             assert!(
-                MEDICAL_PORT_BPF_DENY_FILTER.contains(protected_port),
-                "BPF deny-filter must reference medical/DICOM port {protected_port}",
+                filter.contains(protected_port),
+                "BPF deny-filter must reference fragile device port {protected_port}",
             );
         }
     }
 
     #[test]
     fn bpf_deny_filter_uses_negation() {
+        let filter = get_fragile_device_bpf_filter();
         assert!(
-            MEDICAL_PORT_BPF_DENY_FILTER.contains("not"),
-            "BPF filter must contain 'not' to exclude medical ports",
+            filter.contains("not"),
+            "BPF filter must contain 'not' to exclude fragile device ports",
         );
     }
 

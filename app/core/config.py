@@ -69,10 +69,12 @@ class Settings(BaseSettings):
     # Netmiko device_type string, e.g. "cisco_ios", "mikrotik_routeros", "juniper_junos"
     rogue_dhcp_switch_type: str = "cisco_ios"
 
-    # Medical / IoT VLAN protection.
-    # List of CIDR ranges that must never receive active Nmap SYN scans.
+    # Restricted / fragile VLAN protection.
+    # List of CIDR ranges that must never receive active scanning (e.g., SYN probes).
     # Passive ARP / Zeek sniffing is the only allowed discovery method for these ranges.
-    # Example: MEDICAL_IOT_VLAN_CIDRS='["10.20.0.0/16","192.168.50.0/24"]'
+    # Example: RESTRICTED_VLAN_CIDRS='["10.20.0.0/16","192.168.50.0/24"]'
+    restricted_vlan_cidrs: List[str] = Field(default_factory=list)
+    # Legacy name for backward compatibility
     medical_iot_vlan_cidrs: List[str] = Field(default_factory=list)
 
     # Paths

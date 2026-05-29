@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 from datetime import datetime, timedelta
 from typing import Any, Dict
@@ -46,8 +47,18 @@ async def _enforce_login_rate_limit(request: Request) -> None:
 
     Uses a Redis sorted-set sliding window: timestamps are members scored by their
     Unix epoch, so ZREMRANGEBYSCORE + ZCARD runs atomically in a single pipeline.
+    
+    Extracts the real client IP from X-Forwarded-For or X-Real-IP headers to
+    properly handle proxied requests.
     """
+    # Extract real client IP, handling proxy headers
     client_ip = request.client.host if request.client else "unknown"
+    if x_forwarded_for := request.headers.get("X-Forwarded-For"):
+        # X-Forwarded-For may contain multiple IPs; use the first (client) one
+        client_ip = x_forwarded_for.split(",")[0].strip()
+    elif x_real_ip := request.headers.get("X-Real-IP"):
+        client_ip = x_real_ip.strip()
+    
     redis_client = get_redis()
     rate_limit_key = _rate_limit_key_for_ip(client_ip)
     current_unix_time = datetime.utcnow().timestamp()
@@ -100,6 +111,7 @@ class CreateUserRequest(BaseModel):
     email: EmailStr
     password: str
     full_name: str | None = None
+    setup_token: str | None = None
 
 
 class UserMeResponse(BaseModel):
@@ -179,8 +191,9 @@ async def create_user(
     """Create a new local user.
 
     Bootstrapping rules:
-      - If there are no users yet, allow creation without authentication and
-        force the first account to be ADMIN.
+      - If there are no users yet, require a one-time SETUP_TOKEN environment variable
+        to be passed in the payload to authorize the creation of the first ADMIN account.
+        This prevents race conditions and unauthorized admin creation during initial setup.
       - If at least one user exists and allow_open_signup is False, block
         open signups entirely; additional users must be created by an admin
         through a controlled path (e.g. internal tooling or SSO provisioning).
@@ -194,6 +207,20 @@ async def create_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User with this email already exists",
         )
+
+    # First user requires SETUP_TOKEN to prevent unauthorized admin takeover
+    if not first_user:
+        setup_token_env = os.environ.get("SETUP_TOKEN", "").strip()
+        if not setup_token_env:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Initial setup requires SETUP_TOKEN environment variable. Contact your administrator.",
+            )
+        if not payload.setup_token or payload.setup_token != setup_token_env:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid setup token.",
+            )
 
     if first_user and not settings.allow_open_signup:
         raise HTTPException(
@@ -240,11 +267,8 @@ async def forgot_password(
     token = secrets.token_urlsafe(32)
     await _store_password_reset_token_in_redis(token=token, user_email=user.email)
 
-    logger.warning(
-        "PASSWORD RESET TOKEN for %s: %s  (valid 1 hour)",
-        user.email,
-        token,
-    )
+    # Log only that a reset was requested, never log the plaintext token
+    logger.warning("Password reset requested for email: %s", user.email)
 
     return {"message": "If an account with that email exists, a reset link has been generated."}
 

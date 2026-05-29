@@ -56,7 +56,6 @@ ALLOWED_VALUE_FLAGS: set[str] = {
     "--max-rate",
     "--host-timeout",
     "--script-timeout",
-    "--script-args",
     "--max-retries",
     "--version-intensity",
     "--top-ports",
@@ -225,13 +224,22 @@ def get_scan_type_from_command(command: str) -> str:
     return "Custom Scan"
 
 
-def _is_medical_iot_target(target: str) -> bool:
-    """Return True if the target falls within a configured medical/IoT VLAN CIDR.
+def _is_restricted_segment(target: str) -> bool:
+    """Return True if the target falls within a configured restricted/fragile VLAN CIDR.
 
     These ranges must never be scanned with active techniques (SYN probes, etc.).
     Passive ARP / Zeek is the only allowed discovery method for these segments.
+    
+    Supports both new (restricted_vlan_cidrs) and legacy (medical_iot_vlan_cidrs)
+    configuration variables for backward compatibility. Deduplicates CIDRs to avoid
+    redundant checks during migration.
     """
-    if not settings.medical_iot_vlan_cidrs:
+    # Merge and deduplicate both old and new config for backward compatibility
+    cidrs_set = set(settings.restricted_vlan_cidrs or [])
+    if settings.medical_iot_vlan_cidrs:
+        cidrs_set.update(settings.medical_iot_vlan_cidrs)
+    
+    if not cidrs_set:
         return False
 
     try:
@@ -239,11 +247,10 @@ def _is_medical_iot_target(target: str) -> bool:
         addr = ipaddress.ip_address(target.split("/")[0])
     except ValueError:
         # Hostname target – cannot classify statically.
-        # Operators must ensure medical/IoT VLANs are not reachable by hostname.
-        logger.debug("Medical VLAN check skipped for non-IP target: %s", target)
+        # Operators must ensure restricted/fragile VLANs are not reachable by hostname.
         return False  # Allow the scan; hostname safety must be enforced at network level.
 
-    for cidr in settings.medical_iot_vlan_cidrs:
+    for cidr in cidrs_set:
         try:
             if addr in ipaddress.ip_network(cidr, strict=False):
                 return True
@@ -273,14 +280,14 @@ async def execute_nmap(
     if not _validate_target(request.target):
         raise HTTPException(status_code=400, detail="Invalid target format")
 
-    # Block active SYN scans against medical/IoT VLANs.
+    # Block active SYN scans against restricted/fragile VLAN segments.
     # These segments must only be monitored passively (ARP / Zeek).
-    if _is_medical_iot_target(request.target) and _contains_active_syn_flags(request.command):
+    if _is_restricted_segment(request.target) and _contains_active_syn_flags(request.command):
         raise HTTPException(
             status_code=403,
             detail=(
-                "Active SYN scans are not permitted against medical/IoT VLAN targets. "
-                "Use passive ARP discovery or Zeek sniffing for these segments."
+                "Active scanning is strictly prohibited on designated fragile or restricted subnets. "
+                "Use passive discovery methods instead."
             ),
         )
 

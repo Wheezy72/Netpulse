@@ -445,18 +445,32 @@ class RunGeneratedScriptRequest(BaseModel):
 
 @router.post(
     "/run-generated",
-    status_code=status.HTTP_201_CREATED,
-    summary="Save and execute an AI-generated script",
+    status_code=status.HTTP_200_OK,
+    summary="Return an AI-generated script for review (execution disabled)",
 )
 async def run_generated_script(
     payload: RunGeneratedScriptRequest,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(db_session),
     current_user: User = Depends(require_admin),
 ) -> dict[str, Any]:
+    """Return AI-generated script for user review.
+    
+    IMPORTANT: Arbitrary AI-generated Python script execution is disabled for security.
+    The AI script is returned as text only for the user to review and optionally refactor.
+    
+    Only prebuilt scripts from the scripts_prebuilt_subdir (mounted read-only from the host)
+    may be executed. These scripts are:
+    - Trusted and vetted before deployment
+    - Stored in a read-only filesystem location
+    - Cannot be modified or executed maliciously at runtime
+    
+    To execute this script:
+    1. Review the code carefully for correctness and security
+    2. Place it in the prebuilt scripts directory
+    3. Use the /prebuilt/run endpoint with the script name
+    """
     script_code = payload.script
     filename = payload.filename
-    target = payload.target
 
     if not script_code.strip():
         raise HTTPException(status_code=400, detail="Script code is empty")
@@ -464,27 +478,10 @@ async def run_generated_script(
     if not filename.endswith(".py"):
         filename = filename.rsplit(".", 1)[0] + ".py" if "." in filename else filename + ".py"
 
-    scripts_dir = Path(settings.scripts_base_dir) / settings.scripts_uploads_subdir
-    scripts_dir.mkdir(parents=True, exist_ok=True)
-
-    sanitized = _sanitize_filename(filename)
-    destination = scripts_dir / sanitized
-    destination.write_text(script_code)
-
-    params = {}
-    if target:
-        params["target"] = target
-
-    job = ScriptJob(
-        script_name=sanitized,
-        script_path=str(destination),
-        status=ScriptJobStatus.PENDING,
-        params=params,
-    )
-    db.add(job)
-    await db.commit()
-    await db.refresh(job)
-
-    background_tasks.add_task(execute_script_job_task.delay, job.id)
-
-    return {"job_id": job.id, "script_name": job.script_name}
+    # Return the script for review only; do NOT execute it
+    return {
+        "message": "AI-generated script execution is disabled for security. Review the code below and place it in the prebuilt scripts directory to execute it.",
+        "script_code": script_code,
+        "filename": filename,
+        "instructions": "1. Review the code for correctness and security\n2. Place in scripts/prebuilt/\n3. Use /prebuilt/run endpoint to execute",
+    }
