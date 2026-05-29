@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tracing::{error, info};
 
 use event::PacketEvent;
-use parser::{parse_raw_frame_into_packet_event, MEDICAL_PORT_BPF_DENY_FILTER};
+use parser::{parse_raw_frame_into_packet_event, get_fragile_device_bpf_filter};
 use publisher::{connect_and_declare_exchange, log_publish_error, publish_packet_event};
 
 const DEFAULT_RABBITMQ_URL: &str = "amqp://netpulse:netpulse@localhost:5672/netpulse";
@@ -52,11 +52,12 @@ async fn main() {
         .open()
         .expect("failed to activate capture handle");
 
+    let bpf_filter = get_fragile_device_bpf_filter();
     packet_capture
-        .filter(MEDICAL_PORT_BPF_DENY_FILTER, true)
+        .filter(&bpf_filter, true)
         .expect("failed to compile and apply BPF deny-filter");
 
-    info!(interface = %capture_interface_name, filter = MEDICAL_PORT_BPF_DENY_FILTER, "probe: capture started");
+    info!(interface = %capture_interface_name, filter = %bpf_filter, "probe: capture started");
 
     let (packet_event_sender, mut packet_event_receiver) =
         mpsc::channel::<PacketEvent>(PACKET_CHANNEL_BUFFER_SIZE);
