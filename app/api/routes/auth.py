@@ -95,7 +95,10 @@ async def _consume_password_reset_token_from_redis(token: str) -> str | None:
     if not token_data:
         return None
     await redis_client.delete(reset_token_key)
-    return token_data.get("email")
+    email_value = token_data.get("email")
+    if isinstance(email_value, (bytes, bytearray, memoryview)):
+        return bytes(email_value).decode("utf-8")
+    return email_value
 
 
 class TokenResponse(BaseModel):
