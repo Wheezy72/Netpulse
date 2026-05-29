@@ -93,6 +93,12 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     allow_open_signup: bool = True
 
+    # Development bootstrap admin (only used in non-production when enabled).
+    bootstrap_admin_enabled: bool = True
+    bootstrap_admin_email: str = "admin@netpulse.local"
+    bootstrap_admin_password: str = "Admin1234"
+    bootstrap_admin_full_name: str = "NetPulse Admin"
+
     # Google OAuth
     google_oauth_client_id: str | None = None
     google_oauth_client_secret: str | None = None

@@ -30,14 +30,17 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
+from sqlalchemy import select
 
 from app.api.routes import api_router
 from app.core.config import settings
 from app.core.redis import close_pool, init_pool
 from app.db.base import Base
-from app.db.session import engine
+from app.db.session import engine, async_session_factory
 from app.services.passive_monitor import run_passive_monitor
 from app.services.logging_service import setup_logging
+from app.api.deps import get_password_hash
+from app.models.user import User, UserRole
 
 import app.models  # noqa: F401 – ensure all models are registered with SQLAlchemy
 
@@ -97,6 +100,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_pool()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    if settings.environment.lower() != "production" and settings.bootstrap_admin_enabled:
+        session = async_session_factory()
+        try:
+            existing_any = await session.execute(select(User).limit(1))
+            if existing_any.scalar_one_or_none() is None:
+                bootstrap_user = User(
+                    email=settings.bootstrap_admin_email,
+                    full_name=settings.bootstrap_admin_full_name,
+                    hashed_password=get_password_hash(settings.bootstrap_admin_password),
+                    role=UserRole.ADMIN,
+                )
+                session.add(bootstrap_user)
+                await session.commit()
+        finally:
+            await session.close()
     passive_monitor_task: asyncio.Task[None] | None = None
     try:
         if settings.enable_passive_monitor:
