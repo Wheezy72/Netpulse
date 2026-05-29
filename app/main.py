@@ -9,13 +9,16 @@ Responsible for:
 - Mounting the API router under /api.
 - Serving the built Vue SPA frontend.
 
-Database schema changes are exclusively handled via Alembic migrations.
-The `create_all` call has been removed; run `alembic upgrade head` before
-starting the app for the first time or after adding new migrations.
+On startup the lifespan handler runs ``Base.metadata.create_all`` so that a
+fresh PostgreSQL volume (e.g. after ``docker compose down -v``) is immediately
+populated with all tables without requiring a manual ``alembic upgrade head``.
+Alembic is still used for production schema migrations; ``create_all`` is
+idempotent and safe to run on every boot.
 """
 
+import asyncio
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -30,7 +33,10 @@ from starlette.responses import Response
 
 from app.api.routes import api_router
 from app.core.config import settings
+from app.core.redis import close_pool, init_pool
+from app.db.base import Base
 from app.db.session import engine
+from app.services.passive_monitor import run_passive_monitor
 from app.services.logging_service import setup_logging
 
 import app.models  # noqa: F401 – ensure all models are registered with SQLAlchemy
@@ -82,14 +88,27 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """FastAPI lifespan handler.
 
-    Schema management: use `alembic upgrade head` before starting the app.
-    Recurring monitoring jobs are scheduled via Celery Beat – not in this process.
+    Automatically creates all SQLAlchemy-managed tables on startup so that a
+    fresh database volume works out of the box.  ``create_all`` is idempotent –
+    existing tables are never dropped or altered, so Alembic migrations remain
+    the authoritative mechanism for schema changes in production.
     """
     setup_logging()
+    await init_pool()
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    passive_monitor_task: asyncio.Task[None] | None = None
     try:
+        if settings.enable_passive_monitor:
+            passive_monitor_task = asyncio.create_task(run_passive_monitor())
         yield
     finally:
+        if passive_monitor_task is not None:
+            passive_monitor_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await passive_monitor_task
         await engine.dispose()
+        await close_pool()
 
 
 app = FastAPI(

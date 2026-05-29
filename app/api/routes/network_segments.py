@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, require_admin, require_role
+from app.api.deps import db_session, require_admin, require_compliance_role
 from app.models.network_segment import NetworkSegment
 from app.models.user import User
 
@@ -48,7 +48,7 @@ class NetworkSegmentOut(BaseModel):
 @router.get("", response_model=List[NetworkSegmentOut])
 async def list_network_segments(
     db: AsyncSession = Depends(db_session),
-    _user: User = Depends(require_role()),
+    _user: User = Depends(require_compliance_role()),
 ):
     result = await db.execute(
         select(NetworkSegment).order_by(NetworkSegment.name)
@@ -87,17 +87,17 @@ async def update_network_segment(
         select(NetworkSegment).where(NetworkSegment.id == segment_id)
     )
     existing = result.scalar_one_or_none()
-    
+
     if not existing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Network segment not found",
         )
-    
+
     update_data = segment.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(existing, key, value)
-    
+
     await db.commit()
     await db.refresh(existing)
     return existing
@@ -113,12 +113,12 @@ async def delete_network_segment(
         select(NetworkSegment).where(NetworkSegment.id == segment_id)
     )
     existing = result.scalar_one_or_none()
-    
+
     if not existing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Network segment not found",
         )
-    
+
     await db.delete(existing)
     await db.commit()

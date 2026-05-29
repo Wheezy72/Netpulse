@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, require_admin, require_role
+from app.api.deps import db_session, require_admin, require_compliance_role
 
 from app.models.uptime import UptimeCheck, UptimeTarget
 
@@ -86,7 +86,7 @@ class UptimeSummary(BaseModel):
 @router.get(
     "",
     response_model=UptimeSummary,
-    dependencies=[Depends(require_role())],
+    dependencies=[Depends(require_compliance_role())],
 )
 async def get_uptime_summary(db: AsyncSession = Depends(db_session)) -> UptimeSummary:
     result = await db.execute(select(UptimeTarget).order_by(UptimeTarget.name))
@@ -183,7 +183,7 @@ async def delete_uptime_target(
 @router.get(
     "/{target_id}/history",
     response_model=List[UptimeCheckResponse],
-    dependencies=[Depends(require_role())],
+    dependencies=[Depends(require_compliance_role())],
 )
 async def get_uptime_history(
     target_id: int,

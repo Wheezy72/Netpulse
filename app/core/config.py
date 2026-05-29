@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # Redis / Celery
     redis_url: str = "redis://redis:6379/0"
 
-    # RabbitMQ – used by the Go data-plane probe for telemetry fan-out.
+    # RabbitMQ – used by the Rust data-plane probe for telemetry fan-out.
     rabbitmq_url: str = "amqp://netpulse:netpulse@rabbitmq:5672/netpulse"
 
     # InfluxDB – time-series storage for probe telemetry and bandwidth metrics.
@@ -69,10 +69,12 @@ class Settings(BaseSettings):
     # Netmiko device_type string, e.g. "cisco_ios", "mikrotik_routeros", "juniper_junos"
     rogue_dhcp_switch_type: str = "cisco_ios"
 
-    # Medical / IoT VLAN protection.
-    # List of CIDR ranges that must never receive active Nmap SYN scans.
+    # Restricted / fragile VLAN protection.
+    # List of CIDR ranges that must never receive active scanning (e.g., SYN probes).
     # Passive ARP / Zeek sniffing is the only allowed discovery method for these ranges.
-    # Example: MEDICAL_IOT_VLAN_CIDRS='["10.20.0.0/16","192.168.50.0/24"]'
+    # Example: RESTRICTED_VLAN_CIDRS='["10.20.0.0/16","192.168.50.0/24"]'
+    restricted_vlan_cidrs: List[str] = Field(default_factory=list)
+    # Legacy name for backward compatibility
     medical_iot_vlan_cidrs: List[str] = Field(default_factory=list)
 
     # Paths
@@ -82,6 +84,8 @@ class Settings(BaseSettings):
 
     # Packet capture storage
     pcap_storage_dir: str = "/tmp/pcaps"
+    passive_monitor_iface: str = "eth0"
+    enable_passive_monitor: bool = False
 
     # Security / auth
     secret_key: str = "CHANGE_ME_IN_PRODUCTION"
@@ -121,6 +125,23 @@ class Settings(BaseSettings):
     whatsapp_report_template: str = "[NetPulse] Report Generated\n\n{subject}\n\n{body}\n\nTime: {timestamp}"
     whatsapp_health_template: str = "[NetPulse] Health Alert\n\n{subject}\n\nDevice: {device_name} ({device_ip})\nSegment: {segment_name}\n\n{body}\n\nTime: {timestamp}"
     whatsapp_device_template: str = "[NetPulse] Device Alert\n\nDevice: {device_name}\nIP: {device_ip}\nMAC: {device_mac}\nSegment: {segment_name}\n\n{body}\n\nTime: {timestamp}"
+
+    # Splunk HEC telemetry
+    enable_splunk_hec: bool = False
+    splunk_hec_url: str | None = None
+    splunk_hec_token: str | None = None
+    splunk_hec_index: str = "main"
+    splunk_hec_source: str = "netpulse"
+    splunk_hec_sourcetype: str = "_json"
+    splunk_hec_verify_ssl: bool = True
+
+    # Switch isolation / containment
+    switch_mgmt_host: str | None = None
+    switch_mgmt_user: str | None = None
+    switch_mgmt_password: str | None = None
+    switch_mgmt_enable_secret: str | None = None
+    switch_mgmt_device_type: str = "cisco_ios"
+    switch_mgmt_port: int = 22
 
     # Email templates (same variables available)
     email_vuln_template: str = "Device: {device_name} ({device_ip})\nMAC: {device_mac}\nSegment: {segment_name}\n\n{body}"

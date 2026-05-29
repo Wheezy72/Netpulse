@@ -219,16 +219,16 @@ async def list_playbooks(
 ) -> List[PlaybookScan]:
     """Get all available network scan playbooks."""
     scans = ALL_SCANS
-    
+
     if category:
         scans = [s for s in scans if s.category.lower() == category.lower()]
-    
+
     if environment:
         if environment.lower() == "home":
             scans = [s for s in scans if "home" in s.recommended_for or "small-office" in s.recommended_for]
         elif environment.lower() == "enterprise":
             scans = [s for s in scans if "enterprise" in s.recommended_for]
-    
+
     return scans
 
 
@@ -261,13 +261,13 @@ async def recommend_scans(
     current_user: User = Depends(get_current_user),
 ) -> List[PlaybookScan]:
     """Get intelligent recommendations for scans based on target type.
-    
+
     Target types: router, server, workstation, iot, database, web, network-device
     """
     recommendations = []
-    
+
     target_lower = target_type.lower()
-    
+
     if target_lower in ["router", "gateway", "firewall"]:
         recommendations = [s for s in ALL_SCANS if s.id in [
             "home-router-check", "network-infrastructure", "firewall-evasion", "ssl-tls-audit"
@@ -300,7 +300,7 @@ async def recommend_scans(
         recommendations = [s for s in ALL_SCANS if s.id in [
             "quick-ping", "full-port-scan", "vuln-assessment"
         ]]
-    
+
     return recommendations
 
 

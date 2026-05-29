@@ -412,7 +412,7 @@ onMounted(() => {
     >
       <div class="flex flex-wrap items-end gap-3">
         <div class="min-w-[260px]">
-          <label class="block text-[0.7rem] uppercase tracking-widest text-[var(--np-muted-text)]">PCAP File</label>
+          <label class="block text-[0.7rem] uppercase tracking-widest text-slate-400 dark:text-teal-300">PCAP File</label>
           <select
             v-model="selectedPcapId"
             class="mt-1 w-full rounded-md border px-3 py-2 text-sm bg-transparent outline-none"
@@ -685,16 +685,16 @@ onMounted(() => {
                   ]"
                   @click="selectPacket(item)"
                 >
-                  <div class="truncate text-[var(--np-text)]">{{ formatTimestamp(item.timestamp) }}</div>
-                  <div class="text-[var(--np-muted-text)]">{{ item.packet_index }}</div>
-                  <div class="truncate text-[var(--np-text)]">{{ formatEndpoint(item.src_ip, item.src_port) }}</div>
-                  <div class="truncate text-[var(--np-text)]">{{ formatEndpoint(item.dst_ip, item.dst_port) }}</div>
+                  <div class="truncate text-slate-100 dark:text-sky-100">{{ formatTimestamp(item.timestamp) }}</div>
+                  <div class="text-slate-400 dark:text-teal-300">{{ item.packet_index }}</div>
+                  <div class="truncate text-slate-100 dark:text-sky-100">{{ formatEndpoint(item.src_ip, item.src_port) }}</div>
+                  <div class="truncate text-slate-100 dark:text-sky-100">{{ formatEndpoint(item.dst_ip, item.dst_port) }}</div>
                   <div>
                     <span class="px-1.5 py-0.5 rounded text-[0.6rem] font-semibold uppercase"
                       :class="isNightshade ? 'bg-teal-500/20 text-teal-300' : 'bg-amber-500/20 text-amber-300'"
                     >{{ item.protocol || '—' }}</span>
                   </div>
-                  <div class="text-[var(--np-muted-text)]">{{ item.length }}</div>
+                  <div class="text-slate-400 dark:text-teal-300">{{ item.length }}</div>
                 </div>
               </template>
             </RecycleScroller>

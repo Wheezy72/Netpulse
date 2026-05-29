@@ -6,6 +6,34 @@ RUN npm ci --ignore-scripts 2>/dev/null || npm install
 COPY frontend/ ./
 RUN npm run build
 
+
+# =============================================================================
+# Stage 2: python-builder — compile Python wheels so the runtime stage needs
+# no compiler toolchain and carries no build-time residue.
+# =============================================================================
+FROM python:3.11-slim AS python-builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    libffi-dev \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
+
+
+# =============================================================================
+# Stage 3: production — minimal runtime image.
+# =============================================================================
 FROM python:3.11-slim AS production
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -39,8 +67,9 @@ RUN apt-get update \
     && setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap \
     && setcap cap_net_raw+eip /bin/ping
 
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+COPY --from=python-builder /wheels /wheels
+RUN pip install --no-cache-dir --no-index --find-links=/wheels /wheels/* \
+    && rm -rf /wheels
 
 RUN groupadd -r netpulse && useradd -r -g netpulse -d /app -s /sbin/nologin netpulse
 

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
 import secrets
-import time
-from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Dict
 
@@ -21,24 +20,82 @@ from app.api.deps import (
     verify_password,
 )
 from app.core.config import settings
+from app.core.redis import get_redis
 from app.models.user import User, UserRole
 
 logger = logging.getLogger("netpulse.auth")
 
 router = APIRouter()
 
-login_attempts: dict[str, list[float]] = defaultdict(list)
+_RATE_LIMIT_KEY_PREFIX = "np:login_attempts:"
+_RATE_LIMIT_MAX_ATTEMPTS = 5
+_RATE_LIMIT_WINDOW_SECONDS = 300
+
+_RESET_TOKEN_KEY_PREFIX = "np:reset_token:"
+_RESET_TOKEN_TTL_SECONDS = 3600
 
 
-async def check_rate_limit(request: Request, max_attempts: int = 5, window_seconds: int = 300):
+def _rate_limit_key_for_ip(client_ip: str) -> str:
+    return f"{_RATE_LIMIT_KEY_PREFIX}{client_ip}"
+
+
+def _reset_token_key(token: str) -> str:
+    return f"{_RESET_TOKEN_KEY_PREFIX}{token}"
+
+
+async def _enforce_login_rate_limit(request: Request) -> None:
+    """Block the request if the client IP has exceeded the login attempt ceiling.
+
+    Uses a Redis sorted-set sliding window: timestamps are members scored by their
+    Unix epoch, so ZREMRANGEBYSCORE + ZCARD runs atomically in a single pipeline.
+    
+    Extracts the real client IP from X-Forwarded-For or X-Real-IP headers to
+    properly handle proxied requests.
+    """
+    # Extract real client IP, handling proxy headers
     client_ip = request.client.host if request.client else "unknown"
-    now = time.time()
-    login_attempts[client_ip] = [t for t in login_attempts[client_ip] if now - t < window_seconds]
-    if len(login_attempts[client_ip]) >= max_attempts:
-        raise HTTPException(status_code=429, detail="Too many login attempts. Please try again later.")
-    login_attempts[client_ip].append(now)
+    if x_forwarded_for := request.headers.get("X-Forwarded-For"):
+        # X-Forwarded-For may contain multiple IPs; use the first (client) one
+        client_ip = x_forwarded_for.split(",")[0].strip()
+    elif x_real_ip := request.headers.get("X-Real-IP"):
+        client_ip = x_real_ip.strip()
+    
+    redis_client = get_redis()
+    rate_limit_key = _rate_limit_key_for_ip(client_ip)
+    current_unix_time = datetime.utcnow().timestamp()
+    window_start_time = current_unix_time - _RATE_LIMIT_WINDOW_SECONDS
 
-_reset_tokens: Dict[str, Dict[str, Any]] = {}
+    async with redis_client.pipeline(transaction=True) as pipeline:
+        pipeline.zremrangebyscore(rate_limit_key, "-inf", window_start_time)
+        pipeline.zcard(rate_limit_key)
+        pipeline.zadd(rate_limit_key, {str(current_unix_time): current_unix_time})
+        pipeline.expire(rate_limit_key, _RATE_LIMIT_WINDOW_SECONDS)
+        results = await pipeline.execute()
+
+    attempt_count_before_this_request = results[1]
+    if attempt_count_before_this_request >= _RATE_LIMIT_MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Please try again later.",
+        )
+
+
+async def _store_password_reset_token_in_redis(token: str, user_email: str) -> None:
+    redis_client = get_redis()
+    reset_token_key = _reset_token_key(token)
+    await redis_client.hset(reset_token_key, mapping={"email": user_email})
+    await redis_client.expire(reset_token_key, _RESET_TOKEN_TTL_SECONDS)
+
+
+async def _consume_password_reset_token_from_redis(token: str) -> str | None:
+    """Return the email for the token and delete it (tokens are single-use)."""
+    redis_client = get_redis()
+    reset_token_key = _reset_token_key(token)
+    token_data = await redis_client.hgetall(reset_token_key)
+    if not token_data:
+        return None
+    await redis_client.delete(reset_token_key)
+    return token_data.get("email")
 
 
 class TokenResponse(BaseModel):
@@ -83,6 +140,7 @@ class LoginRequest(EmailRequest):
 class CreateUserRequest(EmailRequest):
     password: str
     full_name: str | None = None
+    setup_token: str | None = None
 
 
 class UserMeResponse(BaseModel):
@@ -92,12 +150,11 @@ class UserMeResponse(BaseModel):
     role: UserRole
 
 
-
 @router.post(
     "/login",
     response_model=TokenResponse,
     summary="Obtain an access token via email and password",
-    dependencies=[Depends(check_rate_limit)],
+    dependencies=[Depends(_enforce_login_rate_limit)],
 )
 async def login(
     payload: LoginRequest,
@@ -143,10 +200,10 @@ async def read_current_user(
     user: User = Depends(get_current_user),
 ) -> UserMeResponse:
     return UserMeResponse(
-      id=user.id,
-      email=user.email,
-      full_name=user.full_name,
-      role=user.role,
+        id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        role=user.role,
     )
 
 
@@ -163,13 +220,13 @@ async def create_user(
     """Create a new local user.
 
     Bootstrapping rules:
-      - If there are no users yet, allow creation without authentication and
-        force the first account to be ADMIN.
+      - If there are no users yet, require a one-time SETUP_TOKEN environment variable
+        to be passed in the payload to authorize the creation of the first ADMIN account.
+        This prevents race conditions and unauthorized admin creation during initial setup.
       - If at least one user exists and allow_open_signup is False, block
         open signups entirely; additional users must be created by an admin
         through a controlled path (e.g. internal tooling or SSO provisioning).
     """
-    # Check whether any user exists yet
     existing_any = await db.execute(select(User).limit(1))
     first_user = existing_any.scalar_one_or_none()
 
@@ -180,7 +237,20 @@ async def create_user(
             detail="User with this email already exists",
         )
 
-    # If at least one user exists and open signup is disabled, reject.
+    # First user requires SETUP_TOKEN to prevent unauthorized admin takeover
+    if not first_user:
+        setup_token_env = os.environ.get("SETUP_TOKEN", "").strip()
+        if not setup_token_env:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Initial setup requires SETUP_TOKEN environment variable. Contact your administrator.",
+            )
+        if not payload.setup_token or payload.setup_token != setup_token_env:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid setup token.",
+            )
+
     if first_user and not settings.allow_open_signup:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -224,16 +294,10 @@ async def forgot_password(
         return {"message": "If an account with that email exists, a reset link has been generated."}
 
     token = secrets.token_urlsafe(32)
-    _reset_tokens[token] = {
-        "email": user.email,
-        "expires": datetime.utcnow() + timedelta(hours=1),
-    }
+    await _store_password_reset_token_in_redis(token=token, user_email=user.email)
 
-    logger.warning(
-        "PASSWORD RESET TOKEN for %s: %s  (valid 1 hour)",
-        user.email,
-        token,
-    )
+    # Log only that a reset was requested, never log the plaintext token
+    logger.warning("Password reset requested for email: %s", user.email)
 
     return {"message": "If an account with that email exists, a reset link has been generated."}
 
@@ -246,27 +310,20 @@ async def reset_password(
     payload: ResetPasswordRequest,
     db: AsyncSession = Depends(db_session),
 ) -> Dict[str, str]:
-    token_data = _reset_tokens.get(payload.token)
-    if not token_data:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset token.",
-        )
-
-    if datetime.utcnow() > token_data["expires"]:
-        _reset_tokens.pop(payload.token, None)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Reset token has expired. Please request a new one.",
-        )
-
     if len(payload.new_password) < 6:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Password must be at least 6 characters.",
         )
 
-    result = await db.execute(select(User).where(User.email == token_data["email"]))
+    associated_email = await _consume_password_reset_token_from_redis(payload.token)
+    if associated_email is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token.",
+        )
+
+    result = await db.execute(select(User).where(User.email == associated_email))
     user = result.scalar_one_or_none()
 
     if not user:
@@ -278,6 +335,5 @@ async def reset_password(
     user.hashed_password = get_password_hash(payload.new_password)
     await db.commit()
 
-    _reset_tokens.pop(payload.token, None)
-
     return {"message": "Password has been reset successfully. You can now sign in."}
+

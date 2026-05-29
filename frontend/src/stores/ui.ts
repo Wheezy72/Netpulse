@@ -7,7 +7,9 @@ export const useUiStore = defineStore("ui", () => {
   const theme = ref<Theme>(
     (localStorage.getItem("np-theme") as Theme) || "nightshade"
   );
-  const sidebarExpanded = ref(true);
+  const sidebarExpanded = ref(
+    localStorage.getItem("np-sidebar-expanded") !== "false"
+  );
   const commandPaletteOpen = ref(false);
 
   function setTheme(t: Theme) {
@@ -19,6 +21,7 @@ export const useUiStore = defineStore("ui", () => {
 
   function toggleSidebar() {
     sidebarExpanded.value = !sidebarExpanded.value;
+    localStorage.setItem("np-sidebar-expanded", String(sidebarExpanded.value));
   }
 
   function openCommandPalette() {

@@ -1,0 +1,30 @@
+[package]
+name = "netpulse-probe"
+version = "0.1.0"
+edition = "2021"
+description = "NetPulse data-plane probe: passive packet capture with BPF filtering and RabbitMQ telemetry fan-out"
+
+[[bin]]
+name = "probe"
+path = "src/main.rs"
+
+[dependencies]
+# pcap wraps libpcap and exposes BPF filter compilation — the same kernel
+# primitive used by tcpdump. It is the most direct Rust equivalent to
+# gopacket/pcap and is required for the medical-port BPF deny-list.
+pcap = "2.2"
+
+# pnet_packet provides zero-copy Ethernet / IPv4 / IPv6 / TCP / UDP header
+# parsing on top of raw byte slices — no additional system libraries needed.
+pnet_packet = "0.35"
+
+# lapin is the de-facto AMQP 0-9-1 client for async Rust. It integrates
+# natively with tokio and handles channel multiplexing and heartbeats.
+lapin = "2.5"
+
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

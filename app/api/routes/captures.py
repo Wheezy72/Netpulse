@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, require_admin, require_role
+from app.api.deps import db_session, require_admin, require_compliance_role
 from app.models.packet_capture import PacketCapture, PacketCaptureStatus
 from app.services.packet_capture import capture_to_pcap, get_capture_stats, parse_pcap_headers
 
@@ -76,7 +76,7 @@ async def start_capture(
     "/",
     response_model=List[CaptureResponse],
     summary="List all packet captures",
-    dependencies=[Depends(require_role())],
+    dependencies=[Depends(require_compliance_role())],
 )
 async def list_captures(
     db: AsyncSession = Depends(db_session),
@@ -112,7 +112,7 @@ async def list_captures(
 @router.get(
     "/{capture_id}",
     summary="Get capture details",
-    dependencies=[Depends(require_role())],
+    dependencies=[Depends(require_compliance_role())],
 )
 async def get_capture(
     capture_id: int,

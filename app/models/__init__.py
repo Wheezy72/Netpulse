@@ -1,8 +1,10 @@
 from app.models.audit_log import AuditLog
 from app.models.device import Device
+from app.models.device_baseline import DeviceBaseline
 from app.models.enforcement_action import EnforcementAction
 from app.models.metric import Metric
 from app.models.network_segment import NetworkSegment
+from app.models.security_telemetry import SecurityTelemetry
 from app.models.packet_capture import PacketCapture, PacketCaptureStatus, PacketHeader
 from app.models.pcap_meta import PcapFile, PcapPacket
 from app.models.router import Router, RouterInterfaceCounter
@@ -17,9 +19,11 @@ from app.models.vulnerability import Vulnerability
 __all__ = [
     "AuditLog",
     "Device",
+    "DeviceBaseline",
     "EnforcementAction",
     "Metric",
     "NetworkSegment",
+    "SecurityTelemetry",
     "PacketCapture",
     "PacketCaptureStatus",
     "PacketHeader",

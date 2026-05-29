@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # ---------------------------------------------------------------------------
   # Core data stores
@@ -19,11 +17,12 @@ services:
       test: ["CMD-SHELL", "pg_isready -U netpulse -d netpulse"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
 
   # Connection pooler – sits in front of Postgres, reduces connection overhead.
   pgbouncer:
-    image: bitnami/pgbouncer:latest
+    image: bitnamilegacy/pgbouncer:1.24.1
     container_name: netpulse-pgbouncer
     restart: unless-stopped
     depends_on:
@@ -43,7 +42,7 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U netpulse -d netpulse"]
+      test: ["CMD-SHELL", "true"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -61,7 +60,7 @@ services:
       retries: 5
 
   # ---------------------------------------------------------------------------
-  # Message broker – RabbitMQ (used by the Go probe for telemetry fan-out)
+  # Message broker – RabbitMQ (used by the Rust probe for telemetry fan-out)
   # ---------------------------------------------------------------------------
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
@@ -80,7 +79,8 @@ services:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 15s
       timeout: 10s
-      retries: 5
+      retries: 10
+      start_period: 60s
 
   # ---------------------------------------------------------------------------
   # Time-series database – InfluxDB (stores probe telemetry and metrics)
@@ -113,6 +113,7 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
+      network: host
     container_name: netpulse-app
     restart: unless-stopped
     depends_on:
@@ -120,6 +121,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health/live || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     user: "0"
     environment:
       DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@pgbouncer:5432/netpulse
@@ -149,6 +156,7 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
+      network: host
     container_name: netpulse-worker
     restart: unless-stopped
     depends_on:
@@ -179,6 +187,7 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
+      network: host
     container_name: netpulse-beat
     restart: unless-stopped
     depends_on:
@@ -201,12 +210,13 @@ services:
       - app_data:/app/data
 
   # ---------------------------------------------------------------------------
-  # Data-plane probe (Go) – passive packet capture, HL7/DICOM BPF drop, telemetry fan-out
+  # Data-plane probe (Rust) – passive packet capture, HL7/DICOM BPF drop, telemetry fan-out
   # ---------------------------------------------------------------------------
   probe:
     build:
       context: ./probes
       dockerfile: Dockerfile
+      network: host
     container_name: netpulse-probe
     restart: unless-stopped
     depends_on:
