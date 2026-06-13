@@ -53,6 +53,7 @@ data/scans/*.xml
 # BACKGROUND WORKERS
 # ==========================================
 celerybeat-schedule*
+celerybeat-schedule-wal
 celerybeat.pid
 *.log
 
