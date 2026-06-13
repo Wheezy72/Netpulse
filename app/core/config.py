@@ -95,8 +95,9 @@ class Settings(BaseSettings):
 
     # Development bootstrap admin (only used in non-production when enabled).
     bootstrap_admin_enabled: bool = True
+    bootstrap_admin_username: str = "admin"
     bootstrap_admin_email: str = "admin@netpulse.local"
-    bootstrap_admin_password: str = "Admin1234"
+    bootstrap_admin_password: str = "changeme"
     bootstrap_admin_full_name: str = "NetPulse Admin"
 
     # Google OAuth

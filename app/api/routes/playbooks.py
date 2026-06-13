@@ -453,7 +453,7 @@ async def config_drift_check(
     await db.commit()
 
     try:
-        celery_app.send_task("app.tasks.analyze_scan_results", args=[scan_id])
+        pass
     except Exception:
         pass
 

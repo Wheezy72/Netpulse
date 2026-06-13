@@ -10,6 +10,7 @@ interface Props {
 
 const props = defineProps<Props>();
 
+const username = ref("");
 const email = ref("");
 const password = ref("");
 const confirmPassword = ref("");
@@ -22,6 +23,7 @@ const showContent = ref(false);
 
 const typedTitle = ref("");
 const showCursor = ref(true);
+const showField0 = ref(false);
 const showField1 = ref(false);
 const showField2 = ref(false);
 const showField3 = ref(false);
@@ -78,13 +80,13 @@ function animateCanvas() {
   let particles = initParticles(canvas);
   const connectionDist = 140;
 
-  const accentColor = isNightshade.value
-    ? { r: 20, g: 184, b: 166 }
-    : { r: 245, g: 158, b: 11 };
-
   function draw() {
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const accentColor = isNightshade.value
+      ? { r: 20, g: 184, b: 166 }
+      : { r: 245, g: 158, b: 11 };
 
     for (let i = 0; i < particles.length; i++) {
       const p = particles[i];
@@ -168,6 +170,7 @@ onMounted(async () => {
   loadGoogleConfig();
 
   setTimeout(() => { showContent.value = true; }, 100);
+  setTimeout(() => { showField0.value = true; }, 300);
   setTimeout(() => { showField1.value = true; }, 400);
   setTimeout(() => { showField2.value = true; }, 550);
   setTimeout(() => { showField3.value = true; }, 700);
@@ -208,7 +211,7 @@ function handleGoogleLogin(): void {
 async function handleSubmit(): Promise<void> {
   errorMessage.value = null;
 
-  if (!email.value || !password.value) {
+  if (!username.value || !email.value || !password.value) {
     errorMessage.value = "All fields are required.";
     return;
   }
@@ -226,6 +229,7 @@ async function handleSubmit(): Promise<void> {
   isSubmitting.value = true;
   try {
     await axios.post("/api/auth/users", {
+      username: username.value,
       email: email.value,
       password: password.value,
       full_name: fullName.value || null,
@@ -234,7 +238,7 @@ async function handleSubmit(): Promise<void> {
     const { data } = await axios.post<{ access_token: string; token_type: string }>(
       "/api/auth/login",
       {
-        email: email.value,
+        username: username.value,
         password: password.value,
       }
     );
@@ -262,24 +266,6 @@ async function handleSubmit(): Promise<void> {
       :class="isNightshade ? 'np-pulse-ring--nightshade' : 'np-pulse-ring--sysadmin'"
     />
 
-    <button
-      type="button"
-      @click="emit('toggle-theme')"
-      class="fixed top-4 right-4 z-50 p-2.5 rounded-lg border transition-all duration-300 hover:scale-105"
-      :class="[
-        isNightshade
-          ? 'border-teal-400/30 bg-teal-500/10 text-teal-400 hover:bg-teal-500/20'
-          : 'border-amber-400/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
-      ]"
-      :title="isNightshade ? 'Switch to SysAdmin' : 'Switch to Nightshade'"
-    >
-      <svg v-if="isNightshade" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-      </svg>
-      <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-      </svg>
-    </button>
 
     <div
       class="w-full max-w-md px-4 transition-all duration-700 transform relative"
@@ -301,6 +287,25 @@ async function handleSubmit(): Promise<void> {
         </div>
 
         <form class="space-y-4" @submit.prevent="handleSubmit">
+          <div
+            class="np-stagger-item"
+            :class="showField0 ? 'np-stagger-visible' : 'np-stagger-hidden'"
+          >
+            <label
+              class="block text-xs uppercase tracking-wider mb-2 font-mono"
+              :class="isNightshade ? 'text-gray-400' : 'text-slate-400'"
+            >
+              Username
+            </label>
+            <input
+              v-model="username"
+              type="text"
+              autocomplete="username"
+              class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 text-sm font-mono"
+              placeholder="admin"
+            />
+          </div>
+
           <div
             class="np-stagger-item"
             :class="showField1 ? 'np-stagger-visible' : 'np-stagger-hidden'"

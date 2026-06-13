@@ -75,13 +75,13 @@ function animateCanvas() {
   let particles = initParticles(canvas);
   const connectionDist = 140;
 
-  const accentColor = isNightshade.value
-    ? { r: 20, g: 184, b: 166 }
-    : { r: 245, g: 158, b: 11 };
-
   function draw() {
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const accentColor = isNightshade.value
+      ? { r: 20, g: 184, b: 166 }
+      : { r: 245, g: 158, b: 11 };
 
     for (let i = 0; i < particles.length; i++) {
       const p = particles[i];
@@ -247,25 +247,6 @@ async function handleResetSubmit(): Promise<void> {
       :class="isNightshade ? 'np-pulse-ring--nightshade' : 'np-pulse-ring--sysadmin'"
     />
 
-    <!-- Theme toggle -->
-    <button
-      type="button"
-      @click="emit('toggle-theme')"
-      class="fixed top-4 right-4 z-50 p-2.5 rounded-lg border transition-all duration-300 hover:scale-105"
-      :class="[
-        isNightshade
-          ? 'border-teal-400/30 bg-teal-500/10 text-teal-400 hover:bg-teal-500/20'
-          : 'border-amber-400/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
-      ]"
-      :title="isNightshade ? 'Switch to SysAdmin' : 'Switch to Nightshade'"
-    >
-      <svg v-if="isNightshade" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-      </svg>
-      <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-      </svg>
-    </button>
 
     <div
       class="w-full max-w-md px-4 transition-all duration-700 transform relative"

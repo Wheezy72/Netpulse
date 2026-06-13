@@ -136,11 +136,13 @@ class EmailRequest(BaseModel):
         return _normalize_email(value)
 
 
-class LoginRequest(EmailRequest):
+class LoginRequest(BaseModel):
+    username: str
     password: str
 
 
 class CreateUserRequest(EmailRequest):
+    username: str
     password: str
     full_name: str | None = None
     setup_token: str | None = None
@@ -148,9 +150,11 @@ class CreateUserRequest(EmailRequest):
 
 class UserMeResponse(BaseModel):
     id: int
+    username: str
     email: str
     full_name: str | None = None
     role: UserRole
+    force_password_change: bool
 
 
 @router.post(
@@ -164,13 +168,13 @@ async def login(
     db: AsyncSession = Depends(db_session),
 ) -> TokenResponse:
     """Authenticate a user and return a JWT access token."""
-    result = await db.execute(select(User).where(User.email == payload.email))
+    result = await db.execute(select(User).where(User.username == payload.username))
     user = result.scalar_one_or_none()
 
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Incorrect username or password",
         )
 
     if user.auth_provider != "local" or not user.hashed_password:
@@ -182,7 +186,7 @@ async def login(
     if not verify_password(payload.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Incorrect username or password",
         )
 
     access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
@@ -204,9 +208,11 @@ async def read_current_user(
 ) -> UserMeResponse:
     return UserMeResponse(
         id=user.id,
+        username=user.username,
         email=user.email,
         full_name=user.full_name,
         role=user.role,
+        force_password_change=user.force_password_change,
     )
 
 
@@ -233,11 +239,11 @@ async def create_user(
     existing_any = await db.execute(select(User).limit(1))
     first_user = existing_any.scalar_one_or_none()
 
-    existing = await db.execute(select(User).where(User.email == payload.email))
+    existing = await db.execute(select(User).where((User.email == payload.email) | (User.username == payload.username)))
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with this email already exists",
+            detail="User with this email or username already exists",
         )
 
     # First user requires SETUP_TOKEN to prevent unauthorized admin takeover
@@ -261,6 +267,7 @@ async def create_user(
         )
 
     user = User(
+        username=payload.username,
         email=payload.email,
         full_name=payload.full_name,
         hashed_password=get_password_hash(payload.password),
@@ -280,6 +287,39 @@ class ForgotPasswordRequest(EmailRequest):
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str
+
+
+class UpdatePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post(
+    "/update-password",
+    summary="Update your password (used for force password change)",
+)
+async def update_password(
+    payload: UpdatePasswordRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(db_session),
+) -> Dict[str, str]:
+    if not user.hashed_password or not verify_password(payload.current_password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect current password",
+        )
+
+    if len(payload.new_password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be at least 6 characters.",
+        )
+
+    user.hashed_password = get_password_hash(payload.new_password)
+    user.force_password_change = False
+    await db.commit()
+
+    return {"message": "Password updated successfully."}
 
 
 @router.post(
