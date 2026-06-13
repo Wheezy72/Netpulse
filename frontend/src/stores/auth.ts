@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import axios from "axios";
 
-type Role = "admin" | "operator";
+type Role = "admin" | "operator" | "auditor";
 
 interface CurrentUser {
   id: number;

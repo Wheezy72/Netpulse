@@ -21,232 +21,113 @@
 @tailwind utilities;
 
 /* ============================================
-   DESIGN TOKENS — Tactical Industrial 2.0
-   True-black #050505 base. Accents: blue (Nightshade) / amber (SysAdmin).
-   Typography: Geist Sans + Geist Mono.
-   Depth via backdrop-blur on sidebar & command palette only.
+   DESIGN TOKENS — Cyberdeck Tactical
+   True-black #000000 base.
+   Accents: Neon Cyan and Vibrant Magenta/Fuchsia, Amber (Telemetry).
    ============================================ */
-:root {
-  --np-transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+
+/* Shared Cyberdeck Utilities */
+
+.cyber-canvas {
+  background-color: #000000;
+  color: #d1d5db; /* text-gray-300 */
 }
 
-/* ── Nightshade: true-black + blue-500 accent ── */
-body.theme-nightshade {
-  --np-bg: #050505;
-  --np-surface: #0b0f17;
-  --np-surface-elevated: rgba(11, 15, 23, 0.88);
-  --np-border: rgba(255, 255, 255, 0.04);
-  --np-border-subtle: rgba(255, 255, 255, 0.03);
-  --np-accent-primary: #3b82f6;
-  --np-accent-secondary: #60a5fa;
-  --np-text: #fafafa;
-  --np-muted-text: #a1a1aa;
-  --np-font-family: "Geist", "Inter", system-ui, -apple-system, sans-serif;
-  --np-mono-family: "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
-  --np-success: #22c55e;
-  --np-warning: #eab308;
-  --np-danger: #ef4444;
-  --np-info: #38bdf8;
-  --np-glass-bg: rgba(11, 15, 23, 0.8);
-  --np-glass-border: rgba(255, 255, 255, 0.04);
+.ambient-glow {
+  /* Very slow, low-frequency pulsing ambient glow shifting between dark violet and midnight blue */
+  background: radial-gradient(circle at center, rgba(30, 0, 60, 0.4) 0%, rgba(0, 10, 40, 0.2) 50%, #000000 80%);
+  animation: pulse-glow 10s ease-in-out infinite alternate;
+  will-change: opacity, transform;
+  transform: translateZ(0); /* Hardware acceleration */
 }
 
-/* ── SysAdmin: true-black + amber-500 accent ── */
-body.theme-sysadmin {
-  --np-bg: #050505;
-  --np-surface: #0b0f17;
-  --np-surface-elevated: rgba(11, 15, 23, 0.88);
-  --np-border: rgba(255, 255, 255, 0.04);
-  --np-border-subtle: rgba(255, 255, 255, 0.03);
-  --np-accent-primary: #f59e0b;
-  --np-accent-secondary: #fbbf24;
-  --np-text: #fafafa;
-  --np-muted-text: #a1a1aa;
-  --np-font-family: "Geist", "Inter", system-ui, -apple-system, sans-serif;
-  --np-mono-family: "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
-  --np-success: #22c55e;
-  --np-warning: #eab308;
-  --np-danger: #ef4444;
-  --np-info: #38bdf8;
-  --np-glass-bg: rgba(11, 15, 23, 0.8);
-  --np-glass-border: rgba(255, 255, 255, 0.04);
+@keyframes pulse-glow {
+  0% { 
+    opacity: 0.6; 
+    transform: scale(1); 
+    background: radial-gradient(circle at 40% 40%, rgba(30, 0, 60, 0.4) 0%, rgba(0, 10, 40, 0.2) 50%, #000000 80%);
+  }
+  100% { 
+    opacity: 1; 
+    transform: scale(1.05); 
+    background: radial-gradient(circle at 60% 60%, rgba(20, 0, 50, 0.5) 0%, rgba(0, 20, 60, 0.3) 50%, #000000 80%);
+  }
 }
 
-body {
-  margin: 0;
-  padding: 0;
-  font-family: var(--np-font-family, "Geist", "Inter", system-ui);
-  background-color: var(--np-bg);
-  color: var(--np-text);
-  overflow-x: hidden;
-  -webkit-font-smoothing: subpixel-antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
+/* Glassmorphism & Accents */
+.panel {
+  background-color: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  position: relative;
+  border-radius: 4px;
 }
 
-/* ============================================
-   FROSTED GLASS — Sidebar + Command Palette only
-   ============================================ */
-.np-glass {
-  background: var(--np-glass-bg);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border-color: var(--np-glass-border);
+/* Razor-thin, 1px border using CSS mask composite for perfect clean geometry */
+.panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  /* Electric Neon Cyan to Vibrant Magenta/Fuchsia */
+  background: linear-gradient(135deg, rgba(0, 255, 255, 0.4), rgba(255, 0, 255, 0.1), rgba(0, 0, 0, 0) 60%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
 }
 
-/* ============================================
-   SHARED KEYFRAMES
-   ============================================ */
-@keyframes np-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+/* Amber/Orange-Gold theme for Telemetry Drawer (Gradient 13) */
+.panel-amber::before {
+  background: linear-gradient(135deg, rgba(255, 180, 0, 0.6), rgba(255, 70, 0, 0.2), rgba(0, 0, 0, 0) 60%);
 }
 
-@keyframes np-slide-up {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+/* Sophisticated Skeleton Screen (Shimmer) */
+.skeleton-row {
+  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
 }
 
-@keyframes np-skeleton-pulse {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
-@keyframes np-spin {
-  to { transform: rotate(360deg); }
+/* Drawer Transitions */
+.drawer-enter-active,
+.drawer-leave-active {
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
-
-@keyframes np-progress-indeterminate {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(200%); }
-}
-
-/* Vue Router view fade transition */
-.np-fade-enter-active,
-.np-fade-leave-active {
-  transition: opacity 0.12s ease;
-}
-.np-fade-enter-from,
-.np-fade-leave-to {
+.drawer-enter-from,
+.drawer-leave-to {
+  transform: translateX(20px);
   opacity: 0;
 }
 
-/* Sheet (slide-over) transition – slides in from the right */
-.np-slide-right-enter-active,
-.np-slide-right-leave-active {
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+/* Custom Scrollbars to maintain clean geometry without visual noise */
+.custom-scrollbar::-webkit-scrollbar,
+.custom-scrollbar-amber::-webkit-scrollbar {
+  width: 4px;
 }
-.np-slide-right-enter-from,
-.np-slide-right-leave-to {
-  transform: translateX(100%);
+.custom-scrollbar::-webkit-scrollbar-track,
+.custom-scrollbar-amber::-webkit-scrollbar-track {
+  background: transparent;
 }
-
-/* Monospace styling for network data in any theme */
-.np-mono {
-  font-family: var(--np-mono-family, "JetBrains Mono", ui-monospace, monospace);
-  font-size: 0.8125rem;
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
 }
-
-/* ============================================
-   SHARED UTILITY CLASSES
-   ============================================ */
-.np-fade-in {
-  animation: np-fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 255, 255, 0.4);
 }
-
-.np-slide-up {
-  animation: np-slide-up 0.25s cubic-bezier(0.4, 0, 0.2, 1) both;
+.custom-scrollbar-amber::-webkit-scrollbar-thumb {
+  background: rgba(255, 180, 0, 0.2);
+  border-radius: 4px;
 }
-
-.np-skeleton {
-  background: linear-gradient(90deg, rgba(20, 20, 22, 0.8) 25%, rgba(32, 32, 36, 0.6) 50%, rgba(20, 20, 22, 0.8) 75%);
-  background-size: 200% 100%;
-  animation: np-skeleton-pulse 1.8s ease-in-out infinite;
-  border-radius: 0.25rem;
-}
-
-.np-progress-bar {
-  position: relative;
-  width: 100%;
-  height: 3px;
-  background: var(--np-border);
-  border-radius: 0;
-  overflow: hidden;
-}
-
-.np-progress-bar::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 50%;
-  height: 100%;
-  background: var(--np-accent-primary);
-  border-radius: 0;
-  animation: np-progress-indeterminate 1.5s ease-in-out infinite;
-}
-
-/* ============================================
-   BACKGROUNDS — Static only, no animations
-   ============================================ */
-.np-grid-bg,
-.np-pulse-bg,
-.np-particles,
-.np-particle {
-  display: none;
-}
-
-/* ============================================
-   BACKGROUNDS — true-black base for both themes
-   ============================================ */
-body.theme-nightshade,
-body.theme-sysadmin {
-  background-color: var(--np-bg);
-}
-
-/* ============================================
-   TITLES
-   ============================================ */
-.np-glitch-title {
-  font-family: "Inter", sans-serif;
-  font-weight: 700;
-  color: var(--np-accent-primary);
-}
-
-.np-glitch-title::before,
-.np-glitch-title::after {
-  display: none;
-}
-
-.np-flash-text,
-.np-flash-text-subtle {
-  animation: none;
-}
-
-/* ============================================
-   BORDERS & BUTTONS
-   ============================================ */
-.np-neon-border {
-  border: 1px solid var(--np-border);
-  transition: var(--np-transition);
-}
-
-.np-neon-border:hover {
-  border-color: var(--np-accent-primary);
-}
-
-/* ── border-subtle ── */
-.np-neon-border-subtle {
-  border: 1px solid var(--np-border-subtle);
-  transition: var(--np-transition);
-}
-
-.np-neon-border-subtle:hover {
-  border-color: var(--np-border);
-}
-
-.np-text-glow-subtle {
-  /* No glow — tactical industrial */
+.custom-scrollbar-amber::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 180, 0, 0.5);
 }
 
 /* ============================================
@@ -254,28 +135,25 @@ body.theme-sysadmin {
    ============================================ */
 .np-cyber-btn {
   position: relative;
-  background: transparent;
-  border: 1px solid var(--np-border);
-  color: var(--np-muted-text);
+  background: rgba(0, 255, 255, 0.05);
+  border: 1px solid rgba(0, 255, 255, 0.3);
+  color: rgba(0, 255, 255, 0.8);
   font-family: "Inter", sans-serif;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  letter-spacing: 0.01em;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
   padding: 0.375rem 0.875rem;
-  border-radius: 0.25rem;
-  transition: var(--np-transition);
+  border-radius: 2px;
+  transition: all 0.2s ease;
   cursor: pointer;
   white-space: nowrap;
 }
 
-.np-cyber-btn::before {
-  display: none;
-}
-
 .np-cyber-btn:hover {
-  border-color: var(--np-accent-primary);
-  color: var(--np-accent-primary);
-  background: transparent;
+  background: rgba(0, 255, 255, 0.15);
+  border-color: rgba(0, 255, 255, 0.8);
+  color: #00ffff;
 }
 
 .np-cyber-btn:active {
@@ -286,24 +164,24 @@ body.theme-sysadmin {
    INPUT STYLES
    ============================================ */
 .np-neon-input {
-  background: var(--np-bg);
-  border: 1px solid var(--np-border);
-  color: var(--np-text);
-  font-family: "Inter", sans-serif;
-  font-size: 0.875rem;
-  border-radius: 0.25rem;
-  transition: var(--np-transition);
+  background: rgba(0, 0, 0, 0.8);
+  border: 1px solid #374151; /* gray-700 */
+  color: #e5e7eb;
+  font-family: var(--np-mono-family, monospace);
+  font-size: 0.75rem;
+  border-radius: 2px;
+  transition: all 0.2s ease;
 }
 
 .np-neon-input:focus {
-  border-color: var(--np-accent-primary);
-  box-shadow: 0 0 0 1px var(--np-accent-primary);
+  border-color: #22d3ee; /* cyan-400 */
+  box-shadow: 0 0 0 1px #22d3ee;
   outline: none;
 }
 
 .np-neon-input::placeholder {
-  color: var(--np-muted-text);
-  opacity: 0.5;
+  color: #4b5563; /* gray-600 */
+  opacity: 1;
 }
 
 .np-neon-input option {
@@ -337,28 +215,42 @@ input[type="time"].np-neon-input::-webkit-calendar-picker-indicator {
 }
 
 /* ============================================
-   PANEL STYLES
+   PANEL STYLES (Cyberdeck Overrides)
    ============================================ */
-.np-panel {
-  background: var(--np-surface);
-  border: 1px solid var(--np-border);
-  border-radius: 0.375rem;
+.np-panel,
+.np-login-panel,
+.sp-card,
+.np-settings-section {
+  background-color: rgba(0, 0, 0, 0.65) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  position: relative;
+  border: none !important;
+  border-radius: 4px;
 }
 
-/* Login Panel */
-.np-login-panel {
-  position: relative;
-  z-index: 10;
-  background: var(--np-surface);
-  border: 1px solid var(--np-border);
-  border-radius: 0.375rem;
+.np-panel::before,
+.np-login-panel::before,
+.sp-card::before,
+.np-settings-section::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(0, 255, 255, 0.4), rgba(255, 0, 255, 0.1), rgba(0, 0, 0, 0) 60%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
 }
 
 .np-login-title {
   font-family: "Inter", sans-serif;
   font-weight: 700;
-  color: var(--np-accent-primary);
-  letter-spacing: -0.01em;
+  color: rgba(0, 255, 255, 0.8);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 /* ============================================
@@ -368,18 +260,18 @@ input[type="time"].np-neon-input::-webkit-calendar-picker-indicator {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--np-border);
-  padding: 0.625rem 1rem;
-  background: var(--np-surface-elevated);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.4) !important;
 }
 
 .np-panel-title {
   font-family: "Inter", sans-serif;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.07em;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--np-muted-text);
+  color: rgba(0, 255, 255, 0.8);
 }
 
 /* ============================================
@@ -449,14 +341,11 @@ input[type="time"].np-neon-input::-webkit-calendar-picker-indicator {
    CARD COMPONENTS
    ============================================ */
 .sp-card {
-  background: var(--np-surface);
-  border: 1px solid var(--np-border);
-  border-radius: 0.375rem;
-  transition: border-color var(--np-transition);
+  /* Handled by global override above */
 }
 
 .sp-card:hover {
-  border-color: rgba(255, 255, 255, 0.12);
+  /* No old borders */
 }
 
 /* Status badges — square-ish for tactical look */
@@ -494,21 +383,19 @@ input[type="time"].np-neon-input::-webkit-calendar-picker-indicator {
    FORM SECTIONS FOR SETTINGS
    ============================================ */
 .np-settings-section {
-  border-radius: 0.375rem;
+  /* Handled by global override above */
   padding: 1rem;
   margin-bottom: 0.75rem;
-  background: var(--np-surface);
-  border: 1px solid var(--np-border);
 }
 
 .np-settings-section-title {
   font-family: "Inter", sans-serif;
   font-size: 0.7rem;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.1em;
   margin-bottom: 0.75rem;
-  color: var(--np-muted-text);
+  color: rgba(0, 255, 255, 0.8);
 }
 
 /* ============================================
@@ -520,15 +407,16 @@ table {
 }
 
 thead {
-  background: var(--np-surface-elevated);
+  background: rgba(0, 0, 0, 0.8) !important;
 }
 
 th {
-  color: var(--np-muted-text);
-  font-weight: 600;
-  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 700;
+  font-size: 0.65rem;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.1em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 td {
@@ -537,11 +425,12 @@ td {
 }
 
 tbody tr {
-  border-bottom: 1px solid var(--np-border-subtle);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  transition: background-color 0.15s ease;
 }
 
 tbody tr:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.03) !important;
 }
 
 /* ============================================

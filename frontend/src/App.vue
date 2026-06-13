@@ -118,7 +118,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-screen flex bg-[#050505] text-zinc-100">
+  <div class="min-h-screen flex cyber-canvas text-gray-300">
     <!-- Command palette (global) -->
     <CommandPalette />
 
@@ -298,7 +298,7 @@ onMounted(async () => {
       </aside>
 
       <!-- Main content via Vue Router -->
-      <main class="flex-1 p-4 relative overflow-auto min-h-screen bg-[#050505]">
+      <main class="flex-1 relative overflow-auto min-h-screen cyber-canvas">
         <RouterView v-slot="{ Component }">
           <component
             :is="Component"
