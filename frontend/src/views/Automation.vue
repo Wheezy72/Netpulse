@@ -52,7 +52,7 @@ const heartbeatLabel = computed(() => (splunkEndpoint.value && splunkToken.value
 
 function accentClass(accent: string): string {
   if (accent === "red") return "text-red-400 bg-red-500/10";
-  if (accent === "blue") return "text-blue-400 bg-blue-500/10";
+  if (accent === "blue") return "text-fuchsia-400 bg-fuchsia-500/10";
   return "text-emerald-400 bg-emerald-500/10";
 }
 
@@ -68,7 +68,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="min-h-full space-y-4 bg-[#050505] text-zinc-100">
+  <div class="min-h-full space-y-4" style="background: var(--np-bg); color: var(--np-text);">
     <header class="flex items-end justify-between px-1">
       <div>
         <p class="text-[0.65rem] uppercase tracking-[0.45em] text-white/30">incident response console</p>
@@ -77,7 +77,7 @@ onBeforeUnmount(() => {
       <div class="flex items-center gap-2 rounded-full border border-white/[0.04] bg-[#0B0F17]/80 px-3 py-1.5 backdrop-blur-md">
         <span
           class="h-2.5 w-2.5 rounded-full"
-          :class="heartbeatActive ? 'bg-blue-400 shadow-[0_0_16px_rgba(96,165,250,0.55)]' : 'bg-white/20'"
+          :class="heartbeatActive ? 'bg-fuchsia-400 shadow-[0_0_16px_rgba(217,70,239,0.55)]' : 'bg-white/20'"
         />
         <span class="np-mono text-[11px] uppercase tracking-[0.35em] text-white/45">{{ heartbeatLabel }}</span>
       </div>
@@ -137,7 +137,7 @@ onBeforeUnmount(() => {
                 v-model="splunkEndpoint"
                 type="text"
                 placeholder="https://splunk.example.com:8088/services/collector"
-              class="mt-2 w-full rounded-2xl border border-white/[0.04] bg-black/40 px-4 py-3 np-mono text-[12px] text-white outline-none placeholder:text-white/20 focus:border-blue-400/40"
+              class="mt-2 w-full rounded-2xl border border-white/[0.04] bg-black/40 px-4 py-3 np-mono text-[12px] text-white outline-none placeholder:text-white/20 focus:border-fuchsia-400/40"
               />
             </div>
 
@@ -148,7 +148,7 @@ onBeforeUnmount(() => {
                   v-model="splunkToken"
                   type="password"
                   placeholder="••••••••••••••••"
-                  class="mt-2 w-full rounded-2xl border border-white/[0.04] bg-black/40 px-4 py-3 np-mono text-[12px] text-white outline-none placeholder:text-white/20 focus:border-blue-400/40"
+                  class="mt-2 w-full rounded-2xl border border-white/[0.04] bg-black/40 px-4 py-3 np-mono text-[12px] text-white outline-none placeholder:text-white/20 focus:border-fuchsia-400/40"
                 />
               </div>
               <div>
@@ -156,7 +156,7 @@ onBeforeUnmount(() => {
                 <input
                   v-model="splunkIndex"
                   type="text"
-                  class="mt-2 w-full rounded-2xl border border-white/[0.04] bg-black/40 px-4 py-3 np-mono text-[12px] text-white outline-none focus:border-blue-400/40"
+                  class="mt-2 w-full rounded-2xl border border-white/[0.04] bg-black/40 px-4 py-3 np-mono text-[12px] text-white outline-none focus:border-fuchsia-400/40"
                 />
               </div>
             </div>
@@ -168,7 +168,7 @@ onBeforeUnmount(() => {
               </div>
               <div
                 class="h-2.5 w-2.5 rounded-full"
-                :class="heartbeatActive ? 'bg-blue-400 shadow-[0_0_18px_rgba(96,165,250,0.65)]' : 'bg-white/15'"
+                :class="heartbeatActive ? 'bg-fuchsia-400 shadow-[0_0_18px_rgba(217,70,239,0.65)]' : 'bg-white/15'"
               />
             </div>
           </section>

@@ -114,7 +114,7 @@ const isNightshade = computed(() => props.theme === "nightshade");
 
 const levelColors = {
   debug: { bg: "bg-slate-500/20", text: "text-slate-400", border: "border-slate-500/40" },
-  info: { bg: "bg-blue-500/20", text: "text-blue-400", border: "border-blue-500/40" },
+  info: { bg: "bg-fuchsia-500/20", text: "text-fuchsia-400", border: "border-fuchsia-500/40" },
   warning: { bg: "bg-amber-500/20", text: "text-amber-400", border: "border-amber-500/40" },
   error: { bg: "bg-rose-500/20", text: "text-rose-400", border: "border-rose-500/40" },
   critical: { bg: "bg-red-600/30", text: "text-red-400", border: "border-red-500/50" },
@@ -228,7 +228,7 @@ const syslogSeverityColors: Record<string, { bg: string; text: string }> = {
   Critical: { bg: "bg-red-500/25", text: "text-red-400" },
   Error: { bg: "bg-orange-500/25", text: "text-orange-400" },
   Warning: { bg: "bg-amber-500/20", text: "text-amber-400" },
-  Notice: { bg: "bg-blue-500/20", text: "text-blue-400" },
+  Notice: { bg: "bg-fuchsia-500/20", text: "text-fuchsia-400" },
   Info: { bg: "bg-sky-500/20", text: "text-sky-400" },
   Debug: { bg: "bg-slate-500/20", text: "text-slate-400" },
 };
@@ -349,8 +349,8 @@ onUnmounted(() => {
         @click="activeTab = (tab as 'application' | 'syslog')"
         class="px-4 py-2.5 text-xs font-semibold tracking-wider uppercase border-b-2 -mb-px transition-colors"
         :class="activeTab === tab
-          ? isNightshade ? 'border-blue-500 text-blue-400' : 'border-amber-500 text-amber-400'
-          : 'border-transparent text-zinc-500 hover:text-zinc-200 hover:border-zinc-600'"
+          ? isNightshade ? 'border-fuchsia-500 text-fuchsia-400' : 'border-amber-500 text-amber-400'
+          : 'border-transparent text-purple-400/50 hover:text-fuchsia-300 hover:border-purple-500/30'"
       >
         {{ tab === 'application' ? 'Application Logs' : 'Syslog Receiver' }}
       </button>
@@ -360,8 +360,8 @@ onUnmounted(() => {
     <template v-if="activeTab === 'application'">
       <header class="flex flex-wrap items-center gap-3 justify-between">
         <div>
-          <h1 class="text-sm font-semibold text-zinc-200">Log Viewer</h1>
-          <p class="text-xs text-zinc-500">Real-time application logs and diagnostics</p>
+          <h1 class="text-sm font-semibold" style="color: var(--np-text);">Log Viewer</h1>
+          <p class="text-xs" style="color: var(--np-text-dim);">Real-time application logs and diagnostics</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <button
@@ -377,7 +377,7 @@ onUnmounted(() => {
             class="np-cyber-btn flex items-center gap-1.5"
             :class="autoRefresh ? 'border-emerald-500/50 text-emerald-400' : ''"
           >
-            <span class="w-1.5 h-1.5 rounded-full" :class="autoRefresh ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'"></span>
+            <span class="w-1.5 h-1.5 rounded-full" :class="autoRefresh ? 'bg-emerald-400 animate-pulse' : 'bg-purple-400/30'"></span>
             {{ autoRefresh ? 'Live' : 'Paused' }}
           </button>
           <button @click="loadLogs" :disabled="loading" class="np-cyber-btn disabled:opacity-40">
@@ -416,7 +416,7 @@ onUnmounted(() => {
           <option value="critical">Critical</option>
         </select>
         <div class="relative flex-1 min-w-[200px]">
-          <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style="color: var(--np-text-dim);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
@@ -428,7 +428,7 @@ onUnmounted(() => {
           <button
             v-if="searchQuery"
             @click="searchQuery = ''"
-            class="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+            class="absolute right-2 top-1/2 -translate-y-1/2" style="color: var(--np-text-dim);"
           >×</button>
         </div>
       </div>
@@ -439,7 +439,7 @@ onUnmounted(() => {
 
       <!-- Virtualized log list -->
       <div class="rounded border overflow-hidden" style="border-color: var(--np-border); background: var(--np-surface);">
-        <div v-if="filteredLogs.length === 0 && !loading" class="p-8 text-center text-sm text-zinc-600">
+        <div v-if="filteredLogs.length === 0 && !loading" class="p-8 text-center text-sm" style="color: var(--np-text-dim);">
           No logs found
         </div>
         <div v-else-if="loading" class="space-y-1.5 p-2">
@@ -467,20 +467,22 @@ onUnmounted(() => {
 
             <div class="min-w-0 flex-1">
               <div class="flex items-baseline gap-2 text-[0.7rem]">
-                <span class="font-mono text-zinc-400 shrink-0">{{ formatTimestamp(log.timestamp) }}</span>
-                <span class="font-mono text-zinc-600 text-[0.6rem] shrink-0">{{ formatDate(log.timestamp) }}</span>
-                <span class="font-mono text-zinc-600 truncate">{{ log.logger }}</span>
-                <span v-if="isErrorLevel(log.level)" class="shrink-0 text-zinc-600">
+                <span class="font-mono shrink-0" style="color: var(--np-text-muted);">{{ formatTimestamp(log.timestamp) }}</span>
+                <span class="font-mono text-[0.6rem] shrink-0" style="color: var(--np-text-dim);">{{ formatDate(log.timestamp) }}</span>
+                <span class="font-mono truncate" style="color: var(--np-text-dim);">{{ log.logger }}</span>
+                <span v-if="isErrorLevel(log.level)" class="shrink-0" style="color: var(--np-text-dim);">
                   {{ expandedErrorIds.has(index) ? '▼' : '▶' }}
                 </span>
               </div>
               <p
-                class="mt-0.5 font-mono text-xs text-zinc-300 leading-relaxed"
+                class="mt-0.5 font-mono text-xs leading-relaxed"
+                style="color: var(--np-text);"
                 :class="isErrorLevel(log.level) && !expandedErrorIds.has(index) ? 'truncate' : 'break-words'"
               >{{ log.message }}</p>
               <div
                 v-if="expandedErrorIds.has(index) && (log.module || log.function)"
-                class="mt-0.5 flex items-center gap-1.5 text-[0.6rem] text-zinc-600 font-mono"
+                class="mt-0.5 flex items-center gap-1.5 text-[0.6rem] font-mono"
+                style="color: var(--np-text-dim);"
               >
                 <span v-if="log.module">{{ log.module }}</span>
                 <span v-if="log.function">→ {{ log.function }}()</span>
@@ -491,7 +493,7 @@ onUnmounted(() => {
         </RecycleScroller>
       </div>
 
-      <p class="text-center text-[0.65rem] text-zinc-600">
+      <p class="text-center text-[0.65rem]" style="color: var(--np-text-dim);">
         Showing {{ filteredLogs.length }} of {{ stats.total }} log entries
       </p>
     </template>
@@ -500,15 +502,15 @@ onUnmounted(() => {
     <template v-if="activeTab === 'syslog'">
       <header class="flex flex-wrap items-center gap-3 justify-between">
         <div>
-          <h1 class="text-sm font-semibold text-zinc-200">Syslog Receiver</h1>
-          <p class="text-xs text-zinc-500">UDP syslog listener — port {{ syslogStatus.port }}</p>
+          <h1 class="text-sm font-semibold" style="color: var(--np-text);">Syslog Receiver</h1>
+          <p class="text-xs" style="color: var(--np-text-dim);">UDP syslog listener — port {{ syslogStatus.port }}</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <!-- Status pip -->
           <div class="flex items-center gap-2 rounded border px-3 py-1.5 text-xs" style="border-color: var(--np-border);">
-            <span class="w-1.5 h-1.5 rounded-full" :class="syslogStatus.running ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'"></span>
-            <span class="text-zinc-400">{{ syslogStatus.running ? 'Running' : 'Stopped' }}</span>
-            <span class="font-mono text-zinc-300">{{ syslogStatus.message_count }} msgs</span>
+            <span class="w-1.5 h-1.5 rounded-full" :class="syslogStatus.running ? 'bg-emerald-400 animate-pulse' : 'bg-purple-400/30'"></span>
+            <span style="color: var(--np-text-muted);">{{ syslogStatus.running ? 'Running' : 'Stopped' }}</span>
+            <span class="font-mono" style="color: var(--np-text);">{{ syslogStatus.message_count }} msgs</span>
           </div>
           <button
             @click="toggleSyslogListener"
@@ -549,7 +551,7 @@ onUnmounted(() => {
           <button
             v-if="syslogSearchFilter"
             @click="syslogSearchFilter = ''; syslogApplyFilters()"
-            class="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+            class="absolute right-2 top-1/2 -translate-y-1/2" style="color: var(--np-text-dim);"
           >×</button>
         </div>
       </div>
@@ -560,7 +562,7 @@ onUnmounted(() => {
 
       <!-- Syslog table -->
       <div class="overflow-x-auto rounded border" style="border-color: var(--np-border); background: var(--np-surface);">
-        <div v-if="syslogMessages.length === 0 && !syslogLoading" class="p-8 text-center text-sm text-zinc-600">
+        <div v-if="syslogMessages.length === 0 && !syslogLoading" class="p-8 text-center text-sm" style="color: var(--np-text-dim);">
           No syslog messages found
         </div>
         <table v-else class="w-full text-left text-xs">
@@ -575,7 +577,7 @@ onUnmounted(() => {
           </thead>
           <tbody>
             <tr v-for="(msg, idx) in syslogMessages" :key="idx" class="transition-colors hover:bg-white/[0.025]">
-              <td class="whitespace-nowrap px-4 py-2 font-mono text-zinc-400">{{ msg.timestamp }}</td>
+              <td class="whitespace-nowrap px-4 py-2 font-mono" style="color: var(--np-text-muted);">{{ msg.timestamp }}</td>
               <td class="whitespace-nowrap px-4 py-2 font-mono" style="color: var(--np-accent-secondary);">{{ msg.source_ip }}</td>
               <td class="whitespace-nowrap px-4 py-2">
                 <span class="rounded px-1.5 py-0.5 text-[0.6rem] font-bold uppercase"
@@ -583,18 +585,18 @@ onUnmounted(() => {
                   {{ msg.severity }}
                 </span>
               </td>
-              <td class="whitespace-nowrap px-4 py-2 font-mono text-zinc-500">{{ msg.hostname }}</td>
-              <td class="max-w-md truncate px-4 py-2 font-mono text-zinc-200" :title="msg.message">{{ msg.message }}</td>
+              <td class="whitespace-nowrap px-4 py-2 font-mono" style="color: var(--np-text-dim);">{{ msg.hostname }}</td>
+              <td class="max-w-md truncate px-4 py-2 font-mono" style="color: var(--np-text);" :title="msg.message">{{ msg.message }}</td>
             </tr>
           </tbody>
         </table>
       </div>
 
       <div class="flex items-center justify-between">
-        <p class="text-[0.65rem] text-zinc-600">Showing {{ syslogMessages.length }} of {{ syslogTotal }} messages</p>
+        <p class="text-[0.65rem]" style="color: var(--np-text-dim);">Showing {{ syslogMessages.length }} of {{ syslogTotal }} messages</p>
         <div class="flex items-center gap-2">
           <button @click="syslogPrevPage" :disabled="syslogPage === 0" class="np-cyber-btn disabled:opacity-30 text-xs px-2 py-1">Prev</button>
-          <span class="font-mono text-xs text-zinc-500">{{ syslogPage + 1 }} / {{ syslogTotalPages }}</span>
+          <span class="font-mono text-xs" style="color: var(--np-text-dim);">{{ syslogPage + 1 }} / {{ syslogTotalPages }}</span>
           <button @click="syslogNextPage" :disabled="syslogPage >= syslogTotalPages - 1" class="np-cyber-btn disabled:opacity-30 text-xs px-2 py-1">Next</button>
         </div>
       </div>

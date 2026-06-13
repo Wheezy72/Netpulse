@@ -425,12 +425,12 @@ onMounted(async () => {
         style="border-color: var(--np-glass-border);"
         :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
       >
-        <div class="px-3 py-1.5 border-b text-[0.6rem] uppercase tracking-widest text-zinc-500" style="border-color: var(--np-border-subtle);">
+        <div class="px-3 py-1.5 border-b text-[0.6rem] uppercase tracking-widest text-purple-400/50" style="border-color: var(--np-border-subtle);">
           {{ contextMenu.device.ip_address }}
         </div>
         <button
           type="button"
-          class="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800/60 transition-colors text-left"
+          class="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-purple-200/80 hover:text-fuchsia-200 hover:bg-purple-500/10 transition-colors text-left"
           @click.stop="quickAction('ping', contextMenu.device!)"
         >
           <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -485,9 +485,9 @@ onMounted(async () => {
         :class="[
           activeTab === tab
             ? isNightshade
-              ? 'border-blue-500 text-blue-400'
+              ? 'border-fuchsia-500 text-fuchsia-400'
               : 'border-amber-500 text-amber-400'
-            : 'border-transparent text-zinc-500 hover:text-zinc-200 hover:border-zinc-600',
+            : 'border-transparent text-purple-400/50 hover:text-fuchsia-300 hover:border-purple-500/30',
         ]"
       >
         {{ tab === 'inventory' ? 'Inventory' : tab === 'uptime' ? 'Uptime Monitor' : 'SNMP Monitor' }}
@@ -499,7 +499,7 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Devices</span>
-          <span class="text-[0.7rem] text-zinc-500">
+          <span class="text-[0.7rem] text-purple-400/50">
             Inventory of discovered hosts. Right-click any row for quick actions.
           </span>
         </div>
@@ -594,13 +594,13 @@ onMounted(async () => {
               @contextmenu.prevent="openContextMenu($event, d)"
             >
               <td class="px-3 py-2.5">
-                <div class="font-mono text-zinc-100">{{ d.ip_address }}</div>
-                <div class="text-[0.65rem] text-zinc-500 mt-0.5">{{ d.hostname || d.mac_address || 'Unknown' }}</div>
+                <div class="font-mono text-purple-50">{{ d.ip_address }}</div>
+                <div class="text-[0.65rem] text-purple-400/50 mt-0.5">{{ d.hostname || d.mac_address || 'Unknown' }}</div>
               </td>
               <td class="px-3 py-2.5 hidden sm:table-cell">
                 <span class="sp-badge">{{ d.is_gateway ? 'Gateway' : (d.device_type || 'Unknown') }}</span>
               </td>
-              <td class="px-3 py-2.5 hidden md:table-cell text-zinc-500">
+              <td class="px-3 py-2.5 hidden md:table-cell text-purple-400/50">
                 {{ d.zone || '—' }}
               </td>
               <td class="px-3 py-2.5 text-center" @click.stop>
@@ -622,7 +622,7 @@ onMounted(async () => {
               </td>
             </tr>
             <tr v-if="filteredDevices.length === 0">
-              <td colspan="4" class="px-3 py-6 text-center text-zinc-600">
+              <td colspan="4" class="px-3 py-6 text-center text-purple-400/30">
                 No devices found.
               </td>
             </tr>
@@ -633,12 +633,12 @@ onMounted(async () => {
 
     <!-- Uptime tab -->
     <div v-if="activeTab === 'uptime'" class="np-panel p-4">
-      <Uptime :is-admin="isAdmin" />
+      <Uptime :is-admin="isAdmin" :theme="props.theme" />
     </div>
 
     <!-- SNMP tab -->
     <div v-if="activeTab === 'snmp'" class="np-panel p-4 space-y-4">
-      <p class="text-xs text-zinc-500">SNMP Polling interface active.</p>
+      <p class="text-xs text-purple-400/50">SNMP Polling interface active.</p>
     </div>
   </div>
 

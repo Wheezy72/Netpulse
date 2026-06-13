@@ -31,14 +31,6 @@ frontend/dist/
 .eslintcache
 
 # ==========================================
-# GOLANG (DATA PLANE PROBES)
-# ==========================================
-probes/netpulse-probe
-*.exe
-*.test
-*.prof
-
-# ==========================================
 # DOCKER & DATABASE VOLUMES
 # ==========================================
 docker-data/
@@ -54,14 +46,13 @@ data/pcaps/*.pcap
 data/pcaps/*.pcapng
 data/scans/*.txt
 data/scans/*.xml
-# (Keep the directories, ignore the contents)
 !data/scans/.gitkeep
 !data/pcaps/.gitkeep
 
 # ==========================================
 # BACKGROUND WORKERS
 # ==========================================
-celerybeat-schedule.db
+celerybeat-schedule*
 celerybeat.pid
 *.log
 
@@ -82,8 +73,6 @@ celerybeat.pid
 *.swo
 .local/
 .config/
-.replit
-replit.md
 attached_assets/
 
 # Archives
@@ -92,5 +81,4 @@ attached_assets/
 *.tar.gz
 
 # Temp files
-# Prefix with slash to ONLY ignore a temp main.py at the root, preserving app/main.py
 /main.py

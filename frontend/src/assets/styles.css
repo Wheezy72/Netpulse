@@ -21,113 +21,193 @@
 @tailwind utilities;
 
 /* ============================================
-   DESIGN TOKENS — Cyberdeck Tactical
-   True-black #000000 base.
-   Accents: Neon Cyan and Vibrant Magenta/Fuchsia, Amber (Telemetry).
+   DESIGN TOKENS — Dual Theme System
+   ============================================
+
+   Theme: Nightshade  → Deep purple base + Fuchsia/Magenta accents
+   Theme: SysAdmin    → True black base + Industrial Amber/Gold accents
    ============================================ */
 
-/* Shared Cyberdeck Utilities */
+/* ── Nightshade (default) ── */
+:root,
+.theme-nightshade {
+  --np-bg: #0a0a14;
+  --np-surface: #0f0c1e;
+  --np-surface-elevated: #161228;
+  --np-surface-hover: #1c1635;
 
+  --np-accent-primary: #d946ef;
+  --np-accent-secondary: #a855f7;
+  --np-accent-tertiary: #7c3aed;
+  --np-accent-muted: #6b6894;
+
+  --np-text: #e2dff0;
+  --np-text-muted: #9490b0;
+  --np-text-dim: #6b6894;
+
+  --np-border: rgba(139, 92, 246, 0.15);
+  --np-border-subtle: rgba(139, 92, 246, 0.08);
+  --np-border-bright: rgba(217, 70, 239, 0.4);
+
+  --np-success: #22c55e;
+  --np-warning: #eab308;
+  --np-danger: #f43f5e;
+  --np-info: #a78bfa;
+
+  --np-glass-bg: rgba(15, 12, 30, 0.75);
+  --np-glass-border: rgba(139, 92, 246, 0.12);
+
+  --np-gradient-start: rgba(217, 70, 239, 0.35);
+  --np-gradient-mid: rgba(139, 92, 246, 0.15);
+  --np-gradient-end: rgba(124, 58, 237, 0.05);
+
+  --np-mono-family: "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* ── SysAdmin ── */
+.theme-sysadmin {
+  --np-bg: #000000;
+  --np-surface: #121212;
+  --np-surface-elevated: #1a1a1a;
+  --np-surface-hover: #222222;
+
+  --np-accent-primary: #f59e0b;
+  --np-accent-secondary: #d97706;
+  --np-accent-tertiary: #b45309;
+  --np-accent-muted: #78716c;
+
+  --np-text: #e2e8f0;
+  --np-text-muted: #94a3b8;
+  --np-text-dim: #64748b;
+
+  --np-border: rgba(245, 158, 11, 0.15);
+  --np-border-subtle: rgba(245, 158, 11, 0.08);
+  --np-border-bright: rgba(245, 158, 11, 0.4);
+
+  --np-success: #22c55e;
+  --np-warning: #eab308;
+  --np-danger: #ef4444;
+  --np-info: #60a5fa;
+
+  --np-glass-bg: rgba(18, 18, 18, 0.85);
+  --np-glass-border: rgba(245, 158, 11, 0.12);
+
+  --np-gradient-start: rgba(245, 158, 11, 0.3);
+  --np-gradient-mid: rgba(217, 119, 6, 0.15);
+  --np-gradient-end: rgba(180, 83, 9, 0.05);
+}
+
+/* ============================================
+   CANVAS & GLASS
+   ============================================ */
 .cyber-canvas {
-  background-color: #000000;
-  color: #d1d5db; /* text-gray-300 */
+  background-color: var(--np-bg);
+  color: var(--np-text);
+}
+
+.np-glass {
+  background: var(--np-glass-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 .ambient-glow {
-  /* Very slow, low-frequency pulsing ambient glow shifting between dark violet and midnight blue */
-  background: radial-gradient(circle at center, rgba(30, 0, 60, 0.4) 0%, rgba(0, 10, 40, 0.2) 50%, #000000 80%);
-  animation: pulse-glow 10s ease-in-out infinite alternate;
-  will-change: opacity, transform;
-  transform: translateZ(0); /* Hardware acceleration */
+  background: radial-gradient(
+    ellipse at 20% 50%,
+    color-mix(in srgb, var(--np-accent-secondary) 8%, transparent) 0%,
+    color-mix(in srgb, var(--np-accent-primary) 4%, transparent) 40%,
+    transparent 70%
+  ),
+  radial-gradient(
+    ellipse at 80% 20%,
+    color-mix(in srgb, var(--np-accent-tertiary) 6%, transparent) 0%,
+    transparent 60%
+  );
+  animation: ambient-drift 20s ease-in-out infinite alternate;
+  will-change: opacity;
 }
 
-@keyframes pulse-glow {
-  0% { 
-    opacity: 0.6; 
-    transform: scale(1); 
-    background: radial-gradient(circle at 40% 40%, rgba(30, 0, 60, 0.4) 0%, rgba(0, 10, 40, 0.2) 50%, #000000 80%);
-  }
-  100% { 
-    opacity: 1; 
-    transform: scale(1.05); 
-    background: radial-gradient(circle at 60% 60%, rgba(20, 0, 50, 0.5) 0%, rgba(0, 20, 60, 0.3) 50%, #000000 80%);
-  }
+@keyframes ambient-drift {
+  0% { opacity: 0.7; }
+  100% { opacity: 1; }
 }
 
-/* Glassmorphism & Accents */
-.panel {
-  background-color: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+/* ============================================
+   PANELS — Glassmorphic cards with gradient borders
+   ============================================ */
+.panel,
+.np-panel,
+.np-login-panel,
+.sp-card,
+.np-settings-section {
+  background: var(--np-glass-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   position: relative;
-  border-radius: 4px;
+  border: none;
+  border-radius: 0.75rem;
 }
 
-/* Razor-thin, 1px border using CSS mask composite for perfect clean geometry */
-.panel::before {
+.panel::before,
+.np-panel::before,
+.np-login-panel::before,
+.sp-card::before,
+.np-settings-section::before {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
   padding: 1px;
-  /* Electric Neon Cyan to Vibrant Magenta/Fuchsia */
-  background: linear-gradient(135deg, rgba(0, 255, 255, 0.4), rgba(255, 0, 255, 0.1), rgba(0, 0, 0, 0) 60%);
+  background: linear-gradient(
+    135deg,
+    var(--np-gradient-start),
+    var(--np-gradient-mid),
+    var(--np-gradient-end) 70%
+  );
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
 }
 
-/* Amber/Orange-Gold theme for Telemetry Drawer (Gradient 13) */
+/* Secondary panel variant */
 .panel-amber::before {
-  background: linear-gradient(135deg, rgba(255, 180, 0, 0.6), rgba(255, 70, 0, 0.2), rgba(0, 0, 0, 0) 60%);
+  background: linear-gradient(
+    135deg,
+    var(--np-gradient-start),
+    var(--np-gradient-mid),
+    transparent 70%
+  );
 }
 
-/* Sophisticated Skeleton Screen (Shimmer) */
-.skeleton-row {
-  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite linear;
+/* ============================================
+   PANEL HEADER
+   ============================================ */
+.np-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--np-border-subtle);
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 0.75rem 0.75rem 0 0;
 }
 
-@keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+.np-panel-title {
+  font-family: "Geist", "Inter", sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--np-accent-primary);
 }
 
-/* Drawer Transitions */
-.drawer-enter-active,
-.drawer-leave-active {
-  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-}
-.drawer-enter-from,
-.drawer-leave-to {
-  transform: translateX(20px);
-  opacity: 0;
-}
-
-/* Custom Scrollbars to maintain clean geometry without visual noise */
-.custom-scrollbar::-webkit-scrollbar,
-.custom-scrollbar-amber::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track,
-.custom-scrollbar-amber::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 255, 255, 0.4);
-}
-.custom-scrollbar-amber::-webkit-scrollbar-thumb {
-  background: rgba(255, 180, 0, 0.2);
-  border-radius: 4px;
-}
-.custom-scrollbar-amber::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 180, 0, 0.5);
+.np-login-title {
+  font-family: "Geist", "Inter", sans-serif;
+  font-weight: 700;
+  color: var(--np-accent-primary);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 /* ============================================
@@ -135,52 +215,53 @@
    ============================================ */
 .np-cyber-btn {
   position: relative;
-  background: rgba(0, 255, 255, 0.05);
-  border: 1px solid rgba(0, 255, 255, 0.3);
-  color: rgba(0, 255, 255, 0.8);
-  font-family: "Inter", sans-serif;
+  background: color-mix(in srgb, var(--np-accent-primary) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--np-accent-primary) 30%, transparent);
+  color: var(--np-accent-primary);
+  font-family: "Geist", "Inter", sans-serif;
   font-size: 0.75rem;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  padding: 0.375rem 0.875rem;
-  border-radius: 2px;
+  letter-spacing: 0.08em;
+  padding: 0.4rem 1rem;
+  border-radius: 0.5rem;
   transition: all 0.2s ease;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .np-cyber-btn:hover {
-  background: rgba(0, 255, 255, 0.15);
-  border-color: rgba(0, 255, 255, 0.8);
-  color: #00ffff;
+  background: color-mix(in srgb, var(--np-accent-primary) 18%, transparent);
+  border-color: color-mix(in srgb, var(--np-accent-primary) 60%, transparent);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--np-accent-primary) 15%, transparent);
 }
 
 .np-cyber-btn:active {
-  opacity: 0.8;
+  opacity: 0.85;
+  transform: scale(0.98);
 }
 
 /* ============================================
-   INPUT STYLES
+   INPUTS
    ============================================ */
 .np-neon-input {
-  background: rgba(0, 0, 0, 0.8);
-  border: 1px solid #374151; /* gray-700 */
-  color: #e5e7eb;
-  font-family: var(--np-mono-family, monospace);
-  font-size: 0.75rem;
-  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--np-border);
+  color: var(--np-text);
+  font-family: var(--np-mono-family);
+  font-size: 0.8rem;
+  border-radius: 0.5rem;
   transition: all 0.2s ease;
 }
 
 .np-neon-input:focus {
-  border-color: #22d3ee; /* cyan-400 */
-  box-shadow: 0 0 0 1px #22d3ee;
+  border-color: var(--np-accent-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--np-accent-primary) 15%, transparent);
   outline: none;
 }
 
 .np-neon-input::placeholder {
-  color: #4b5563; /* gray-600 */
+  color: var(--np-text-dim);
   opacity: 1;
 }
 
@@ -204,114 +285,81 @@ input[type="time"].np-neon-input::-webkit-calendar-picker-indicator {
 }
 
 /* ============================================
-   SCANLINES — disabled
+   SKELETON SHIMMER
    ============================================ */
-.np-scanlines::after {
-  display: none;
+.skeleton-row,
+.np-skeleton {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--np-accent-secondary) 4%, transparent) 25%,
+    color-mix(in srgb, var(--np-accent-primary) 8%, transparent) 50%,
+    color-mix(in srgb, var(--np-accent-secondary) 4%, transparent) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
 }
 
-.np-crt-flicker {
-  animation: none;
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 /* ============================================
-   PANEL STYLES (Cyberdeck Overrides)
+   DRAWER TRANSITIONS
    ============================================ */
-.np-panel,
-.np-login-panel,
-.sp-card,
-.np-settings-section {
-  background-color: rgba(0, 0, 0, 0.65) !important;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  position: relative;
-  border: none !important;
+.drawer-enter-active,
+.drawer-leave-active {
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+.drawer-enter-from,
+.drawer-leave-to {
+  transform: translateX(20px);
+  opacity: 0;
+}
+
+/* ============================================
+   CUSTOM SCROLLBARS
+   ============================================ */
+.custom-scrollbar::-webkit-scrollbar,
+.custom-scrollbar-amber::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track,
+.custom-scrollbar-amber::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--np-accent-secondary) 20%, transparent);
   border-radius: 4px;
 }
-
-.np-panel::before,
-.np-login-panel::before,
-.sp-card::before,
-.np-settings-section::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: linear-gradient(135deg, rgba(0, 255, 255, 0.4), rgba(255, 0, 255, 0.1), rgba(0, 0, 0, 0) 60%);
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--np-accent-primary) 40%, transparent);
 }
-
-.np-login-title {
-  font-family: "Inter", sans-serif;
-  font-weight: 700;
-  color: rgba(0, 255, 255, 0.8);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+.custom-scrollbar-amber::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--np-accent-secondary) 20%, transparent);
+  border-radius: 4px;
+}
+.custom-scrollbar-amber::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--np-accent-secondary) 50%, transparent);
 }
 
 /* ============================================
-   PANEL HEADER
+   SCANLINES / CRT — disabled
    ============================================ */
-.np-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
-  padding: 0.75rem 1rem;
-  background: rgba(0, 0, 0, 0.4) !important;
-}
-
-.np-panel-title {
-  font-family: "Inter", sans-serif;
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: rgba(0, 255, 255, 0.8);
-}
-
-/* ============================================
-   TYPING ANIMATION — off by default
-   ============================================ */
-.np-typing {
-  animation: none;
-  border-right: none;
-}
-
-/* ============================================
-   PATTERN BACKGROUNDS — disabled
-   ============================================ */
-.np-hex-pattern {
-  background-image: none;
-}
-
+.np-scanlines::after { display: none; }
+.np-crt-flicker { animation: none; }
+.np-typing { animation: none; border-right: none; }
+.np-hex-pattern { background-image: none; }
 .np-circuit-pattern::before,
 .np-data-stream::before,
-.np-hologram::before {
-  display: none;
-}
+.np-hologram::before { display: none; }
 
 /* ============================================
-   STATUS BORDERS (no glow)
+   STATUS BORDERS
    ============================================ */
-.np-danger-glow {
-  border-color: var(--np-danger);
-}
-
-.np-success-glow {
-  border-color: var(--np-success);
-}
-
-/* ============================================
-   NAVBAR
-   ============================================ */
-.np-nav-glow {
-  background: none;
-}
+.np-danger-glow { border-color: var(--np-danger); }
+.np-success-glow { border-color: var(--np-success); }
+.np-nav-glow { background: none; }
 
 /* ============================================
    LOADING SPINNER
@@ -325,11 +373,14 @@ input[type="time"].np-neon-input::-webkit-calendar-picker-indicator {
   animation: np-spin 0.8s linear infinite;
 }
 
+@keyframes np-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ============================================
-   UTILITY CLASSES
+   TEXT UTILITIES
    ============================================ */
 .np-text-glow {
-  /* No glow — tactical industrial */
   color: var(--np-accent-primary);
 }
 
@@ -338,22 +389,25 @@ input[type="time"].np-neon-input::-webkit-calendar-picker-indicator {
 }
 
 /* ============================================
-   CARD COMPONENTS
+   THEME-AWARE ACCENT CLASSES
+   These let components use accent colors without
+   knowing which theme is active.
    ============================================ */
-.sp-card {
-  /* Handled by global override above */
-}
+.np-accent-text { color: var(--np-accent-primary); }
+.np-accent-bg { background-color: color-mix(in srgb, var(--np-accent-primary) 10%, transparent); }
+.np-accent-border { border-color: color-mix(in srgb, var(--np-accent-primary) 30%, transparent); }
+.np-muted-text { color: var(--np-text-muted); }
+.np-dim-text { color: var(--np-text-dim); }
+.np-surface-bg { background-color: var(--np-surface); }
 
-.sp-card:hover {
-  /* No old borders */
-}
-
-/* Status badges — square-ish for tactical look */
+/* ============================================
+   BADGES
+   ============================================ */
 .sp-badge {
-  background: rgba(100, 100, 120, 0.12);
-  color: var(--np-accent-primary);
-  border: 1px solid rgba(100, 100, 120, 0.25);
-  border-radius: 2px;
+  background: color-mix(in srgb, var(--np-accent-secondary) 10%, transparent);
+  color: var(--np-accent-secondary);
+  border: 1px solid color-mix(in srgb, var(--np-accent-secondary) 20%, transparent);
+  border-radius: 0.375rem;
   padding: 0.125rem 0.5rem;
   font-size: 0.65rem;
   font-weight: 600;
@@ -374,28 +428,27 @@ input[type="time"].np-neon-input::-webkit-calendar-picker-indicator {
 }
 
 .sp-badge-danger {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
-  border-color: rgba(239, 68, 68, 0.2);
+  background: rgba(244, 63, 94, 0.1);
+  color: #f43f5e;
+  border-color: rgba(244, 63, 94, 0.2);
 }
 
 /* ============================================
-   FORM SECTIONS FOR SETTINGS
+   SETTINGS SECTIONS
    ============================================ */
 .np-settings-section {
-  /* Handled by global override above */
   padding: 1rem;
   margin-bottom: 0.75rem;
 }
 
 .np-settings-section-title {
-  font-family: "Inter", sans-serif;
+  font-family: "Geist", "Inter", sans-serif;
   font-size: 0.7rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   margin-bottom: 0.75rem;
-  color: rgba(0, 255, 255, 0.8);
+  color: var(--np-accent-primary);
 }
 
 /* ============================================
@@ -407,16 +460,16 @@ table {
 }
 
 thead {
-  background: rgba(0, 0, 0, 0.8) !important;
+  background: rgba(0, 0, 0, 0.6);
 }
 
 th {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--np-text-dim);
   font-weight: 700;
   font-size: 0.65rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--np-border-subtle);
 }
 
 td {
@@ -425,16 +478,16 @@ td {
 }
 
 tbody tr {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--np-border-subtle);
   transition: background-color 0.15s ease;
 }
 
 tbody tr:hover {
-  background: rgba(255, 255, 255, 0.03) !important;
+  background: color-mix(in srgb, var(--np-accent-secondary) 4%, transparent) !important;
 }
 
 /* ============================================
-   SPLITPANES THEME OVERRIDES
+   SPLITPANES
    ============================================ */
 .splitpanes__splitter {
   background: var(--np-border) !important;
@@ -445,4 +498,16 @@ tbody tr:hover {
 .splitpanes__splitter:active {
   background: var(--np-accent-primary) !important;
   opacity: 0.7;
+}
+
+/* ============================================
+   FADE TRANSITION
+   ============================================ */
+.np-fade-enter-active,
+.np-fade-leave-active {
+  transition: opacity 0.15s ease;
+}
+.np-fade-enter-from,
+.np-fade-leave-to {
+  opacity: 0;
 }

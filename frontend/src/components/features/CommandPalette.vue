@@ -53,8 +53,8 @@ const allCommands: Command[] = [
   { label: "Logs", hint: "Application & syslog", group: "Navigation", icon: "≡", action: () => router.push("/logs") },
   { label: "Automation", hint: "Playbooks & scripts", group: "Navigation", icon: "⚡", action: () => router.push("/automation") },
   { label: "Settings", hint: "Provider & system config", group: "Navigation", icon: "⚙", action: () => router.push("/settings") },
-  { label: "Theme: Nightshade", hint: "Blue-500 accent", group: "Theme", icon: "◑", action: () => ui.setTheme("nightshade") },
-  { label: "Theme: SysAdmin", hint: "Amber-500 accent", group: "Theme", icon: "◐", action: () => ui.setTheme("sysadmin") },
+  { label: "Theme: Nightshade", hint: "Fuchsia accent", group: "Theme", icon: "◑", action: () => ui.setTheme("nightshade") },
+  { label: "Theme: SysAdmin", hint: "Amber accent", group: "Theme", icon: "◐", action: () => ui.setTheme("sysadmin") },
   { label: "Toggle Sidebar", hint: "Collapse / expand nav", group: "Actions", icon: "◫", action: () => ui.toggleSidebar() },
 ];
 
@@ -129,7 +129,7 @@ const isNightshade = computed(() => ui.theme === "nightshade");
             class="flex items-center gap-3 px-4 py-3.5 border-b"
             style="border-color: var(--np-glass-border);"
           >
-            <svg class="w-4 h-4 shrink-0 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-4 h-4 shrink-0" style="color: var(--np-text-dim);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <input
@@ -137,24 +137,25 @@ const isNightshade = computed(() => ui.theme === "nightshade");
               v-model="query"
               type="text"
               placeholder="Search commands, views, actions…"
-              class="flex-1 bg-transparent outline-none text-sm text-zinc-100 placeholder:text-zinc-600 font-sans"
+              class="flex-1 bg-transparent outline-none text-sm placeholder:text-purple-400/30 font-sans"
+              style="color: var(--np-text);"
               @keydown.up.prevent="selectUp"
               @keydown.down.prevent="selectDown"
               @keydown.enter.prevent="executeSelected"
               @keydown.escape="close"
             />
-            <kbd class="text-[0.6rem] px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-500 font-mono">Esc</kbd>
+            <kbd class="text-[0.6rem] px-1.5 py-0.5 rounded border font-mono" style="border-color: var(--np-border); color: var(--np-text-dim);">Esc</kbd>
           </div>
 
           <!-- Grouped command list -->
           <ul class="max-h-80 overflow-y-auto py-2 font-sans" role="listbox">
             <template v-if="flatFiltered.length === 0">
-              <li class="px-4 py-3 text-sm text-zinc-500">No commands found.</li>
+              <li class="px-4 py-3 text-sm" style="color: var(--np-text-dim);">No commands found.</li>
             </template>
             <template v-else>
               <template v-for="[group, cmds] in groupedFiltered" :key="group">
                 <!-- Group header -->
-                <li class="px-4 pt-2 pb-1 text-[0.6rem] uppercase tracking-widest text-zinc-600">{{ group }}</li>
+                <li class="px-4 pt-2 pb-1 text-[0.6rem] uppercase tracking-widest" style="color: var(--np-text-dim);">{{ group }}</li>
                 <!-- Commands in group -->
                 <li
                   v-for="cmd in cmds"
@@ -163,8 +164,9 @@ const isNightshade = computed(() => ui.theme === "nightshade");
                   :aria-selected="isSelected(cmd)"
                   class="flex items-center gap-3 px-4 py-2.5 cursor-pointer text-sm transition-colors duration-100"
                   :class="isSelected(cmd)
-                    ? isNightshade ? 'bg-blue-500/10 text-zinc-100' : 'bg-amber-500/10 text-zinc-100'
-                    : 'text-zinc-300 hover:text-zinc-100'"
+                    ? isNightshade ? 'bg-fuchsia-500/10 text-purple-50' : 'bg-amber-500/10 text-purple-50'
+                    : ''"
+                  :style="!isSelected(cmd) ? { color: 'var(--np-text-muted)' } : {}"
                   @mouseenter="hoverCmd(cmd)"
                   @click="execute(cmd)"
                 >
@@ -172,16 +174,17 @@ const isNightshade = computed(() => ui.theme === "nightshade");
                   <span
                     class="w-0.5 h-4 rounded-full shrink-0 transition-colors"
                     :class="isSelected(cmd)
-                      ? isNightshade ? 'bg-blue-500' : 'bg-amber-500'
+                      ? isNightshade ? 'bg-fuchsia-500' : 'bg-amber-500'
                       : 'bg-transparent'"
                   ></span>
                   <span class="w-4 text-center shrink-0 font-mono text-xs"
                     :class="isSelected(cmd)
-                      ? isNightshade ? 'text-blue-400' : 'text-amber-400'
-                      : 'text-zinc-600'"
+                      ? isNightshade ? 'text-fuchsia-400' : 'text-amber-400'
+                      : ''"
+                    :style="!isSelected(cmd) ? { color: 'var(--np-text-dim)' } : {}"
                   >{{ cmd.icon }}</span>
                   <span class="flex-1 font-medium">{{ cmd.label }}</span>
-                  <span v-if="cmd.hint" class="text-[0.7rem] text-zinc-600 truncate max-w-[140px]">{{ cmd.hint }}</span>
+                  <span v-if="cmd.hint" class="text-[0.7rem] truncate max-w-[140px]" style="color: var(--np-text-dim);">{{ cmd.hint }}</span>
                 </li>
               </template>
             </template>
@@ -189,8 +192,8 @@ const isNightshade = computed(() => ui.theme === "nightshade");
 
           <!-- Footer hint -->
           <div
-            class="px-4 py-2 text-[0.65rem] flex gap-4 border-t text-zinc-600"
-            style="border-color: var(--np-glass-border);"
+            class="px-4 py-2 text-[0.65rem] flex gap-4 border-t"
+            style="border-color: var(--np-glass-border); color: var(--np-text-dim);"
           >
             <span><kbd class="font-mono">↑↓</kbd> navigate</span>
             <span><kbd class="font-mono">↵</kbd> select</span>
