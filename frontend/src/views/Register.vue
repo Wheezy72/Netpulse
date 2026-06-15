@@ -10,6 +10,7 @@ interface Props {
 
 const props = defineProps<Props>();
 
+const username = ref("");
 const email = ref("");
 const password = ref("");
 const confirmPassword = ref("");
@@ -22,6 +23,7 @@ const showContent = ref(false);
 
 const typedTitle = ref("");
 const showCursor = ref(true);
+const showField0 = ref(false);
 const showField1 = ref(false);
 const showField2 = ref(false);
 const showField3 = ref(false);
@@ -85,6 +87,10 @@ function animateCanvas() {
   function draw() {
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const accentColor = isNightshade.value
+      ? { r: 20, g: 184, b: 166 }
+      : { r: 245, g: 158, b: 11 };
 
     for (let i = 0; i < particles.length; i++) {
       const p = particles[i];
@@ -168,6 +174,7 @@ onMounted(async () => {
   loadGoogleConfig();
 
   setTimeout(() => { showContent.value = true; }, 100);
+  setTimeout(() => { showField0.value = true; }, 300);
   setTimeout(() => { showField1.value = true; }, 400);
   setTimeout(() => { showField2.value = true; }, 550);
   setTimeout(() => { showField3.value = true; }, 700);
@@ -208,7 +215,7 @@ function handleGoogleLogin(): void {
 async function handleSubmit(): Promise<void> {
   errorMessage.value = null;
 
-  if (!email.value || !password.value) {
+  if (!username.value || !email.value || !password.value) {
     errorMessage.value = "All fields are required.";
     return;
   }
@@ -226,6 +233,7 @@ async function handleSubmit(): Promise<void> {
   isSubmitting.value = true;
   try {
     await axios.post("/api/auth/users", {
+      username: username.value,
       email: email.value,
       password: password.value,
       full_name: fullName.value || null,
@@ -234,7 +242,7 @@ async function handleSubmit(): Promise<void> {
     const { data } = await axios.post<{ access_token: string; token_type: string }>(
       "/api/auth/login",
       {
-        email: email.value,
+        username: username.value,
         password: password.value,
       }
     );
@@ -303,7 +311,7 @@ async function handleSubmit(): Promise<void> {
         <form class="space-y-4" @submit.prevent="handleSubmit">
           <div
             class="np-stagger-item"
-            :class="showField1 ? 'np-stagger-visible' : 'np-stagger-hidden'"
+            :class="showField0 ? 'np-stagger-visible' : 'np-stagger-hidden'"
           >
             <label
               class="block text-xs uppercase tracking-wider mb-2 font-mono"

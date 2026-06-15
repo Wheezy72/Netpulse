@@ -105,10 +105,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             result = await session.execute(select(User).limit(1))  # type: ignore
             if result.scalar_one_or_none() is None:
                 bootstrap_user = User(
+                    username=settings.bootstrap_admin_username,
                     email=settings.bootstrap_admin_email,
                     full_name=settings.bootstrap_admin_full_name,
                     hashed_password=get_password_hash(settings.bootstrap_admin_password),
                     role=UserRole.ADMIN,
+                    force_password_change=True,
                 )
                 session.add(bootstrap_user)
                 await session.commit()  # type: ignore

@@ -30,7 +30,6 @@ const allCommands = [
   { label: "Scanning", icon: "⊕", action: () => router.push("/scanning") },
   { label: "Packet Browser", icon: "◎", action: () => router.push("/packets") },
   { label: "Diagnostics / MTR", icon: "⊘", action: () => router.push("/diagnostics") },
-  { label: "Logs", icon: "≡", action: () => router.push("/logs") },
   { label: "Automation", icon: "⚙", action: () => router.push("/automation") },
   { label: "Settings", icon: "⚙", action: () => router.push("/settings") },
   { label: "Theme: Nightshade", icon: "◑", action: () => ui.setTheme("nightshade") },

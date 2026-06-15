@@ -12,7 +12,9 @@ interface Props {
 const props = defineProps<Props>();
 const router = useRouter();
 
-const email = ref("");
+const isNightshade = computed(() => props.theme === "nightshade");
+
+const username = ref("");
 const password = ref("");
 const showPassword = ref(false);
 const rememberMe = ref(true);
@@ -79,6 +81,10 @@ function animateCanvas() {
   function draw() {
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const accentColor = isNightshade.value
+      ? { r: 59, g: 130, b: 246 }   // blue-500
+      : { r: 245, g: 158, b: 11 };  // amber-500
 
     for (let i = 0; i < particles.length; i++) {
       const p = particles[i];
@@ -200,8 +206,8 @@ function handleGoogleLogin(): void {
 async function handleSubmit(): Promise<void> {
   errorMessage.value = null;
 
-  if (!email.value || !password.value) {
-    errorMessage.value = "Enter both email and password.";
+  if (!username.value || !password.value) {
+    errorMessage.value = "Enter both username and password.";
     return;
   }
 
@@ -210,7 +216,7 @@ async function handleSubmit(): Promise<void> {
     const { data } = await axios.post<{ access_token: string; token_type: string }>(
       "/api/auth/login",
       {
-        email: email.value,
+        username: username.value,
         password: password.value,
       }
     );
@@ -262,8 +268,8 @@ async function handleSubmit(): Promise<void> {
               Email
             </label>
             <input
-              v-model="email"
-              type="email"
+              v-model="username"
+              type="text"
               autocomplete="username"
               class="np-neon-input w-full rounded-lg px-4 py-3 text-sm font-mono"
               placeholder="operator@netpulse.local"
