@@ -22,6 +22,12 @@ const route = useRoute();
 const auth = useAuthStore();
 const ui = useUiStore();
 
+const isNightshade = computed(() => ui.theme === "nightshade");
+
+function toggleTheme() {
+  ui.setTheme(isNightshade.value ? "sysadmin" : "nightshade");
+}
+
 const toastRef = ref<InstanceType<typeof Toast> | null>(null);
 const mobileMenuOpen = ref(false);
 const logoError = ref(false);
