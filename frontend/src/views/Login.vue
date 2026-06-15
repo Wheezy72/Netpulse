@@ -12,6 +12,8 @@ interface Props {
 const props = defineProps<Props>();
 const router = useRouter();
 
+const isNightshade = computed(() => props.theme === "nightshade");
+
 const username = ref("");
 const password = ref("");
 const showPassword = ref(false);
