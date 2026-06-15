@@ -80,6 +80,10 @@ function animateCanvas() {
   let particles = initParticles(canvas);
   const connectionDist = 140;
 
+  const accentColor = isNightshade.value
+    ? { r: 168, g: 85, b: 247 }
+    : { r: 245, g: 158, b: 11 };
+
   function draw() {
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -253,7 +257,7 @@ async function handleSubmit(): Promise<void> {
 
 <template>
   <div
-    class="min-h-screen flex items-center justify-center relative overflow-hidden transition-colors duration-500 bg-[#0d1117] dark:bg-[#020617]"
+    class="min-h-screen flex items-center justify-center relative overflow-hidden transition-colors duration-500 bg-[#0a0a14]"
   >
     <canvas
       ref="canvasRef"
@@ -266,6 +270,24 @@ async function handleSubmit(): Promise<void> {
       :class="isNightshade ? 'np-pulse-ring--nightshade' : 'np-pulse-ring--sysadmin'"
     />
 
+    <button
+      type="button"
+      @click="emit('toggle-theme')"
+      class="fixed top-4 right-4 z-50 p-2.5 rounded-lg border transition-all duration-300 hover:scale-105"
+      :class="[
+        isNightshade
+          ? 'border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-400 hover:bg-fuchsia-500/20'
+          : 'border-amber-400/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
+      ]"
+      :title="isNightshade ? 'Switch to SysAdmin' : 'Switch to Nightshade'"
+    >
+      <svg v-if="isNightshade" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+      </svg>
+      <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+      </svg>
+    </button>
 
     <div
       class="w-full max-w-md px-4 transition-all duration-700 transform relative"
@@ -277,11 +299,11 @@ async function handleSubmit(): Promise<void> {
           <h1 class="np-login-title text-2xl tracking-wide mb-1">
             <span>{{ typedTitle }}</span><span
               class="inline-block w-[2px] h-[1.1em] ml-[2px] align-middle"
-              :class="isNightshade ? 'bg-teal-400' : 'bg-amber-400'"
+              :class="isNightshade ? 'bg-fuchsia-400' : 'bg-amber-400'"
               :style="{ opacity: showCursor ? 1 : 0 }"
             />
           </h1>
-          <p class="text-xs font-mono" :class="isNightshade ? 'text-teal-300/50' : 'text-slate-400'">
+          <p class="text-xs font-mono" :class="isNightshade ? 'text-purple-400/50' : 'text-slate-400'">
             Create Account
           </p>
         </div>
@@ -293,26 +315,7 @@ async function handleSubmit(): Promise<void> {
           >
             <label
               class="block text-xs uppercase tracking-wider mb-2 font-mono"
-              :class="isNightshade ? 'text-gray-400' : 'text-slate-400'"
-            >
-              Username
-            </label>
-            <input
-              v-model="username"
-              type="text"
-              autocomplete="username"
-              class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 text-sm font-mono"
-              placeholder="admin"
-            />
-          </div>
-
-          <div
-            class="np-stagger-item"
-            :class="showField1 ? 'np-stagger-visible' : 'np-stagger-hidden'"
-          >
-            <label
-              class="block text-xs uppercase tracking-wider mb-2 font-mono"
-              :class="isNightshade ? 'text-gray-400' : 'text-slate-400'"
+              :class="isNightshade ? 'text-purple-300/60' : 'text-slate-400'"
             >
               Name
             </label>
@@ -331,7 +334,7 @@ async function handleSubmit(): Promise<void> {
           >
             <label
               class="block text-xs uppercase tracking-wider mb-2 font-mono"
-              :class="isNightshade ? 'text-gray-400' : 'text-slate-400'"
+              :class="isNightshade ? 'text-purple-300/60' : 'text-slate-400'"
             >
               Email
             </label>
@@ -350,7 +353,7 @@ async function handleSubmit(): Promise<void> {
           >
             <label
               class="block text-xs uppercase tracking-wider mb-2 font-mono"
-              :class="isNightshade ? 'text-gray-400' : 'text-slate-400'"
+              :class="isNightshade ? 'text-purple-300/60' : 'text-slate-400'"
             >
               Password
             </label>
@@ -366,7 +369,7 @@ async function handleSubmit(): Promise<void> {
                 type="button"
                 @click="showPassword = !showPassword"
                 class="absolute inset-y-0 right-0 flex items-center px-3 transition-opacity"
-                :class="isNightshade ? 'text-teal-400/60 hover:text-teal-400' : 'text-amber-400/60 hover:text-amber-400'"
+                :class="isNightshade ? 'text-fuchsia-400/60 hover:text-fuchsia-400' : 'text-amber-400/60 hover:text-amber-400'"
                 tabindex="-1"
                 :title="showPassword ? 'Hide password' : 'Show password'"
               >
@@ -387,7 +390,7 @@ async function handleSubmit(): Promise<void> {
           >
             <label
               class="block text-xs uppercase tracking-wider mb-2 font-mono"
-              :class="isNightshade ? 'text-gray-400' : 'text-slate-400'"
+              :class="isNightshade ? 'text-purple-300/60' : 'text-slate-400'"
             >
               Confirm Password
             </label>
@@ -403,7 +406,7 @@ async function handleSubmit(): Promise<void> {
                 type="button"
                 @click="showConfirmPassword = !showConfirmPassword"
                 class="absolute inset-y-0 right-0 flex items-center px-3 transition-opacity"
-                :class="isNightshade ? 'text-teal-400/60 hover:text-teal-400' : 'text-amber-400/60 hover:text-amber-400'"
+                :class="isNightshade ? 'text-fuchsia-400/60 hover:text-fuchsia-400' : 'text-amber-400/60 hover:text-amber-400'"
                 tabindex="-1"
                 :title="showConfirmPassword ? 'Hide password' : 'Show password'"
               >
@@ -440,23 +443,23 @@ async function handleSubmit(): Promise<void> {
             </button>
           </div>
 
-          <p v-if="errorMessage" class="text-center text-sm text-red-400">
+          <p v-if="errorMessage" class="text-center text-sm text-rose-400">
             {{ errorMessage }}
           </p>
         </form>
 
         <div v-if="googleEnabled" class="mt-5">
           <div class="flex items-center gap-3 mb-4">
-            <div class="flex-1 h-px" :class="isNightshade ? 'bg-teal-500/20' : 'bg-amber-500/20'" />
-            <span class="text-xs font-mono" :class="isNightshade ? 'text-gray-500' : 'text-slate-500'">or</span>
-            <div class="flex-1 h-px" :class="isNightshade ? 'bg-teal-500/20' : 'bg-amber-500/20'" />
+            <div class="flex-1 h-px" :class="isNightshade ? 'bg-purple-500/15' : 'bg-amber-500/20'" />
+            <span class="text-xs font-mono" :class="isNightshade ? 'text-purple-400/40' : 'text-slate-500'">or</span>
+            <div class="flex-1 h-px" :class="isNightshade ? 'bg-purple-500/15' : 'bg-amber-500/20'" />
           </div>
           <button
             type="button"
             @click="handleGoogleLogin"
             class="w-full flex items-center justify-center gap-3 rounded-lg px-4 py-3 text-sm font-medium border transition-all duration-300 hover:scale-[1.01]"
             :class="isNightshade
-              ? 'border-teal-500/30 bg-teal-500/5 text-teal-300 hover:bg-teal-500/10 hover:border-teal-400/40'
+              ? 'border-fuchsia-500/30 bg-fuchsia-500/5 text-fuchsia-300 hover:bg-fuchsia-500/10 hover:border-fuchsia-400/40'
               : 'border-amber-500/30 bg-amber-500/5 text-amber-300 hover:bg-amber-500/10 hover:border-amber-400/40'"
           >
             <svg class="w-5 h-5" viewBox="0 0 24 24">
@@ -469,15 +472,15 @@ async function handleSubmit(): Promise<void> {
           </button>
         </div>
 
-        <div class="mt-6 pt-5 border-t text-center" :class="isNightshade ? 'border-teal-500/20' : 'border-amber-500/20'">
-          <p class="text-xs mb-2" :class="isNightshade ? 'text-gray-500' : 'text-slate-500'">
+        <div class="mt-6 pt-5 border-t text-center" :class="isNightshade ? 'border-purple-500/15' : 'border-amber-500/20'">
+          <p class="text-xs mb-2" :class="isNightshade ? 'text-purple-400/40' : 'text-slate-500'">
             Already have an account?
           </p>
           <button
             type="button"
             @click="emit('switch-to-login')"
             class="text-sm transition-colors"
-            :class="isNightshade ? 'text-teal-400 hover:text-teal-300' : 'text-amber-400 hover:text-amber-300'"
+            :class="isNightshade ? 'text-fuchsia-400 hover:text-fuchsia-300' : 'text-amber-400 hover:text-amber-300'"
           >
             Sign In
           </button>
@@ -494,7 +497,7 @@ async function handleSubmit(): Promise<void> {
         />
         <span
           class="text-xs font-mono tracking-wider"
-          :class="isNightshade ? 'text-teal-400/60' : 'text-amber-400/60'"
+          :class="isNightshade ? 'text-fuchsia-400/60' : 'text-amber-400/60'"
         >
           Secure Connection &bull; System Online
         </span>
@@ -513,8 +516,8 @@ async function handleSubmit(): Promise<void> {
   z-index: 1;
 }
 .np-pulse-ring--nightshade {
-  border: 1px solid rgba(20, 184, 166, 0.1);
-  box-shadow: 0 0 60px rgba(20, 184, 166, 0.05), inset 0 0 60px rgba(20, 184, 166, 0.03);
+  border: 1px solid rgba(168, 85, 247, 0.1);
+  box-shadow: 0 0 60px rgba(217, 70, 239, 0.05), inset 0 0 60px rgba(139, 92, 246, 0.03);
   animation: pulseRingNight 4s ease-in-out infinite;
 }
 .np-pulse-ring--sysadmin {
@@ -550,8 +553,8 @@ async function handleSubmit(): Promise<void> {
   border-radius: 50%;
 }
 .np-status-dot--nightshade {
-  background: #14b8a6;
-  box-shadow: 0 0 6px rgba(20, 184, 166, 0.6);
+  background: #a855f7;
+  box-shadow: 0 0 6px rgba(168, 85, 247, 0.6);
   animation: statusPulseNight 2s ease-in-out infinite;
 }
 .np-status-dot--sysadmin {
@@ -560,8 +563,8 @@ async function handleSubmit(): Promise<void> {
   animation: statusPulseSys 2s ease-in-out infinite;
 }
 @keyframes statusPulseNight {
-  0%, 100% { box-shadow: 0 0 4px rgba(20, 184, 166, 0.4); }
-  50% { box-shadow: 0 0 12px rgba(20, 184, 166, 0.8); }
+  0%, 100% { box-shadow: 0 0 4px rgba(168, 85, 247, 0.4); }
+  50% { box-shadow: 0 0 12px rgba(168, 85, 247, 0.8); }
 }
 @keyframes statusPulseSys {
   0%, 100% { box-shadow: 0 0 4px rgba(245, 158, 11, 0.4); }
