@@ -8,6 +8,7 @@ import { resolveOui } from "../utils/oui";
 const props = defineProps<{
   theme: "nightshade" | "sysadmin";
   isAdmin?: boolean;
+  infoMode?: "full" | "compact";
 }>();
 
 const isNightshade = computed(() => props.theme === "nightshade");
@@ -425,12 +426,12 @@ onMounted(async () => {
         style="border-color: var(--np-glass-border);"
         :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
       >
-        <div class="px-3 py-1.5 border-b text-[0.6rem] uppercase tracking-widest text-purple-400/50" style="border-color: var(--np-border-subtle);">
+        <div class="px-3 py-1.5 border-b text-[0.6rem] uppercase tracking-widest text-slate-400/50" style="border-color: var(--np-border-subtle);">
           {{ contextMenu.device.ip_address }}
         </div>
         <button
           type="button"
-          class="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-purple-200/80 hover:text-fuchsia-200 hover:bg-purple-500/10 transition-colors text-left"
+          class="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-200/80 hover:text-fuchsia-200 hover:bg-slate-500/10 transition-colors text-left"
           @click.stop="quickAction('ping', contextMenu.device!)"
         >
           <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -485,9 +486,9 @@ onMounted(async () => {
         :class="[
           activeTab === tab
             ? isNightshade
-              ? 'border-fuchsia-500 text-fuchsia-400'
+              ? 'border-emerald-500 text-emerald-400'
               : 'border-amber-500 text-amber-400'
-            : 'border-transparent text-purple-400/50 hover:text-fuchsia-300 hover:border-purple-500/30',
+            : 'border-transparent text-slate-400/50 hover:text-emerald-300 hover:border-slate-500/30',
         ]"
       >
         {{ tab === 'inventory' ? 'Inventory' : tab === 'uptime' ? 'Uptime Monitor' : 'SNMP Monitor' }}
@@ -499,7 +500,7 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Devices</span>
-          <span class="text-[0.7rem] text-purple-400/50">
+          <span class="text-[0.7rem] text-slate-400/50">
             Inventory of discovered hosts. Right-click any row for quick actions.
           </span>
         </div>
@@ -553,11 +554,19 @@ onMounted(async () => {
       <div
         v-if="actionNotice"
         class="rounded p-2 text-xs border flex justify-between items-center"
-        :class="{
-          'border-blue-500/40 text-blue-300 bg-blue-500/5': actionNotice.type === 'info',
-          'border-emerald-500/40 text-emerald-300 bg-emerald-500/5': actionNotice.type === 'success',
-          'border-red-500/40 text-red-300 bg-red-500/5': actionNotice.type === 'error',
-          'border-amber-500/40 text-amber-300 bg-amber-500/5': actionNotice.type === 'warning',
+        :style="{
+          borderColor: actionNotice.type === 'success' ? 'var(--np-success)' :
+                       actionNotice.type === 'error' ? 'var(--np-danger)' :
+                       actionNotice.type === 'warning' ? 'var(--np-warning)' :
+                       'var(--np-border)',
+          color: actionNotice.type === 'success' ? 'var(--np-success)' :
+                 actionNotice.type === 'error' ? 'var(--np-danger)' :
+                 actionNotice.type === 'warning' ? 'var(--np-warning)' :
+                 'var(--np-text)',
+          background: actionNotice.type === 'success' ? 'rgba(16, 185, 129, 0.05)' :
+                      actionNotice.type === 'error' ? 'rgba(244, 63, 94, 0.05)' :
+                      actionNotice.type === 'warning' ? 'rgba(245, 158, 11, 0.05)' :
+                      'rgba(168, 85, 247, 0.05)',
         }"
       >
         <span>{{ actionNotice.message }}</span>
@@ -593,17 +602,17 @@ onMounted(async () => {
               @click="openDrawer(d)"
               @contextmenu.prevent="openContextMenu($event, d)"
             >
-              <td class="px-3 py-2.5">
+              <td class="px-3" :class="infoMode === 'compact' ? 'py-1' : 'py-2.5'">
                 <div class="font-mono text-purple-50">{{ d.ip_address }}</div>
-                <div class="text-[0.65rem] text-purple-400/50 mt-0.5">{{ d.hostname || d.mac_address || 'Unknown' }}</div>
+                <div v-if="infoMode !== 'compact'" class="text-[0.65rem] text-slate-400/50 mt-0.5">{{ d.hostname || d.mac_address || 'Unknown' }}</div>
               </td>
-              <td class="px-3 py-2.5 hidden sm:table-cell">
+              <td class="px-3 hidden sm:table-cell" :class="infoMode === 'compact' ? 'py-1' : 'py-2.5'">
                 <span class="sp-badge">{{ d.is_gateway ? 'Gateway' : (d.device_type || 'Unknown') }}</span>
               </td>
-              <td class="px-3 py-2.5 hidden md:table-cell text-purple-400/50">
+              <td class="px-3 hidden md:table-cell text-slate-400/50" :class="infoMode === 'compact' ? 'py-1' : 'py-2.5'">
                 {{ d.zone || '—' }}
               </td>
-              <td class="px-3 py-2.5 text-center" @click.stop>
+              <td class="px-3 text-center" :class="infoMode === 'compact' ? 'py-1' : 'py-2.5'" @click.stop>
                 <div v-if="blockedDevices.has(d.ip_address)" class="flex flex-col gap-1 items-center justify-center">
                   <span class="sp-badge-danger flex items-center gap-1 rounded cursor-help px-2 py-0.5" title="Manual router intervention required to drop MAC.">
                     ⚠ ROGUE
@@ -622,7 +631,7 @@ onMounted(async () => {
               </td>
             </tr>
             <tr v-if="filteredDevices.length === 0">
-              <td colspan="4" class="px-3 py-6 text-center text-purple-400/30">
+              <td colspan="4" class="px-3 py-6 text-center text-slate-400/30">
                 No devices found.
               </td>
             </tr>
@@ -638,7 +647,7 @@ onMounted(async () => {
 
     <!-- SNMP tab -->
     <div v-if="activeTab === 'snmp'" class="np-panel p-4 space-y-4">
-      <p class="text-xs text-purple-400/50">SNMP Polling interface active.</p>
+      <p class="text-xs text-slate-400/50">SNMP Polling interface active.</p>
     </div>
   </div>
 

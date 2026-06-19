@@ -290,7 +290,6 @@ class ResetPasswordRequest(BaseModel):
 
 
 class UpdatePasswordRequest(BaseModel):
-    current_password: str
     new_password: str
 
 
@@ -300,13 +299,17 @@ class UpdatePasswordRequest(BaseModel):
 )
 async def update_password(
     payload: UpdatePasswordRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(db_session),
 ) -> Dict[str, str]:
-    if not user.hashed_password or not verify_password(payload.current_password, user.hashed_password):
+    # Retrieve the user directly from the database to ensure it's attached and has all fields loaded
+    result = await db.execute(select(User).where(User.id == user.id))
+    db_user = result.scalar_one_or_none()
+    if not db_user:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Incorrect current password",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
         )
 
     if len(payload.new_password) < 6:
@@ -315,9 +318,22 @@ async def update_password(
             detail="New password must be at least 6 characters.",
         )
 
-    user.hashed_password = get_password_hash(payload.new_password)
-    user.force_password_change = False
+    db_user.hashed_password = get_password_hash(payload.new_password)
+    db_user.force_password_change = False
     await db.commit()
+
+    # Invalidate Redis session cache so it updates with the new user profile state on next request
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        import hashlib
+        digest = hashlib.sha256(token.encode()).hexdigest()[:32]
+        cache_key = f"np:session:{digest}"
+        try:
+            redis = get_redis()
+            await redis.delete(cache_key)
+        except Exception:
+            pass
 
     return {"message": "Password updated successfully."}
 

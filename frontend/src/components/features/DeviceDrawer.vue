@@ -48,11 +48,11 @@ const error = ref<string | null>(null);
 
 const isNightshade = () => props.theme === "nightshade";
 
-const severityColor: Record<string, string> = {
-  Critical: "text-red-400",
-  High: "text-orange-400",
-  Medium: "text-yellow-400",
-  Low: "text-blue-400",
+const severityStyle: Record<string, string> = {
+  Critical: "color: #f43f5e; font-weight: bold;",
+  High: "color: #f59e0b; font-weight: bold;",
+  Medium: "color: #eab308; font-weight: bold;",
+  Low: "color: #a69fbe;",
 };
 
 watch(
@@ -88,19 +88,24 @@ watch(
     <Transition name="np-slide-right">
       <aside
         v-if="open"
-        class="fixed inset-y-0 right-0 z-40 w-full max-w-lg flex flex-col border-l overflow-y-auto
-               bg-gray-900 dark:bg-[#0a0f1e] border-amber-500/15 dark:border-teal-500/20"
+        class="fixed inset-y-0 right-0 z-40 w-full max-w-lg flex flex-col border-l overflow-y-auto"
+        :style="{
+          background: 'var(--np-surface)',
+          borderColor: 'var(--np-border)',
+        }"
       >
         <!-- Header -->
         <div
-          class="flex items-center justify-between px-6 py-4 border-b border-amber-500/15 dark:border-teal-500/20"
+          class="flex items-center justify-between px-6 py-4 border-b"
+          :style="{ borderColor: 'var(--np-border)' }"
         >
-          <h2 class="font-semibold text-sm text-slate-100 dark:text-sky-100">
+          <h2 class="font-semibold text-sm" :style="{ color: 'var(--np-text)' }">
             Device Detail
           </h2>
           <button
             type="button"
-            class="p-1.5 rounded hover:bg-white/10 transition-colors text-slate-400 dark:text-teal-300"
+            class="p-1.5 rounded hover:bg-white/10 transition-colors"
+            :style="{ color: 'var(--np-muted-text)' }"
             @click="emit('close')"
           >
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -110,7 +115,7 @@ watch(
         </div>
 
         <!-- Loading -->
-        <div v-if="loading" class="flex-1 flex items-center justify-center text-sm text-slate-400 dark:text-teal-300">
+        <div v-if="loading" class="flex-1 flex items-center justify-center text-sm" :style="{ color: 'var(--np-muted-text)' }">
           Loading…
         </div>
 
@@ -122,53 +127,53 @@ watch(
 
           <!-- Identity section -->
           <section>
-            <h3 class="text-xs uppercase tracking-widest mb-3 text-slate-400 dark:text-teal-300">Identity</h3>
+            <h3 class="text-xs uppercase tracking-widest mb-3" :style="{ color: 'var(--np-muted-text)' }">Identity</h3>
             <dl class="space-y-2 text-sm">
               <div class="flex justify-between">
-                <dt class="text-slate-400 dark:text-teal-300">IP Address</dt>
-                <dd class="font-mono text-amber-500 dark:text-teal-500">{{ detail.device.ip_address }}</dd>
+                <dt :style="{ color: 'var(--np-muted-text)' }">IP Address</dt>
+                <dd class="font-mono" :style="{ color: 'var(--np-accent-primary)' }">{{ detail.device.ip_address }}</dd>
               </div>
               <div class="flex justify-between">
-                <dt class="text-slate-400 dark:text-teal-300">Hostname</dt>
-                <dd class="text-slate-100 dark:text-sky-100">{{ detail.device.hostname || '—' }}</dd>
+                <dt :style="{ color: 'var(--np-muted-text)' }">Hostname</dt>
+                <dd :style="{ color: 'var(--np-text)' }">{{ detail.device.hostname || '—' }}</dd>
               </div>
               <div class="flex justify-between">
-                <dt class="text-slate-400 dark:text-teal-300">MAC Address</dt>
-                <dd class="font-mono text-xs text-slate-100 dark:text-sky-100">{{ detail.device.mac_address || '—' }}</dd>
+                <dt :style="{ color: 'var(--np-muted-text)' }">MAC Address</dt>
+                <dd class="font-mono text-xs" :style="{ color: 'var(--np-text)' }">{{ detail.device.mac_address || '—' }}</dd>
               </div>
               <div class="flex justify-between">
-                <dt class="text-slate-400 dark:text-teal-300">Vendor (OUI)</dt>
-                <dd class="text-slate-100 dark:text-sky-100">
+                <dt :style="{ color: 'var(--np-muted-text)' }">Vendor (OUI)</dt>
+                <dd :style="{ color: 'var(--np-text)' }">
                   {{ detail.device.mac_address ? (resolveOui(detail.device.mac_address) ?? 'Unknown') : '—' }}
                 </dd>
               </div>
               <div class="flex justify-between">
-                <dt class="text-slate-400 dark:text-teal-300">Type</dt>
-                <dd class="text-slate-100 dark:text-sky-100">{{ detail.device.device_type || detail.type_guess || '—' }}</dd>
+                <dt :style="{ color: 'var(--np-muted-text)' }">Type</dt>
+                <dd :style="{ color: 'var(--np-text)' }">{{ detail.device.device_type || detail.type_guess || '—' }}</dd>
               </div>
               <div class="flex justify-between">
-                <dt class="text-slate-400 dark:text-teal-300">Zone</dt>
-                <dd class="text-slate-100 dark:text-sky-100">{{ detail.device.zone || '—' }}</dd>
+                <dt :style="{ color: 'var(--np-muted-text)' }">Zone</dt>
+                <dd :style="{ color: 'var(--np-text)' }">{{ detail.device.zone || '—' }}</dd>
               </div>
               <div class="flex justify-between">
-                <dt class="text-slate-400 dark:text-teal-300">Gateway</dt>
-                <dd :class="detail.device.is_gateway ? 'text-green-500 dark:text-emerald-400' : 'text-slate-400 dark:text-teal-300'">
+                <dt :style="{ color: 'var(--np-muted-text)' }">Gateway</dt>
+                <dd :style="{ color: detail.device.is_gateway ? 'var(--np-success)' : 'var(--np-muted-text)' }">
                   {{ detail.device.is_gateway ? 'Yes' : 'No' }}
                 </dd>
               </div>
               <div class="flex justify-between">
-                <dt class="text-slate-400 dark:text-teal-300">Last Seen</dt>
-                <dd class="text-slate-100 dark:text-sky-100">{{ detail.device.last_seen ?? '—' }}</dd>
+                <dt :style="{ color: 'var(--np-muted-text)' }">Last Seen</dt>
+                <dd :style="{ color: 'var(--np-text)' }">{{ detail.device.last_seen ?? '—' }}</dd>
               </div>
             </dl>
           </section>
 
           <!-- Vulnerabilities -->
           <section>
-            <h3 class="text-xs uppercase tracking-widest mb-3 text-slate-400 dark:text-teal-300">
+            <h3 class="text-xs uppercase tracking-widest mb-3" :style="{ color: 'var(--np-muted-text)' }">
               Vulnerabilities ({{ detail.vulnerabilities.length }})
             </h3>
-            <div v-if="detail.vulnerabilities.length === 0" class="text-xs text-slate-400 dark:text-teal-300">
+            <div v-if="detail.vulnerabilities.length === 0" class="text-xs" :style="{ color: 'var(--np-muted-text)' }">
               No vulnerabilities detected.
             </div>
             <ul v-else class="space-y-2">
@@ -177,11 +182,11 @@ watch(
                 :key="vuln.id"
                 class="flex items-start gap-2 text-xs"
               >
-                <span :class="[severityColor[vuln.severity] ?? 'text-gray-400', 'font-mono shrink-0']">
+                <span :style="severityStyle[vuln.severity] || 'color: #71698b'" class="font-mono shrink-0">
                   [{{ vuln.severity }}]
                 </span>
-                <span class="text-slate-100 dark:text-sky-100">{{ vuln.title }}</span>
-                <span v-if="vuln.port" class="ml-auto font-mono shrink-0 text-slate-400 dark:text-teal-300">
+                <span :style="{ color: 'var(--np-text)' }">{{ vuln.title }}</span>
+                <span v-if="vuln.port" class="ml-auto font-mono shrink-0" :style="{ color: 'var(--np-muted-text)' }">
                   :{{ vuln.port }}
                 </span>
               </li>
@@ -190,7 +195,7 @@ watch(
         </div>
 
         <!-- Empty state -->
-        <div v-else class="flex-1 flex items-center justify-center text-sm text-slate-400 dark:text-teal-300">
+        <div v-else class="flex-1 flex items-center justify-center text-sm" :style="{ color: 'var(--np-muted-text)' }">
           Select a device to view details.
         </div>
       </aside>

@@ -9,6 +9,7 @@ interface CurrentUser {
   email: string;
   full_name: string | null;
   role: Role;
+  force_password_change: boolean;
 }
 
 export const useAuthStore = defineStore("auth", () => {

@@ -7,13 +7,14 @@ from collections import deque
 from typing import Any, Iterable, List
 
 import nmap  # type: ignore[import-untyped]
-from scapy.all import ARP, Ether, sniff  # type: ignore[import-untyped]
+from scapy.all import ARP, Ether, sniff, conf  # type: ignore[import-untyped]
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.device import Device
 from app.models.vulnerability import Vulnerability, VulnerabilitySeverity
 from app.services.splunk_service import get_splunk_service
+from app.core.config import settings
 
 
 @dataclass
@@ -126,16 +127,31 @@ async def passive_arp_discovery(db: AsyncSession, iface: str = "eth0", duration:
         source="passive_arp",
     )
 
+    # Intelligent Gateway Detection
+    # Attempt to read the live system routing table for the default gateway.
+    # If it fails or is None, fallback to the manual setup override from config.py.
+    try:
+        live_gateway_ip = conf.route.route("0.0.0.0")[2]
+    except Exception:
+        live_gateway_ip = None
+        
+    manual_gateway_override = settings.pulse_gateway_ip
+
     for ip, mac in pairs:
+        # Determine if this IP matches the detected gateway or the manual override
+        is_gw = (ip == live_gateway_ip) or (ip == manual_gateway_override)
+
         # Upsert behaviour: try to find an existing device by IP, else create new.
         result = await db.execute(select(Device).where(Device.ip_address == ip))
         device = result.scalar_one_or_none()
 
         if device is None:
-            device = Device(ip_address=ip, mac_address=mac, last_seen=now)
+            device = Device(ip_address=ip, mac_address=mac, last_seen=now, is_gateway=is_gw)
             db.add(device)
         else:
             device.mac_address = device.mac_address or mac
             device.last_seen = now
+            if is_gw:
+                device.is_gateway = True
 
     await db.commit()

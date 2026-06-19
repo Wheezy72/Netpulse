@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import io
 import uuid
 from datetime import datetime
@@ -153,9 +154,10 @@ def _generate_pdf_content(
         elements.append(Paragraph("Network Operations Console", tagline_style))
         elements.append(HRFlowable(width="100%", thickness=2, color=np_cyan, spaceAfter=20))
 
-        elements.append(Paragraph(title, title_style))
+        elements.append(Paragraph(html.escape(title), title_style))
         elements.append(Paragraph(f"Generated: {datetime.now().strftime('%B %d, %Y at %H:%M')}", meta_style))
-        elements.append(Paragraph(f"Report Type: {report_type.replace('_', ' ').title()}", meta_style))
+        safe_report_type = html.escape(report_type).replace('_', ' ').title()
+        elements.append(Paragraph(f"Report Type: {safe_report_type}", meta_style))
         elements.append(Spacer(1, 20))
 
         elements.append(Paragraph("Executive Summary", heading_style))
@@ -547,14 +549,15 @@ async def generate_scan_pdf(
     elements = []
     elements.append(Paragraph("NETPULSE", logo_style))
     elements.append(Spacer(1, 10))
-    elements.append(Paragraph(f"Scan Report: {request.scan_type or 'Network Scan'}", title_style))
+    safe_scan_type = html.escape(request.scan_type or 'Network Scan')
+    elements.append(Paragraph(f"Scan Report: {safe_scan_type}", title_style))
     elements.append(HRFlowable(width="100%", thickness=2, color=np_cyan, spaceAfter=15))
     elements.append(Paragraph(f"Generated: {datetime.now().strftime('%B %d, %Y at %H:%M')}", styles['Normal']))
 
     if request.target:
-        elements.append(Paragraph(f"<b>Target:</b> {request.target}", styles['Normal']))
+        elements.append(Paragraph(f"<b>Target:</b> {html.escape(request.target)}", styles['Normal']))
     if request.command:
-        elements.append(Paragraph(f"<b>Command:</b> <font name='Courier' size='9'>{request.command}</font>", styles['Normal']))
+        elements.append(Paragraph(f"<b>Command:</b> <font name='Courier' size='9'>{html.escape(request.command)}</font>", styles['Normal']))
 
     elements.append(Spacer(1, 20))
     elements.append(Paragraph("Scan Results", ParagraphStyle('Heading', parent=styles['Heading2'], fontSize=14, textColor=np_indigo)))

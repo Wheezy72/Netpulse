@@ -19,15 +19,9 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
-    path: "/diagnostics",
-    name: "diagnostics",
-    component: () => import("../views/Diagnostics.vue"),
-    meta: { requiresAuth: true },
-  },
-  {
-    path: "/scanning",
-    name: "scanning",
-    component: () => import("../views/Scanning.vue"),
+    path: "/toolbox",
+    name: "toolbox",
+    component: () => import("../views/Toolbox.vue"),
     meta: { requiresAuth: true },
   },
   {
@@ -37,9 +31,9 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
-    path: "/automation",
-    name: "automation",
-    component: () => import("../views/Automation.vue"),
+    path: "/logs",
+    name: "logs",
+    component: () => import("../views/Logs.vue"),
     meta: { requiresAuth: true },
   },
   {

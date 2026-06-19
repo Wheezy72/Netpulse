@@ -25,8 +25,6 @@ def _isolate_env(monkeypatch):
         "DATABASE_URL": "postgresql+asyncpg://netpulse:netpulse@localhost:5432/netpulse",
         "REDIS_URL": "redis://localhost:6379/0",
         "RABBITMQ_URL": "amqp://netpulse:netpulse@localhost:5672/netpulse",
-        "INFLUXDB_URL": "http://localhost:8086",
-        "INFLUXDB_TOKEN": "test-token",
         "ENVIRONMENT": "development",
     }
     for key, value in defaults.items():

@@ -9,6 +9,7 @@ type Theme = "nightshade" | "sysadmin";
 
 interface Props {
   theme: Theme;
+  infoMode?: "full" | "compact";
 }
 
 const props = defineProps<Props>();
@@ -383,10 +384,10 @@ onMounted(() => {
   <div class="space-y-4">
     <header class="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h1 class="text-xl font-semibold" :class="isNightshade ? 'text-teal-400' : 'text-amber-400'">
+        <h1 class="text-xl font-semibold" :class="isNightshade ? 'text-slate-100' : 'text-amber-400'">
           Packet Browser
         </h1>
-        <p class="text-xs" :class="isNightshade ? 'text-teal-100/60' : 'text-slate-400'">
+        <p class="text-xs text-slate-400">
           Browse parsed packet headers with virtualized rendering.
         </p>
       </div>
@@ -394,10 +395,7 @@ onMounted(() => {
       <div class="flex items-center gap-2">
         <button
           type="button"
-          class="rounded-md border px-3 py-1.5 text-xs transition-colors"
-          :class="isNightshade
-            ? 'border-teal-400/30 bg-black/30 text-teal-200 hover:bg-teal-500/10'
-            : 'border-amber-500/30 bg-slate-800/50 text-slate-300 hover:bg-amber-500/10'"
+          class="np-cyber-btn disabled:opacity-40"
           :disabled="pcapsLoading || !selectedPcapId"
           @click="refreshCurrentPcap"
         >
@@ -406,20 +404,14 @@ onMounted(() => {
       </div>
     </header>
 
-    <div
-      class="np-panel p-4 space-y-3"
-      :class="isNightshade ? 'border-teal-400/10' : ''"
-    >
+    <div class="np-panel p-4 space-y-3">
       <div class="flex flex-wrap items-end gap-3">
         <div class="min-w-[260px]">
-          <label class="block text-[0.7rem] uppercase tracking-widest text-slate-400 dark:text-teal-300">PCAP File</label>
+          <label class="block text-[0.7rem] uppercase tracking-widest text-slate-400 dark:text-zinc-500">PCAP File</label>
           <select
             v-model="selectedPcapId"
-            class="mt-1 w-full rounded-md border px-3 py-2 text-sm bg-transparent outline-none"
+            class="np-neon-input mt-1 w-full px-3 py-2 text-sm"
             :disabled="pcapsLoading || pcaps.length === 0"
-            :class="isNightshade
-              ? 'border-teal-400/30 text-teal-100 focus:border-teal-400/60'
-              : 'border-amber-400/30 text-amber-100 focus:border-amber-400/60'"
           >
             <option v-if="pcaps.length === 0" :value="null">No pcaps found</option>
             <option v-for="c in pcaps" :key="c.id" :value="c.id">
@@ -430,7 +422,7 @@ onMounted(() => {
 
         <div class="flex-1 min-w-[240px]">
           <div class="rounded-md border px-3 py-2 text-xs"
-            :class="isNightshade ? 'border-teal-400/20 bg-black/20 text-teal-100/70' : 'border-slate-700 bg-slate-900/40 text-slate-400'"
+            :class="isNightshade ? 'border-zinc-800 bg-zinc-950/20 text-zinc-400' : 'border-slate-700 bg-slate-900/40 text-slate-400'"
           >
             <div v-if="pcapsLoading">Loading pcaps…</div>
             <div v-else-if="pcapsError" class="text-rose-400">{{ pcapsError }}</div>
@@ -632,7 +624,7 @@ onMounted(() => {
       <Splitpanes
         horizontal
         class="rounded-lg overflow-hidden border"
-        :class="isNightshade ? 'border-teal-400/30' : 'border-slate-700'"
+        :class="isNightshade ? 'border-zinc-800' : 'border-slate-700'"
         style="height: 520px;"
       >
         <!-- Top pane: packet list (Zeek sessions / indexed packets) -->
@@ -645,7 +637,7 @@ onMounted(() => {
 
             <div
               class="grid grid-cols-[10.25rem_3.5rem_11rem_11rem_6rem_5rem] border-b px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-wider shrink-0"
-              :class="isNightshade ? 'border-teal-400/20 text-teal-300/80 bg-black/30' : 'border-slate-700 text-slate-400 bg-slate-900/40'"
+              :class="isNightshade ? 'border-zinc-800 text-zinc-300 bg-zinc-950/40' : 'border-slate-700 text-slate-400 bg-slate-900/40'"
             >
               <div>Timestamp</div>
               <div>#</div>
@@ -655,14 +647,14 @@ onMounted(() => {
               <div>Len</div>
             </div>
 
-            <div v-if="!selectedPcapId" class="flex-1 flex items-center justify-center text-sm" :class="isNightshade ? 'text-teal-100/50' : 'text-slate-500'">
+            <div v-if="!selectedPcapId" class="flex-1 flex items-center justify-center text-sm" :class="isNightshade ? 'text-zinc-500' : 'text-slate-500'">
               Select a pcap file.
             </div>
             <div v-else-if="packets.length === 0 && packetsLoading" class="flex-1 flex flex-col items-center justify-center gap-3">
               <div class="np-spinner"></div>
-              <div class="text-sm" :class="isNightshade ? 'text-teal-100/60' : 'text-slate-400'">Loading packets…</div>
+              <div class="text-sm" :class="isNightshade ? 'text-zinc-400' : 'text-slate-400'">Loading packets…</div>
             </div>
-            <div v-else-if="packets.length === 0" class="flex-1 flex items-center justify-center text-sm" :class="isNightshade ? 'text-teal-100/50' : 'text-slate-500'">
+            <div v-else-if="packets.length === 0" class="flex-1 flex items-center justify-center text-sm" :class="isNightshade ? 'text-zinc-500' : 'text-slate-500'">
               No packets. Waiting for indexing.
             </div>
 
@@ -670,7 +662,7 @@ onMounted(() => {
               v-else
               class="flex-1"
               :items="packets"
-              :item-size="40"
+              :item-size="infoMode === 'compact' ? 32 : 40"
               key-field="id"
               :buffer="600"
               :emit-update="true"
@@ -678,28 +670,29 @@ onMounted(() => {
             >
               <template #default="{ item }">
                 <div
-                  class="grid grid-cols-[10.25rem_3.5rem_11rem_11rem_6rem_5rem] px-3 h-10 items-center border-b font-mono text-xs transition-colors cursor-pointer"
+                  class="grid grid-cols-[10.25rem_3.5rem_11rem_11rem_6rem_5rem] px-3 items-center border-b font-mono text-xs transition-colors cursor-pointer"
                   :class="[
-                    isNightshade ? 'border-teal-400/10 hover:bg-teal-500/5' : 'border-slate-700/50 hover:bg-slate-700/30',
-                    selectedPacket?.id === item.id ? (isNightshade ? 'bg-teal-500/10' : 'bg-amber-500/10') : '',
+                    isNightshade ? 'border-zinc-800/40 hover:bg-zinc-800/20' : 'border-slate-700/50 hover:bg-slate-700/30',
+                    selectedPacket?.id === item.id ? (isNightshade ? 'bg-zinc-800/50 text-white' : 'bg-amber-500/10') : '',
+                    infoMode === 'compact' ? 'h-8' : 'h-10'
                   ]"
                   @click="selectPacket(item)"
                 >
-                  <div class="truncate text-slate-100 dark:text-sky-100">{{ formatTimestamp(item.timestamp) }}</div>
-                  <div class="text-slate-400 dark:text-teal-300">{{ item.packet_index }}</div>
-                  <div class="truncate text-slate-100 dark:text-sky-100">{{ formatEndpoint(item.src_ip, item.src_port) }}</div>
-                  <div class="truncate text-slate-100 dark:text-sky-100">{{ formatEndpoint(item.dst_ip, item.dst_port) }}</div>
+                  <div class="truncate text-slate-100 dark:text-zinc-100">{{ formatTimestamp(item.timestamp) }}</div>
+                  <div class="text-slate-400 dark:text-zinc-300">{{ item.packet_index }}</div>
+                  <div class="truncate text-slate-100 dark:text-zinc-100">{{ formatEndpoint(item.src_ip, item.src_port) }}</div>
+                  <div class="truncate text-slate-100 dark:text-zinc-100">{{ formatEndpoint(item.dst_ip, item.dst_port) }}</div>
                   <div>
                     <span class="px-1.5 py-0.5 rounded text-[0.6rem] font-semibold uppercase"
-                      :class="isNightshade ? 'bg-teal-500/20 text-teal-300' : 'bg-amber-500/20 text-amber-300'"
+                      :class="isNightshade ? 'bg-zinc-700/30 text-zinc-300' : 'bg-amber-500/20 text-amber-300'"
                     >{{ item.protocol || '—' }}</span>
                   </div>
-                  <div class="text-slate-400 dark:text-teal-300">{{ item.length }}</div>
+                  <div class="text-slate-400 dark:text-zinc-300">{{ item.length }}</div>
                 </div>
               </template>
             </RecycleScroller>
 
-            <div class="shrink-0 px-3 py-1.5 text-[0.65rem] flex gap-4 border-t" :class="isNightshade ? 'border-teal-400/10 text-teal-100/40' : 'border-slate-700 text-slate-500'">
+            <div class="shrink-0 px-3 py-1.5 text-[0.65rem] flex gap-4 border-t" :class="isNightshade ? 'border-zinc-800/40 text-zinc-500' : 'border-slate-700 text-slate-500'">
               <span class="font-mono">loaded: {{ packets.length }}</span>
               <span v-if="packetsLoading" class="font-mono">loading…</span>
               <span v-else-if="hasMore" class="font-mono">scroll to load more</span>
@@ -711,9 +704,9 @@ onMounted(() => {
         <Pane min-size="15">
           <div
             class="h-full p-4 font-mono text-xs overflow-auto whitespace-pre"
-            :class="isNightshade ? 'bg-black/60 text-teal-200/80' : 'bg-slate-950 text-slate-300'"
+            :class="isNightshade ? 'bg-black/60 text-zinc-300/90' : 'bg-slate-950 text-slate-300'"
           >
-            <div class="mb-2 text-[0.6rem] uppercase tracking-widest" :class="isNightshade ? 'text-teal-400/60' : 'text-slate-500'">
+            <div class="mb-2 text-[0.6rem] uppercase tracking-widest" :class="isNightshade ? 'text-zinc-500' : 'text-slate-500'">
               ── Payload Viewer ──
             </div>
             {{ buildHexView(selectedPacket) }}

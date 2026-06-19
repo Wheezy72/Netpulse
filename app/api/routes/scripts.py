@@ -128,16 +128,17 @@ async def run_prebuilt_script(
     _user: User = Depends(require_admin),
 ) -> dict[str, Any]:
     scripts_dir = Path(settings.scripts_base_dir) / settings.scripts_prebuilt_subdir
-    script_path = scripts_dir / payload.script_name
+    safe_script_name = _sanitize_filename(payload.script_name)
+    script_path = scripts_dir / safe_script_name
 
-    if settings.allowed_prebuilt_scripts and payload.script_name not in settings.allowed_prebuilt_scripts:
+    if settings.allowed_prebuilt_scripts and safe_script_name not in settings.allowed_prebuilt_scripts:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This script is not allowed by current policy")
 
     if not script_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prebuilt script not found")
 
     job = ScriptJob(
-        script_name=payload.script_name,
+        script_name=safe_script_name,
         script_path=str(script_path),
         status=ScriptJobStatus.PENDING,
         params=payload.params or {},
@@ -148,8 +149,12 @@ async def run_prebuilt_script(
     await db.refresh(job)
 
     background_tasks.add_task(execute_script_job_task.delay, job.id)
-    return {"job_id": job.id, "script_name": job.script_name}
+    return {"job_id": job.id, "script_name": safe_script_name}
 
+
+@router.get(
+    "/jobs/{job_id}",
+    summary="Get script job status and logs",
 )
 async def get_script_job(
     job_id: int,

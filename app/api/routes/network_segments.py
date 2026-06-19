@@ -62,6 +62,15 @@ async def create_network_segment(
     db: AsyncSession = Depends(db_session),
     _user: User = Depends(require_admin),
 ):
+    import ipaddress
+    try:
+        ipaddress.ip_network(segment.cidr, strict=False)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid CIDR format",
+        )
+
     new_segment = NetworkSegment(
         name=segment.name,
         cidr=segment.cidr,
@@ -93,6 +102,16 @@ async def update_network_segment(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Network segment not found",
         )
+
+    if segment.cidr is not None:
+        import ipaddress
+        try:
+            ipaddress.ip_network(segment.cidr, strict=False)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid CIDR format",
+            )
 
     update_data = segment.model_dump(exclude_unset=True)
     for key, value in update_data.items():

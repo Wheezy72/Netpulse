@@ -83,7 +83,7 @@ function animateCanvas() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const accentColor = isNightshade.value
-      ? { r: 59, g: 130, b: 246 }   // blue-500
+      ? { r: 232, g: 121, b: 249 }  // emerald-400
       : { r: 245, g: 158, b: 11 };  // amber-500
 
     for (let i = 0; i < particles.length; i++) {
@@ -250,11 +250,11 @@ async function handleSubmit(): Promise<void> {
         <div class="text-center mb-8">
           <h1 class="np-login-title text-2xl tracking-wide mb-1">
             <span>{{ typedTitle }}</span><span
-              class="inline-block w-[2px] h-[1.1em] ml-[2px] align-middle bg-fuchsia-400"
+              class="inline-block w-[2px] h-[1.1em] ml-[2px] align-middle bg-emerald-400"
               :style="{ opacity: showCursor ? 1 : 0 }"
             />
           </h1>
-          <p class="text-xs font-mono text-purple-400/50">
+          <p class="text-xs font-mono text-slate-400/50">
             Network Operations Console
           </p>
         </div>
@@ -264,15 +264,15 @@ async function handleSubmit(): Promise<void> {
             class="np-stagger-item"
             :class="showField1 ? 'np-stagger-visible' : 'np-stagger-hidden'"
           >
-            <label class="block text-xs uppercase tracking-wider mb-2 font-mono text-purple-300/60">
-              Email
+            <label class="block text-xs uppercase tracking-wider mb-2 font-mono text-slate-300/60">
+              Username
             </label>
             <input
               v-model="username"
               type="text"
               autocomplete="username"
-              class="np-neon-input w-full rounded-lg px-4 py-3 text-sm font-mono"
-              placeholder="operator@netpulse.local"
+              class="np-neon-input w-full rounded-lg px-4 py-3 text-sm font-mono bg-[#0d0a1b]"
+              placeholder="admin"
             />
           </div>
 
@@ -280,7 +280,7 @@ async function handleSubmit(): Promise<void> {
             class="np-stagger-item"
             :class="showField2 ? 'np-stagger-visible' : 'np-stagger-hidden'"
           >
-            <label class="block text-xs uppercase tracking-wider mb-2 font-mono text-purple-300/60">
+            <label class="block text-xs uppercase tracking-wider mb-2 font-mono text-slate-300/60">
               Password
             </label>
             <div class="relative">
@@ -294,7 +294,7 @@ async function handleSubmit(): Promise<void> {
               <button
                 type="button"
                 @click="showPassword = !showPassword"
-                class="absolute inset-y-0 right-0 flex items-center px-3 transition-opacity text-fuchsia-400/50 hover:text-fuchsia-400"
+                class="absolute inset-y-0 right-0 flex items-center px-3 transition-opacity text-emerald-400/50 hover:text-emerald-400"
                 tabindex="-1"
                 :title="showPassword ? 'Hide password' : 'Show password'"
               >
@@ -320,16 +320,16 @@ async function handleSubmit(): Promise<void> {
               <input
                 v-model="rememberMe"
                 type="checkbox"
-                class="rounded accent-fuchsia-500"
+                class="rounded accent-emerald-500"
               />
-              <span class="text-xs font-mono text-purple-300/60">
+              <span class="text-xs font-mono text-slate-300/60">
                 Remember me
               </span>
             </label>
             <button
               type="button"
               @click="router.push('/forgot-password')"
-              class="text-xs transition-colors text-purple-400/50 hover:text-fuchsia-400"
+              class="text-xs transition-colors text-slate-400/50 hover:text-emerald-400"
             >
               Forgot password?
             </button>
@@ -365,14 +365,14 @@ async function handleSubmit(): Promise<void> {
 
         <div v-if="googleEnabled" class="mt-5">
           <div class="flex items-center gap-3 mb-4">
-            <div class="flex-1 h-px bg-purple-500/20" />
-            <span class="text-xs font-mono text-purple-400/40">or</span>
-            <div class="flex-1 h-px bg-purple-500/20" />
+            <div class="flex-1 h-px bg-slate-500/20" />
+            <span class="text-xs font-mono text-slate-400/40">or</span>
+            <div class="flex-1 h-px bg-slate-500/20" />
           </div>
           <button
             type="button"
             @click="handleGoogleLogin"
-            class="w-full flex items-center justify-center gap-3 rounded-lg px-4 py-3 text-sm font-medium border transition-all duration-300 hover:scale-[1.01] border-purple-500/20 bg-purple-500/5 text-purple-200 hover:bg-purple-500/10 hover:border-fuchsia-400/30"
+            class="w-full flex items-center justify-center gap-3 rounded-lg px-4 py-3 text-sm font-medium border transition-all duration-300 hover:scale-[1.01] border-slate-500/20 bg-slate-500/5 text-slate-200 hover:bg-slate-500/10 hover:border-emerald-400/30"
           >
             <svg class="w-5 h-5" viewBox="0 0 24 24">
               <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>
@@ -384,14 +384,14 @@ async function handleSubmit(): Promise<void> {
           </button>
         </div>
 
-        <div class="mt-6 pt-5 border-t border-purple-500/15 text-center">
-          <p class="text-xs text-purple-400/40 mb-2">
+        <div class="mt-6 pt-5 border-t border-slate-500/15 text-center">
+          <p class="text-xs text-slate-400/40 mb-2">
             Don't have an account?
           </p>
           <button
             type="button"
             @click="emit('switch-to-register')"
-            class="text-sm transition-colors text-fuchsia-400 hover:text-fuchsia-300"
+            class="text-sm transition-colors text-emerald-400 hover:text-emerald-300"
           >
             Create Account
           </button>
@@ -403,7 +403,7 @@ async function handleSubmit(): Promise<void> {
         :class="showStatus ? 'np-stagger-visible' : 'np-stagger-hidden'"
       >
         <span class="np-status-dot" />
-        <span class="text-xs font-mono tracking-wider text-fuchsia-400/50">
+        <span class="text-xs font-mono tracking-wider text-emerald-400/50">
           Secure Connection &bull; System Online
         </span>
       </div>

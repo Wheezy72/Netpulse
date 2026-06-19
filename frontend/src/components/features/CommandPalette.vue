@@ -47,11 +47,9 @@ interface Command {
 const allCommands: Command[] = [
   { label: "Dashboard", hint: "Command center overview", group: "Navigation", icon: "▦", action: () => router.push("/dashboard") },
   { label: "Devices", hint: "Host inventory & SNMP", group: "Navigation", icon: "⬡", action: () => router.push("/devices") },
-  { label: "Diagnostics", hint: "MTR / traceroute", group: "Navigation", icon: "⊘", action: () => router.push("/diagnostics") },
-  { label: "Scanning", hint: "Nmap scan console", group: "Navigation", icon: "⊕", action: () => router.push("/scanning") },
+  { label: "Toolbox", hint: "Scans & diagnostics", group: "Navigation", icon: "⊘", action: () => router.push("/toolbox") },
   { label: "Packet Browser", hint: "Live packet capture", group: "Navigation", icon: "◎", action: () => router.push("/packets") },
   { label: "Logs", hint: "Application & syslog", group: "Navigation", icon: "≡", action: () => router.push("/logs") },
-  { label: "Automation", hint: "Playbooks & scripts", group: "Navigation", icon: "⚡", action: () => router.push("/automation") },
   { label: "Settings", hint: "Provider & system config", group: "Navigation", icon: "⚙", action: () => router.push("/settings") },
   { label: "Theme: Nightshade", hint: "Fuchsia accent", group: "Theme", icon: "◑", action: () => ui.setTheme("nightshade") },
   { label: "Theme: SysAdmin", hint: "Amber accent", group: "Theme", icon: "◐", action: () => ui.setTheme("sysadmin") },
@@ -137,7 +135,7 @@ const isNightshade = computed(() => ui.theme === "nightshade");
               v-model="query"
               type="text"
               placeholder="Search commands, views, actions…"
-              class="flex-1 bg-transparent outline-none text-sm placeholder:text-purple-400/30 font-sans"
+              class="flex-1 bg-transparent outline-none text-sm placeholder:text-slate-400/30 font-sans"
               style="color: var(--np-text);"
               @keydown.up.prevent="selectUp"
               @keydown.down.prevent="selectDown"
@@ -164,7 +162,7 @@ const isNightshade = computed(() => ui.theme === "nightshade");
                   :aria-selected="isSelected(cmd)"
                   class="flex items-center gap-3 px-4 py-2.5 cursor-pointer text-sm transition-colors duration-100"
                   :class="isSelected(cmd)
-                    ? isNightshade ? 'bg-fuchsia-500/10 text-purple-50' : 'bg-amber-500/10 text-purple-50'
+                    ? isNightshade ? 'bg-emerald-500/10 text-purple-50' : 'bg-amber-500/10 text-purple-50'
                     : ''"
                   :style="!isSelected(cmd) ? { color: 'var(--np-text-muted)' } : {}"
                   @mouseenter="hoverCmd(cmd)"
@@ -174,12 +172,12 @@ const isNightshade = computed(() => ui.theme === "nightshade");
                   <span
                     class="w-0.5 h-4 rounded-full shrink-0 transition-colors"
                     :class="isSelected(cmd)
-                      ? isNightshade ? 'bg-fuchsia-500' : 'bg-amber-500'
+                      ? isNightshade ? 'bg-emerald-500' : 'bg-amber-500'
                       : 'bg-transparent'"
                   ></span>
                   <span class="w-4 text-center shrink-0 font-mono text-xs"
                     :class="isSelected(cmd)
-                      ? isNightshade ? 'text-fuchsia-400' : 'text-amber-400'
+                      ? isNightshade ? 'text-emerald-400' : 'text-amber-400'
                       : ''"
                     :style="!isSelected(cmd) ? { color: 'var(--np-text-dim)' } : {}"
                   >{{ cmd.icon }}</span>
