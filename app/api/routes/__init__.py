@@ -11,6 +11,7 @@ from app.api.routes import (
     logs,
     metrics,
     network_segments,
+    nmap,
     packets,
     pcaps,
     playbooks,
@@ -19,6 +20,7 @@ from app.api.routes import (
     reports,
     routers,
     scripts,
+    settings,
     snmp,
     syslog_receiver,
     threat_intel,
@@ -45,11 +47,13 @@ api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
 api_router.include_router(threat_intel.router, prefix="/threat-intel", tags=["threat-intel"])
 api_router.include_router(logs.router, prefix="/logs", tags=["logs"])
 api_router.include_router(ws.router, prefix="/ws", tags=["ws"])
+api_router.include_router(nmap.router, prefix="/nmap", tags=["nmap"])
 api_router.include_router(uptime.router)
 api_router.include_router(snmp.router, prefix="/snmp", tags=["snmp"])
 api_router.include_router(syslog_receiver.router, prefix="/syslog", tags=["syslog"])
 api_router.include_router(device_actions.router, prefix="/device-actions", tags=["device-actions"])
 api_router.include_router(backup.router, prefix="/backup", tags=["backup"])
+api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
 api_router.include_router(plugins.router, prefix="/plugins", tags=["plugins"])
 
 load_builtin_plugins()

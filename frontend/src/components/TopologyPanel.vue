@@ -207,7 +207,7 @@ async function loadTopology(): Promise<void> {
     }
 
     const mappedNodes = data.nodes.map((n) => {
-      let nodeColor = { border: "#14b8a6", background: "#0f172a", highlight: { border: "#5eead4", background: "#111c33" } };
+      let nodeColor: any = { border: "#14b8a6", background: "#0f172a", highlight: { border: "#5eead4", background: "#111c33" } };
       let nodeShape = "dot";
       let nodeShadow = false as any;
 
@@ -253,7 +253,7 @@ async function loadTopology(): Promise<void> {
           barnesHut: { gravitationalConstant: -2000, centralGravity: 0.3, springLength: 95, damping: 0.15 },
         },
         nodes: { borderWidth: 2 },
-        edges: { width: 1, smooth: { type: "continuous" } },
+        edges: { width: 1, smooth: { enabled: true, type: "continuous", roundness: 0.5 } },
         interaction: { hover: true, tooltipDelay: 200 }
       };
 
@@ -262,7 +262,7 @@ async function loadTopology(): Promise<void> {
       network.on("selectNode", async (params) => {
         if (!visNodes) return;
         const nodeId = params.nodes[0];
-        const tappedNode = visNodes.get(nodeId).raw as TopologyNode;
+        const tappedNode = (visNodes.get(nodeId) as any).raw as TopologyNode;
         
         selectedNode.value = tappedNode;
         selectedTarget.value = tappedNode.ip_address; // Auto-fill Quick Recon
@@ -276,7 +276,7 @@ async function loadTopology(): Promise<void> {
 
       network.on("hoverNode", (params) => {
         if (!visNodes) return;
-        hoveredNode.value = visNodes.get(params.node).raw as TopologyNode;
+        hoveredNode.value = (visNodes.get(params.node) as any).raw as TopologyNode;
       });
 
       network.on("blurNode", () => {

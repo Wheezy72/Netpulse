@@ -2,7 +2,7 @@
 import axios from "axios";
 import { onBeforeUnmount, ref, computed } from "vue";
 
-type BrainTab = "console" | "ai-generate" | "scripts";
+type BrainTab = "console" | "scripts";
 
 const activeTab = ref<BrainTab>("console");
 const brainLogs = ref<string[]>([]);
@@ -11,15 +11,6 @@ let logSocket: WebSocket | null = null;
 const isRunningAction = ref(false);
 const actionStatus = ref<string | null>(null);
 const selectedTarget = ref("");
-
-const aiDescription = ref("");
-const aiTarget = ref("");
-const aiLoading = ref(false);
-const generatedScript = ref("");
-const generatedFilename = ref("");
-const aiExplanation = ref("");
-const isRunningGenerated = ref(false);
-const showEditor = computed(() => generatedScript.value.length > 0);
 
 function attachLogStream(jobId: number): void {
   const token = window.localStorage.getItem("np-token");
@@ -97,54 +88,6 @@ async function runPrebuiltScript(
   }
 }
 
-async function generateScript(): Promise<void> {
-  if (!aiDescription.value.trim()) return;
-  aiLoading.value = true;
-  generatedScript.value = "";
-  aiExplanation.value = "";
-
-  try {
-    const { data } = await axios.post<{
-      script: string;
-      filename: string;
-      explanation: string;
-    }>("/api/scripts/ai-generate", {
-      description: aiDescription.value,
-      target: aiTarget.value || undefined,
-    });
-    generatedScript.value = data.script;
-    generatedFilename.value = data.filename;
-    aiExplanation.value = data.explanation;
-  } catch {
-    aiExplanation.value = "Failed to generate script. Check your AI settings.";
-  } finally {
-    aiLoading.value = false;
-  }
-}
-
-async function runGeneratedScript(): Promise<void> {
-  if (!generatedScript.value.trim()) return;
-  isRunningGenerated.value = true;
-
-  try {
-    const { data } = await axios.post<{ job_id: number }>(
-      "/api/scripts/run-generated",
-      {
-        script: generatedScript.value,
-        filename: generatedFilename.value,
-        target: aiTarget.value || undefined,
-      }
-    );
-    brainLogs.value.push(`[ai] Running generated script (job #${data.job_id})...`);
-    activeTab.value = "console";
-    attachLogStream(data.job_id);
-  } catch {
-    brainLogs.value.push("[error] Failed to execute generated script.");
-  } finally {
-    isRunningGenerated.value = false;
-  }
-}
-
 function clearConsole(): void {
   brainLogs.value = [];
 }
@@ -194,7 +137,7 @@ onBeforeUnmount(() => {
 
     <div class="flex gap-1 mb-3 border-b border-amber-500/15 dark:border-teal-500/20">
       <button
-        v-for="tab in (['console', 'ai-generate', 'scripts'] as const)"
+        v-for="tab in (['console', 'scripts'] as const)"
         :key="tab"
         type="button"
         @click="activeTab = tab"
@@ -205,7 +148,7 @@ onBeforeUnmount(() => {
             : 'border-transparent text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100'
         ]"
       >
-        {{ tab === 'console' ? 'Console' : tab === 'ai-generate' ? 'Code Generator' : 'Quick Scripts' }}
+        {{ tab === 'console' ? 'Console' : 'Quick Scripts' }}
       </button>
     </div>
 
@@ -222,7 +165,7 @@ onBeforeUnmount(() => {
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
           <span>Script output will appear here</span>
-          <span class="text-[0.6rem] opacity-60">Generate a script with AI or run a quick script below</span>
+          <span class="text-[0.6rem] opacity-60">Run a quick script below</span>
         </div>
         <pre
           v-else
@@ -238,89 +181,6 @@ onBeforeUnmount(() => {
         >
           Clear Console
         </button>
-      </div>
-    </div>
-
-    <div v-else-if="activeTab === 'ai-generate'" class="np-fade-in space-y-3">
-      <div class="rounded-lg border p-4 border-amber-500/15 dark:border-teal-500/20 bg-gray-900 dark:bg-[#0a0f1e]">
-        <h3 class="text-sm font-medium mb-3 text-amber-500 dark:text-teal-500">
-          Generate a Script
-        </h3>
-        <p class="text-[0.7rem] text-slate-400 dark:text-teal-300 mb-3">
-          Describe what script you need in plain English and get a ready-to-run Python script.
-        </p>
-
-        <div class="space-y-2">
-          <textarea
-            v-model="aiDescription"
-            rows="3"
-            class="np-neon-input w-full rounded-lg px-3 py-2 text-sm resize-none"
-            placeholder="e.g. Scan my network for devices with open SSH ports and list them..."
-          ></textarea>
-
-          <div class="flex gap-2">
-            <input
-              v-model="aiTarget"
-              type="text"
-              class="np-neon-input flex-1 rounded-lg px-3 py-2 text-sm"
-              placeholder="Target IP/hostname (optional)"
-            />
-            <button
-              type="button"
-              @click="generateScript"
-              :disabled="aiLoading || !aiDescription.trim()"
-              class="np-cyber-btn rounded-lg px-4 py-2 text-xs disabled:opacity-50 flex items-center gap-2"
-            >
-              <svg v-if="aiLoading" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              {{ aiLoading ? 'Generating...' : 'Generate Script' }}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div v-if="aiExplanation && !showEditor" class="rounded-lg border p-3 border-amber-500/15 dark:border-teal-500/20 bg-gray-900 dark:bg-[#0a0f1e]">
-        <p class="text-xs text-slate-400 dark:text-teal-300">{{ aiExplanation }}</p>
-      </div>
-
-      <div v-if="showEditor" class="rounded-lg border overflow-hidden np-slide-up border-amber-500/15 dark:border-teal-500/20">
-        <div class="flex items-center justify-between px-3 py-2 bg-gray-900 dark:bg-[#0a0f1e]">
-          <div class="flex items-center gap-2">
-            <span class="text-xs font-mono text-amber-500 dark:text-teal-500">{{ generatedFilename }}</span>
-            <span class="text-[0.6rem] px-1.5 py-0.5 rounded bg-amber-500 dark:bg-teal-500 text-[#0a0f1a] dark:text-[#030712]">Generated</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <button
-              type="button"
-              @click="runGeneratedScript"
-              :disabled="isRunningGenerated"
-              class="np-cyber-btn rounded-md px-3 py-1 text-[0.7rem] disabled:opacity-50 flex items-center gap-1.5"
-            >
-              <svg v-if="isRunningGenerated" class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              <svg v-else class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              {{ isRunningGenerated ? 'Running...' : 'Run Script' }}
-            </button>
-          </div>
-        </div>
-
-        <div v-if="aiExplanation" class="px-3 py-2 text-[0.7rem] text-slate-400 dark:text-teal-300" style="background: rgba(0,0,0,0.2)">
-          {{ aiExplanation }}
-        </div>
-
-        <textarea
-          v-model="generatedScript"
-          class="w-full bg-black/90 text-slate-100 dark:text-sky-100 font-mono text-xs p-3 resize-none focus:outline-none"
-          rows="16"
-          spellcheck="false"
-        ></textarea>
       </div>
     </div>
 

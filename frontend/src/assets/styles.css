@@ -24,77 +24,86 @@
    DESIGN TOKENS — Dual Theme System
    ============================================
 
-   Theme: Nightshade  → Deep purple base + Fuchsia/Magenta accents
+   Theme: Nightshade  → Deep premium violet-black base + Fuchsia/Magenta gradients
    Theme: SysAdmin    → True black base + Industrial Amber/Gold accents
    ============================================ */
 
-/* ── Nightshade (default) ── */
+/* ── Nightshade (default: Tactical NOC Dark) ── */
 :root,
 .theme-nightshade {
-  --np-bg: #0a0a14;
-  --np-surface: #0f0c1e;
-  --np-surface-elevated: #161228;
-  --np-surface-hover: #1c1635;
-
-  --np-accent-primary: #d946ef;
-  --np-accent-secondary: #a855f7;
-  --np-accent-tertiary: #7c3aed;
-  --np-accent-muted: #6b6894;
-
-  --np-text: #e2dff0;
-  --np-text-muted: #9490b0;
-  --np-text-dim: #6b6894;
-
-  --np-border: rgba(139, 92, 246, 0.15);
-  --np-border-subtle: rgba(139, 92, 246, 0.08);
-  --np-border-bright: rgba(217, 70, 239, 0.4);
-
-  --np-success: #22c55e;
-  --np-warning: #eab308;
-  --np-danger: #f43f5e;
-  --np-info: #a78bfa;
-
-  --np-glass-bg: rgba(15, 12, 30, 0.75);
-  --np-glass-border: rgba(139, 92, 246, 0.12);
-
-  --np-gradient-start: rgba(217, 70, 239, 0.35);
-  --np-gradient-mid: rgba(139, 92, 246, 0.15);
-  --np-gradient-end: rgba(124, 58, 237, 0.05);
-
-  --np-mono-family: "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
-}
-
-/* ── SysAdmin ── */
-.theme-sysadmin {
   --np-bg: #000000;
-  --np-surface: #121212;
-  --np-surface-elevated: #1a1a1a;
-  --np-surface-hover: #222222;
+  --np-surface: #0a0a0a;
+  --np-surface-elevated: #141414;
+  --np-surface-hover: #1f1f1f;
 
-  --np-accent-primary: #f59e0b;
-  --np-accent-secondary: #d97706;
-  --np-accent-tertiary: #b45309;
-  --np-accent-muted: #78716c;
+  --np-accent-primary: #ffffff;   /* Stark White */
+  --np-accent-secondary: #e2e8f0; /* Slate 200 */
+  --np-accent-tertiary: #94a3b8;  /* Slate 400 */
+  --np-accent-muted: #475569;     /* Slate 600 */
 
-  --np-text: #e2e8f0;
+  --np-text: #ffffff;
   --np-text-muted: #94a3b8;
   --np-text-dim: #64748b;
 
-  --np-border: rgba(245, 158, 11, 0.15);
-  --np-border-subtle: rgba(245, 158, 11, 0.08);
-  --np-border-bright: rgba(245, 158, 11, 0.4);
+  --np-border: rgba(255, 255, 255, 0.15);
+  --np-border-subtle: rgba(255, 255, 255, 0.05);
+  --np-border-bright: rgba(255, 255, 255, 0.4);
 
-  --np-success: #22c55e;
-  --np-warning: #eab308;
+  --np-success: #10b981;
+  --np-warning: #f59e0b;
   --np-danger: #ef4444;
-  --np-info: #60a5fa;
+  --np-info: #0ea5e9;
 
-  --np-glass-bg: rgba(18, 18, 18, 0.85);
+  --np-glass-bg: rgba(10, 10, 10, 0.95);
+  --np-glass-border: rgba(255, 255, 255, 0.1);
+
+  --np-gradient-start: rgba(255, 255, 255, 0.15);
+  --np-gradient-mid: rgba(255, 255, 255, 0.05);
+  --np-gradient-end: rgba(255, 255, 255, 0.01);
+
+  --np-sans-family: "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif;
+  --np-mono-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* ── SysAdmin (default: Industrial Graphite & Amber) ── */
+.theme-sysadmin {
+  --np-bg: #050505;
+  --np-surface: #0f0f11;
+  --np-surface-elevated: #18181b;
+  --np-surface-hover: #27272a;
+
+  --np-accent-primary: #f59e0b;   /* Industrial Amber Warning */
+  --np-accent-secondary: #d97706; /* Deep Amber */
+  --np-accent-tertiary: #10b981;  /* Emerald */
+  --np-accent-muted: #78716c;     /* Stone Muted */
+
+  --np-text: #fafafa;
+  --np-text-muted: #d4d4d8;
+  --np-text-dim: #71717a;
+
+  --np-border: rgba(245, 158, 11, 0.15);
+  --np-border-subtle: rgba(245, 158, 11, 0.06);
+  --np-border-bright: rgba(245, 158, 11, 0.45);
+
+  --np-success: #10b981;
+  --np-warning: #f59e0b;
+  --np-danger: #ef4444;
+  --np-info: #3b82f6;
+
+  --np-glass-bg: rgba(15, 15, 17, 0.9);
   --np-glass-border: rgba(245, 158, 11, 0.12);
 
-  --np-gradient-start: rgba(245, 158, 11, 0.3);
-  --np-gradient-mid: rgba(217, 119, 6, 0.15);
-  --np-gradient-end: rgba(180, 83, 9, 0.05);
+  --np-gradient-start: rgba(245, 158, 11, 0.25);
+  --np-gradient-mid: rgba(217, 119, 6, 0.1);
+  --np-gradient-end: rgba(16, 185, 129, 0.02);
+
+  --np-sans-family: "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif;
+  --np-mono-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* Apply default font families to html/body */
+html, body {
+  font-family: var(--np-sans-family);
 }
 
 /* ============================================

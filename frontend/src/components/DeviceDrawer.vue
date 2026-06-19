@@ -48,11 +48,11 @@ const error = ref<string | null>(null);
 
 const isNightshade = () => props.theme === "nightshade";
 
-const severityColor: Record<string, string> = {
-  Critical: "text-red-400",
-  High: "text-orange-400",
-  Medium: "text-yellow-400",
-  Low: "text-blue-400",
+const severityStyle: Record<string, string> = {
+  Critical: "color: #f43f5e; font-weight: bold;",
+  High: "color: #f59e0b; font-weight: bold;",
+  Medium: "color: #eab308; font-weight: bold;",
+  Low: "color: #a69fbe;",
 };
 
 watch(
@@ -182,7 +182,7 @@ watch(
                 :key="vuln.id"
                 class="flex items-start gap-2 text-xs"
               >
-                <span :class="[severityColor[vuln.severity] ?? 'text-gray-400', 'font-mono shrink-0']">
+                <span :style="severityStyle[vuln.severity] || 'color: #71698b'" class="font-mono shrink-0">
                   [{{ vuln.severity }}]
                 </span>
                 <span :style="{ color: 'var(--np-text)' }">{{ vuln.title }}</span>

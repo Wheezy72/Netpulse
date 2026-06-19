@@ -12,7 +12,7 @@ and used across the backend for:
 - database and Redis connections,
 - security and CORS,
 - script directories and allowlists,
-- RabbitMQ / InfluxDB (split-plane data architecture),
+- RabbitMQ / TimescaleDB (split-plane data architecture),
 - medical/IoT VLAN protection,
 - rogue DHCP killswitch.
 """
@@ -43,12 +43,6 @@ class Settings(BaseSettings):
 
     # RabbitMQ – used by the Rust data-plane probe for telemetry fan-out.
     rabbitmq_url: str = "amqp://netpulse:netpulse@rabbitmq:5672/netpulse"
-
-    # InfluxDB – time-series storage for probe telemetry and bandwidth metrics.
-    influxdb_url: str = "http://influxdb:8086"
-    influxdb_token: str = "netpulse-influx-token"
-    influxdb_org: str = "netpulse"
-    influxdb_bucket: str = "telemetry"
 
     # Network monitoring targets (Pulse)
     pulse_gateway_ip: str = "192.168.1.1"

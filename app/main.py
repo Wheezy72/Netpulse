@@ -100,6 +100,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_pool()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Convert metrics table to TimescaleDB hypertable
+        from sqlalchemy import text
+        try:
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"))
+            await conn.execute(text("SELECT create_hypertable('metrics', 'timestamp', if_not_exists => TRUE);"))
+        except Exception:
+            # Silently fallback if timescaledb extension is not present (e.g. SQLite / normal PG tests)
+            pass
     if settings.environment.lower() != "production" and settings.bootstrap_admin_enabled:
         async with async_session_factory() as session:  # type: ignore
             result = await session.execute(select(User).limit(1))  # type: ignore

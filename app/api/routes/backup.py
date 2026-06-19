@@ -101,6 +101,24 @@ async def list_backups(
     return backups
 
 
+@router.get("/{filename}")
+async def download_backup(
+    filename: str,
+    current_user: User = Depends(require_admin),
+) -> FileResponse:
+    if not filename.startswith(FILENAME_PATTERN) or not filename.endswith(".json"):
+        raise HTTPException(status_code=400, detail="Invalid backup filename format")
+
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    filepath = BACKUP_DIR / filename
+    if not filepath.exists() or not filepath.is_file():
+        raise HTTPException(status_code=404, detail="Backup file not found")
+
+    return FileResponse(filepath, filename=filename, media_type="application/json")
+
+
 @router.delete("/{filename}")
 async def delete_backup(
     filename: str,

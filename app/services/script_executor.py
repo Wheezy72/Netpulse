@@ -4,7 +4,9 @@ import asyncio
 import importlib.util
 import inspect
 import ipaddress
+import json
 import re
+import sys
 import textwrap
 from dataclasses import dataclass
 from datetime import datetime
@@ -261,30 +263,132 @@ async def execute_script(
     await db.commit()
     await db.refresh(job)
 
-    context = ScriptContext(
-        db=db,
-        logger=log,
-        network=NetworkTools(),
-        job_id=job.id,
-        params=job.params or {},
-    )
-
+    script_path = Path(job.script_path)
+    temp_file_path = None
     try:
-        script_path = Path(job.script_path)
-        run_callable = await _load_script_callable(script_path)
+        # Validate that the script exists and is allowed early
+        await _load_script_callable(script_path)
 
-        if inspect.iscoroutinefunction(run_callable):
-            result = await run_callable(context)  # type: ignore[arg-type]
+        # Build wrapper code string
+        wrapper_code = f"""import asyncio
+import sys
+import json
+import importlib.util
+from pathlib import Path
+
+# Add project root to sys.path
+sys.path.insert(0, {repr(str(Path(__file__).parent.parent.parent.resolve().as_posix()))})
+
+from app.services.script_executor import NetworkTools
+
+class SubprocessContext:
+    def __init__(self, job_id, params):
+        self.job_id = job_id
+        self.params = params
+        self.network = NetworkTools()
+        self.db = None
+    
+    def logger(self, message):
+        print(f"[LOG] {{message}}", flush=True)
+
+async def main():
+    script_path = Path({repr(str(script_path.resolve().as_posix()))})
+    params = json.loads({repr(json.dumps(job.params or {}))})
+    
+    spec = importlib.util.spec_from_file_location("run_module", str(script_path))
+    if spec is None or spec.loader is None:
+        print("[ERROR] Could not load script spec", file=sys.stderr, flush=True)
+        sys.exit(1)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    
+    ctx = SubprocessContext({job.id}, params)
+    
+    try:
+        import inspect
+        if inspect.iscoroutinefunction(module.run):
+            res = await module.run(ctx)
         else:
-            # Run sync functions in a thread to avoid blocking the event loop.
-            result = await asyncio.to_thread(run_callable, context)  # type: ignore[arg-type]
+            res = module.run(ctx)
+        print(f"[RESULT] {{json.dumps(res)}}", flush=True)
+    except Exception as e:
+        print(f"[ERROR] {{e}}", file=sys.stderr, flush=True)
+        sys.exit(1)
 
-        job.result = result if isinstance(result, dict) else {"result": str(result)}
-        job.status = ScriptJobStatus.SUCCESS
+if __name__ == "__main__":
+    asyncio.run(main())
+"""
+        temp_dir = Path(settings.scripts_base_dir) / "temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_file_path = temp_dir / f"temp_job_{job.id}.py"
+        temp_file_path.write_text(wrapper_code, encoding="utf-8")
+
+        if settings.environment.lower() == "development":
+            # Bypass sandbox: execute Python code natively using asyncio subprocess
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable,
+                str(temp_file_path.resolve()),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        else:
+            # Production: execute using secure gVisor sandbox containment scripts
+            proc = await asyncio.create_subprocess_exec(
+                "docker",
+                "run",
+                "--runtime=runsc",
+                "-i",
+                "--rm",
+                "-v",
+                f"{temp_dir.resolve().as_posix()}:/workspace/temp",
+                "-v",
+                f"{Path(settings.scripts_base_dir).resolve().as_posix()}:/workspace/scripts",
+                "python:3.11-slim",
+                "python",
+                f"/workspace/temp/{temp_file_path.name}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+        stdout_bytes, stderr_bytes = await proc.communicate()
+        stdout_str = stdout_bytes.decode(errors="replace")
+        stderr_str = stderr_bytes.decode(errors="replace")
+
+        result_dict = None
+        for line in stdout_str.splitlines():
+            if line.startswith("[LOG] "):
+                log(line[6:])
+            elif line.startswith("[RESULT] "):
+                try:
+                    result_dict = json.loads(line[9:])
+                except Exception:
+                    log(f"Failed to parse result: {line}")
+            else:
+                if line.strip():
+                    log(f"stdout: {line}")
+
+        for line in stderr_str.splitlines():
+            if line.strip():
+                log(f"stderr: {line}")
+
+        if proc.returncode == 0:
+            job.result = result_dict if isinstance(result_dict, dict) else {"result": str(result_dict)}
+            job.status = ScriptJobStatus.SUCCESS
+        else:
+            log(f"Script process exited with non-zero code: {proc.returncode}")
+            job.status = ScriptJobStatus.FAILED
+
     except Exception as exc:  # noqa: BLE001
         log(f"Script execution failed: {exc!r}")
         job.status = ScriptJobStatus.FAILED
     finally:
+        # Cleanup temp file
+        if temp_file_path and temp_file_path.exists():
+            try:
+                temp_file_path.unlink()
+            except Exception:
+                pass
+
         # Persist logs and final status
         existing_logs = (job.logs or "").strip()
         combined = "\n".join(logs)

@@ -64,4 +64,21 @@ export default defineConfig({
       "@": "/src",
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            if (id.includes("echarts") || id.includes("zrender")) {
+              return "vendor-echarts";
+            }
+            if (id.includes("cytoscape") || id.includes("vis-network") || id.includes("@vue-flow")) {
+              return "vendor-graphs";
+            }
+            return "vendor";
+          }
+        },
+      },
+    },
+  },
 });

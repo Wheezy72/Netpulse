@@ -6,7 +6,7 @@ import ToggleSwitch from "../components/ui/ToggleSwitch.vue";
 type Theme = "nightshade" | "sysadmin";
 type InfoMode = "full" | "compact";
 
-type SettingsTab = "general" | "ai" | "notifications" | "network" | "schedule" | "threat" | "backup";
+type SettingsTab = "general" | "notifications" | "network" | "schedule" | "threat" | "backup";
 
 interface Props {
   theme: Theme;
@@ -33,15 +33,6 @@ interface NotificationSettings {
   alert_on_warning: boolean;
   alert_on_device_down: boolean;
   daily_digest: boolean;
-}
-
-interface AISettings {
-  provider: string;
-  api_key_configured: boolean;
-  model: string;
-  enabled: boolean;
-  custom_base_url: string;
-  custom_model: string;
 }
 
 interface ThreatIntelSettings {
@@ -199,42 +190,6 @@ async function saveNotificationSettings(): Promise<void> {
   }
 }
 
-// AI
-const aiSettings = ref<AISettings>({
-  provider: "openai",
-  api_key_configured: false,
-  model: "gpt-4o-mini",
-  enabled: false,
-  custom_base_url: "",
-  custom_model: "",
-});
-const aiSaving = ref(false);
-const aiMessage = ref<string | null>(null);
-
-async function loadAISettings(): Promise<void> {
-  try {
-    const { data } = await axios.get("/api/settings/ai");
-    aiSettings.value = { ...aiSettings.value, ...data };
-  } catch {
-    // non-fatal
-  }
-}
-
-async function saveAISettings(): Promise<void> {
-  aiSaving.value = true;
-  aiMessage.value = null;
-  try {
-    const { api_key_configured, ...payload } = aiSettings.value;
-    await axios.put("/api/settings/ai", payload);
-    aiMessage.value = "AI settings saved.";
-    setTimeout(() => (aiMessage.value = null), 3000);
-    await loadAISettings();
-  } catch {
-    aiMessage.value = "Failed to save AI settings.";
-  } finally {
-    aiSaving.value = false;
-  }
-}
 
 // Threat intel
 const threatIntel = ref<ThreatIntelSettings>({
@@ -450,7 +405,6 @@ onMounted(async () => {
   await Promise.all([
     loadNetworkSegments(),
     loadNotificationSettings(),
-    loadAISettings(),
     loadThreatIntelSettings(),
     loadScanSchedule(),
   ]);
@@ -464,7 +418,6 @@ onMounted(async () => {
       <button
         v-for="tab in [
           { key: 'general', label: 'General' },
-          { key: 'ai', label: 'AI Assistant' },
           { key: 'notifications', label: 'Alerts' },
           { key: 'network', label: 'Network' },
           { key: 'schedule', label: 'Scheduler' },
@@ -475,9 +428,10 @@ onMounted(async () => {
         type="button"
         @click="activeSettingsTab = tab.key as any"
         class="flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium transition-all duration-300 border-b-2 -mb-px"
+        :style="activeSettingsTab === tab.key ? 'border-color: var(--np-accent-primary); color: var(--np-accent-primary);' : ''"
         :class="[
           activeSettingsTab === tab.key
-            ? 'border-amber-500 dark:border-teal-500 text-amber-500 dark:text-teal-500'
+            ? ''
             : 'border-transparent text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100'
         ]"
       >
@@ -541,63 +495,6 @@ onMounted(async () => {
         <p class="text-[0.75rem]" :class="isNightshade ? 'text-teal-100/80' : 'text-slate-300'">
           {{ props.theme === 'nightshade' ? 'Nightshade' : 'SysAdmin' }}
         </p>
-      </div>
-    </section>
-
-    <!-- AI -->
-    <section v-else-if="activeSettingsTab === 'ai'" class="np-panel p-4 space-y-4">
-      <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
-        <div class="flex flex-col">
-          <span class="np-panel-title">AI Assistant</span>
-          <span class="text-[0.7rem] text-slate-400 dark:text-teal-300">Configure the AI chatbot.</span>
-        </div>
-      </header>
-
-      <div class="np-settings-section space-y-3 text-xs">
-        <div class="flex items-center justify-between">
-          <p class="np-settings-section-title mb-0">Enable AI</p>
-          <ToggleSwitch v-model="aiSettings.enabled" :theme="theme" />
-        </div>
-
-        <div v-if="aiSettings.enabled" class="grid gap-3 md:grid-cols-2">
-          <label class="flex flex-col gap-1">
-            <span :class="isNightshade ? 'text-teal-200' : 'text-slate-300'">Provider</span>
-            <select v-model="aiSettings.provider" class="np-neon-input rounded px-3 py-2 text-[0.8rem]">
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic</option>
-              <option value="ollama">Ollama</option>
-              <option value="custom">Custom / OpenAI-compatible</option>
-            </select>
-          </label>
-
-          <label class="flex flex-col gap-1">
-            <span :class="isNightshade ? 'text-teal-200' : 'text-slate-300'">Model</span>
-            <input v-model="aiSettings.model" type="text" class="np-neon-input rounded px-3 py-2 text-[0.8rem] font-mono" />
-          </label>
-
-          <label v-if="aiSettings.provider === 'custom'" class="flex flex-col gap-1 md:col-span-2">
-            <span :class="isNightshade ? 'text-teal-200' : 'text-slate-300'">Base URL</span>
-            <input v-model="aiSettings.custom_base_url" type="text" class="np-neon-input rounded px-3 py-2 text-[0.8rem] font-mono" placeholder="https://api.example.com/v1" />
-          </label>
-
-          <label v-if="aiSettings.provider === 'custom'" class="flex flex-col gap-1 md:col-span-2">
-            <span :class="isNightshade ? 'text-teal-200' : 'text-slate-300'">Custom Model</span>
-            <input v-model="aiSettings.custom_model" type="text" class="np-neon-input rounded px-3 py-2 text-[0.8rem] font-mono" placeholder="llama-3.1-70b" />
-          </label>
-
-          <div class="md:col-span-2 text-[0.7rem]" :class="aiSettings.api_key_configured ? (isNightshade ? 'text-emerald-400' : 'text-green-400') : 'text-amber-300'">
-            {{ aiSettings.api_key_configured ? 'API key configured via environment.' : 'API key not configured (set via .env / environment variables).' }}
-          </div>
-        </div>
-
-        <div class="flex items-center justify-between">
-          <p v-if="aiMessage" class="text-[0.7rem]" :class="aiMessage.includes('Failed') ? 'text-rose-400' : (isNightshade ? 'text-emerald-400' : 'text-green-500')">
-            {{ aiMessage }}
-          </p>
-          <button type="button" class="np-cyber-btn rounded px-4 py-2 text-[0.75rem]" @click="saveAISettings" :disabled="aiSaving">
-            {{ aiSaving ? 'Saving...' : 'Save AI Settings' }}
-          </button>
-        </div>
       </div>
     </section>
 

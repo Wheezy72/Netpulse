@@ -3,7 +3,7 @@ services:
   # Core data stores
   # ---------------------------------------------------------------------------
   db:
-    image: postgres:16-alpine
+    image: timescale/timescaledb:latest-pg16
     container_name: netpulse-db
     restart: unless-stopped
     environment:
@@ -83,30 +83,6 @@ services:
       start_period: 60s
 
   # ---------------------------------------------------------------------------
-  # Time-series database – InfluxDB (stores probe telemetry and metrics)
-  # ---------------------------------------------------------------------------
-  influxdb:
-    image: influxdb:2.7-alpine
-    container_name: netpulse-influxdb
-    restart: unless-stopped
-    environment:
-      DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME: netpulse
-      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD:-netpulse123}
-      DOCKER_INFLUXDB_INIT_ORG: netpulse
-      DOCKER_INFLUXDB_INIT_BUCKET: telemetry
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN:-netpulse-influx-token}
-    ports:
-      - "8086:8086"
-    volumes:
-      - influxdb_data:/var/lib/influxdb2
-    healthcheck:
-      test: ["CMD", "influx", "ping"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-
-  # ---------------------------------------------------------------------------
   # Application
   # ---------------------------------------------------------------------------
   app:
@@ -132,10 +108,6 @@ services:
       DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@pgbouncer:5432/netpulse
       REDIS_URL: redis://redis:6379/0
       RABBITMQ_URL: amqp://netpulse:${RABBITMQ_PASSWORD:-netpulse}@rabbitmq:5672/netpulse
-      INFLUXDB_URL: http://influxdb:8086
-      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-netpulse-influx-token}
-      INFLUXDB_ORG: netpulse
-      INFLUXDB_BUCKET: telemetry
       SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
       ENVIRONMENT: production
       PULSE_GATEWAY_IP: ${PULSE_GATEWAY_IP:-192.168.1.1}
@@ -234,4 +206,3 @@ volumes:
   db_data:
   app_data:
   rabbitmq_data:
-  influxdb_data:

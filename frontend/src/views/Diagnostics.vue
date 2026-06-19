@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from "axios";
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
 import { useWebSocket } from "@vueuse/core";
 
 interface Props {
@@ -234,7 +234,7 @@ interface MtrHop {
 
 const mtrTarget = ref("8.8.8.8");
 const mtrActive = ref(false);
-const mtrHops = ref<MtrHop[]>([]);
+const mtrHops = shallowRef<MtrHop[]>([]);
 const mtrError = ref<string | null>(null);
 
 let mtrWs: WebSocket | null = null;

@@ -129,8 +129,10 @@ function startScanPolling(): void {
     if (!meta) return;
 
     const done = meta.status === "completed" || meta.status === "failed";
-    if (done && (meta.ai_briefing || meta.result_summary)) {
-      stopScanPolling();
+    if (done) {
+      if (meta.status === "failed" || meta.ai_briefing || meta.result_summary) {
+        stopScanPolling();
+      }
     }
   }, 2000);
 }
@@ -246,7 +248,7 @@ onBeforeUnmount(() => {
         <div class="np-panel-header">
           <div>
             <h2 class="np-panel-title">Scanning Console</h2>
-            <p class="mt-0.5 text-xs text-purple-400/50">
+            <p class="mt-0.5 text-xs text-slate-400/50">
               Run targeted scans or automated playbooks. Output streams live.
             </p>
           </div>
@@ -255,14 +257,14 @@ onBeforeUnmount(() => {
         <div class="p-4 space-y-4">
           <div
             v-if="!props.isAdmin"
-            class="rounded border border-purple-500/10 bg-[#0f0c1e]/60 px-3 py-2 text-xs text-purple-300/60"
+            class="rounded border border-slate-500/10 bg-[#0f0c1e]/60 px-3 py-2 text-xs text-slate-300/60"
           >
-            Scanning is <span class="font-semibold text-purple-100">admin-only</span>. You can view scan output and history, but cannot start new scans.
+            Scanning is <span class="font-semibold text-slate-100">admin-only</span>. You can view scan output and history, but cannot start new scans.
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div class="md:col-span-2">
-              <label class="block text-[0.7rem] uppercase tracking-widest text-purple-400/50 mb-1">Target</label>
+              <label class="block text-[0.7rem] uppercase tracking-widest text-slate-400/50 mb-1">Target</label>
               <input
                 v-model="target"
                 type="text"
@@ -272,16 +274,16 @@ onBeforeUnmount(() => {
             </div>
 
             <div>
-              <label class="block text-[0.7rem] uppercase tracking-widest text-purple-400/50 mb-1">Artifacts</label>
+              <label class="block text-[0.7rem] uppercase tracking-widest text-slate-400/50 mb-1">Artifacts</label>
               <div class="flex items-center gap-2">
-                <input id="save" v-model="saveResults" type="checkbox" class="rounded border-purple-500/20 bg-[#0f0c1e] accent-current" />
-                <label for="save" class="text-xs text-purple-400/50">Save output</label>
+                <input id="save" v-model="saveResults" type="checkbox" class="rounded border-slate-500/20 bg-[#0f0c1e] accent-current" />
+                <label for="save" class="text-xs text-slate-400/50">Save output</label>
               </div>
               <button
                 v-if="downloadUrl"
                 type="button"
                 @click="downloadLatest"
-                class="mt-2 inline-flex text-xs text-purple-300/60 hover:text-fuchsia-300 underline underline-offset-2"
+                class="mt-2 inline-flex text-xs text-slate-300/60 hover:text-emerald-300 underline underline-offset-2"
               >
                 Download latest
               </button>
@@ -296,7 +298,7 @@ onBeforeUnmount(() => {
               :class="[
                 activeTab === 'targeted'
                   ? 'border-[var(--np-accent-primary)] text-purple-50'
-                  : 'border-transparent text-purple-400/50 hover:text-fuchsia-300 hover:border-purple-500/30'
+                  : 'border-transparent text-slate-400/50 hover:text-emerald-300 hover:border-slate-500/30'
               ]"
               @click="activeTab = 'targeted'"
             >
@@ -308,7 +310,7 @@ onBeforeUnmount(() => {
               :class="[
                 activeTab === 'playbooks'
                   ? 'border-[var(--np-accent-primary)] text-purple-50'
-                  : 'border-transparent text-purple-400/50 hover:text-fuchsia-300 hover:border-purple-500/30'
+                  : 'border-transparent text-slate-400/50 hover:text-emerald-300 hover:border-slate-500/30'
               ]"
               @click="activeTab = 'playbooks'"
             >
@@ -319,7 +321,7 @@ onBeforeUnmount(() => {
           <!-- Targeted scan preset -->
           <div v-if="activeTab === 'targeted'" class="space-y-4">
             <div>
-              <label class="block text-[0.7rem] uppercase tracking-widest text-purple-400/50 mb-1">Preset</label>
+              <label class="block text-[0.7rem] uppercase tracking-widest text-slate-400/50 mb-1">Preset</label>
               <select
                 v-model="preset"
                 class="np-neon-input w-full px-3 py-2 text-sm"
@@ -334,14 +336,14 @@ onBeforeUnmount(() => {
             </div>
 
             <div v-if="preset === 'custom'">
-              <label class="block text-[0.7rem] uppercase tracking-widest text-purple-400/50 mb-1">Command</label>
+              <label class="block text-[0.7rem] uppercase tracking-widest text-slate-400/50 mb-1">Command</label>
               <input
                 v-model="customCommand"
                 type="text"
                 class="np-neon-input w-full px-3 py-2 text-sm font-mono"
                 placeholder="nmap -sV -sC -T4"
               />
-              <p class="mt-1 text-[0.7rem] text-purple-400/30">Only an allowlist of flags/scripts is permitted.</p>
+              <p class="mt-1 text-[0.7rem] text-slate-400/30">Only an allowlist of flags/scripts is permitted.</p>
             </div>
 
             <div class="flex justify-end">
@@ -361,7 +363,7 @@ onBeforeUnmount(() => {
           <div v-else class="space-y-4">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label class="block text-[0.7rem] uppercase tracking-widest text-purple-400/50 mb-1">Playbook</label>
+                <label class="block text-[0.7rem] uppercase tracking-widest text-slate-400/50 mb-1">Playbook</label>
                 <select
                   v-model="selectedPlaybookId"
                   class="np-neon-input w-full px-3 py-2 text-sm disabled:opacity-50"
@@ -390,16 +392,16 @@ onBeforeUnmount(() => {
               <div class="flex items-center justify-between gap-4">
                 <div class="min-w-0">
                   <p class="text-sm font-semibold text-purple-50 truncate">{{ selectedPlaybook.name }}</p>
-                  <p class="text-xs text-purple-400/50 mt-0.5">{{ selectedPlaybook.description }}</p>
+                  <p class="text-xs text-slate-400/50 mt-0.5">{{ selectedPlaybook.description }}</p>
                 </div>
                 <div class="text-right shrink-0">
                   <p class="text-[0.7rem] uppercase tracking-widest" style="color: var(--np-accent-primary);">{{ selectedPlaybook.risk_level }}</p>
-                  <p class="text-[0.7rem] text-purple-400/50">{{ selectedPlaybook.estimated_time }}</p>
+                  <p class="text-[0.7rem] text-slate-400/50">{{ selectedPlaybook.estimated_time }}</p>
                 </div>
               </div>
-              <p class="mt-3 text-[0.7rem] text-purple-400/50">
+              <p class="mt-3 text-[0.7rem] text-slate-400/50">
                 Command:
-                <span class="font-mono text-purple-200/80">{{ selectedPlaybook.nmap_args }}</span>
+                <span class="font-mono text-slate-200/80">{{ selectedPlaybook.nmap_args }}</span>
               </p>
             </div>
           </div>
@@ -411,10 +413,10 @@ onBeforeUnmount(() => {
         <div class="np-panel-header">
           <h3 class="np-panel-title">Tips</h3>
         </div>
-        <div class="p-4 text-xs text-purple-400/50 space-y-2">
-          <p>• Use <span class="font-mono text-purple-200/80">Ping Sweep</span> or <span class="font-mono text-purple-200/80">Quick Ports</span> first to avoid noisy scans.</p>
+        <div class="p-4 text-xs text-slate-400/50 space-y-2">
+          <p>• Use <span class="font-mono text-slate-200/80">Ping Sweep</span> or <span class="font-mono text-slate-200/80">Quick Ports</span> first to avoid noisy scans.</p>
           <p>• Full scans and vuln scripts may trigger IDS/IPS. Only scan networks you own or control.</p>
-          <p>• Output files are stored as <span class="font-mono text-purple-200/80">data/scans/scan_&lt;id&gt;.txt</span>.</p>
+          <p>• Output files are stored as <span class="font-mono text-slate-200/80">data/scans/scan_&lt;id&gt;.txt</span>.</p>
         </div>
       </div>
     </div>
@@ -424,17 +426,17 @@ onBeforeUnmount(() => {
       <div class="np-panel">
         <div class="np-panel-header">
           <h3 class="np-panel-title">AI Analyst Briefing</h3>
-          <div class="text-[0.7rem] text-purple-400/30">
+          <div class="text-[0.7rem] text-slate-400/30">
             <span v-if="!currentScanId">Idle</span>
             <span v-else-if="scanMetaLoading" style="color: var(--np-accent-primary);">Analyzing…</span>
             <span v-else class="text-emerald-500">Auto</span>
           </div>
         </div>
         <div class="p-4">
-          <p v-if="!currentScanId" class="text-xs text-purple-400/30">Run a scan to generate an automatic analyst summary.</p>
-          <p v-else-if="aiBriefing" class="text-sm leading-relaxed whitespace-pre-wrap text-purple-100">{{ aiBriefing }}</p>
+          <p v-if="!currentScanId" class="text-xs text-slate-400/30">Run a scan to generate an automatic analyst summary.</p>
+          <p v-else-if="aiBriefing" class="text-sm leading-relaxed whitespace-pre-wrap text-slate-100">{{ aiBriefing }}</p>
           <p v-else-if="aiError" class="text-xs text-rose-400">AI analysis failed: {{ aiError }}</p>
-          <p v-else class="text-xs text-purple-400/30">Waiting for scan completion and AI analysis…</p>
+          <p v-else class="text-xs text-slate-400/30">Waiting for scan completion and AI analysis…</p>
         </div>
       </div>
 
