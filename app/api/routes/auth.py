@@ -18,6 +18,7 @@ from app.api.deps import (
     get_current_user,
     get_password_hash,
     verify_password,
+    security_scheme,
 )
 from app.core.config import settings
 from app.core.redis import get_redis
@@ -139,6 +140,7 @@ class EmailRequest(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+    remember_me: bool = False
 
 
 class CreateUserRequest(EmailRequest):
@@ -189,13 +191,55 @@ async def login(
             detail="Incorrect username or password",
         )
 
-    access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
+    access_token_expires = (
+        timedelta(days=30)
+        if payload.remember_me
+        else timedelta(minutes=settings.access_token_expire_minutes)
+    )
     token = create_access_token(
         subject=user.email,
         role=user.role.value,
         expires_delta=access_token_expires,
     )
     return TokenResponse(access_token=token)
+
+
+@router.post(
+    "/logout",
+    summary="Invalidate the current user's session token",
+)
+async def logout(
+    request: Request,
+    db: AsyncSession = Depends(db_session),
+) -> Dict[str, str]:
+    # Extract token
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        try:
+            # Decode token (ignore expiration verification to find remaining TTL)
+            payload = jwt.decode(
+                token,
+                settings.secret_key,
+                algorithms=[settings.jwt_algorithm],
+                options={"verify_exp": False},
+            )
+            exp = payload.get("exp", 0)
+            current_time = int(datetime.utcnow().timestamp())
+            ttl = max(exp - current_time, 0)
+            
+            if ttl > 0:
+                import hashlib
+                digest = hashlib.sha256(token.encode()).hexdigest()[:32]
+                redis = get_redis()
+                # Blacklist this token digest for the remainder of its lifetime
+                await redis.setex(f"np:blacklist:{digest}", ttl, "1")
+                # Also clean up the active session cache
+                await redis.delete(f"np:session:{digest}")
+        except Exception as e:
+            logger.exception("Error blacklisting token on logout: %s", e)
+
+    return {"message": "Logged out successfully"}
 
 
 @router.get(

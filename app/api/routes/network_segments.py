@@ -56,6 +56,113 @@ async def list_network_segments(
     return result.scalars().all()
 
 
+@router.get("/detect-gateway")
+async def detect_gateway(
+    _user: User = Depends(require_compliance_role()),
+):
+    """
+    Auto-detect the default gateway of the host system.
+    Returns: {"gateway_ip": "..."}
+    """
+    import sys
+    import subprocess
+    import socket
+    import struct
+
+    # 1. Try Scapy
+    try:
+        from scapy.all import conf
+        route = conf.route.route("0.0.0.0")
+        if route and len(route) >= 3 and route[2] and route[2] != "0.0.0.0":
+            return {"gateway_ip": str(route[2])}
+    except Exception:
+        pass
+
+    # 2. Try Linux /proc/net/route
+    try:
+        with open("/proc/net/route", "r") as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) >= 3 and parts[1] == "00000000":
+                    gw_hex = parts[2]
+                    res = socket.inet_ntoa(struct.pack("<L", int(gw_hex, 16)))
+                    return {"gateway_ip": res}
+    except Exception:
+        pass
+
+    system = sys.platform.lower()
+
+    # SECURITY RATIONALE:
+    # 1. No shell=True is used (we explicitly pass shell=False).
+    # 2. All arguments are hardcoded string constants with zero user-controlled input.
+    # 3. Execution parameters are strictly restricted to system routes queries.
+    # 4. This endpoint requires pre-authenticated Compliance Role privileges.
+    if "win" in system:
+        # Windows route print
+        try:
+            out = subprocess.check_output(
+                ["route", "print", "0.0.0.0"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                shell=False
+            )
+            for line in out.splitlines():
+                parts = line.strip().split()
+                if len(parts) >= 4 and parts[0] == "0.0.0.0" and parts[1] == "0.0.0.0":
+                    return {"gateway_ip": parts[2]}
+        except Exception:
+            pass
+
+    elif "darwin" in system:
+        # macOS route -n get default
+        try:
+            out = subprocess.check_output(
+                ["route", "-n", "get", "default"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                shell=False
+            )
+            for line in out.splitlines():
+                if "gateway" in line.lower():
+                    parts = line.strip().split()
+                    if len(parts) >= 2:
+                        return {"gateway_ip": parts[1]}
+        except Exception:
+            pass
+
+    # Fallback to ip route on Linux/macOS
+    try:
+        out = subprocess.check_output(
+            ["ip", "route", "show", "default"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            shell=False
+        )
+        parts = out.strip().split()
+        if len(parts) >= 3 and parts[1] == "via":
+            return {"gateway_ip": parts[2]}
+    except Exception:
+        pass
+
+    # Final fallback: query local socket connection
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        if local_ip:
+            octets = local_ip.split(".")
+            if len(octets) == 4:
+                return {"gateway_ip": f"{octets[0]}.{octets[1]}.{octets[2]}.1"}
+    except Exception:
+        pass
+
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Unable to auto-detect default gateway."
+    )
+
+
 @router.post("", response_model=NetworkSegmentOut, status_code=status.HTTP_201_CREATED)
 async def create_network_segment(
     segment: NetworkSegmentCreate,

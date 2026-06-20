@@ -64,8 +64,8 @@ function navigateTo(id: string) {
   mobileMenuOpen.value = false;
 }
 
-function handleLogout() {
-  auth.logout();
+async function handleLogout() {
+  await auth.logout();
   router.push("/login");
 }
 
@@ -78,13 +78,6 @@ async function handleAuthSuccess(arg: string | { token: string; rememberMe?: boo
 }
 
 onMounted(async () => {
-  await auth.loadUser();
-
-  // Redirect to login if not authenticated and not on a guest route.
-  if (!auth.isAuthenticated && !route.meta?.guest) {
-    router.push("/login");
-  }
-
   // Handle Google OAuth callback.
   const isGoogleCallback = window.location.pathname === "/auth/google/callback";
   if (isGoogleCallback) {
@@ -164,7 +157,7 @@ async function handleForcePasswordChange() {
     <CommandPalette />
 
     <!-- Unauthenticated: just render the router-view (Login / Register) -->
-    <template v-if="!auth.isAuthenticated">
+    <template v-if="!auth.isAuthenticated || route.meta?.guest">
       <div class="w-full relative z-10">
         <RouterView v-slot="{ Component }">
           <component
@@ -260,8 +253,7 @@ async function handleForcePasswordChange() {
 
       <!-- Standard Shell -->
       <template v-else>
-        <!-- Premium Top Header Navigation (replacing sidebar) -->
-      <header class="sticky top-0 z-40 w-full border-b border-slate-600/10 bg-[var(--np-glass-bg)] backdrop-blur-md transition-all duration-200">
+      <header class="sticky top-0 z-40 w-full border-b border-[var(--np-border-subtle)] bg-[var(--np-glass-bg)] backdrop-blur-md transition-all duration-200">
         <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
           
           <!-- Left: Logo & Netpulse title -->
@@ -272,26 +264,22 @@ async function handleForcePasswordChange() {
             </div>
             <div class="flex flex-col">
               <div class="flex items-center gap-1.5 leading-none">
-                <span class="text-xs font-bold tracking-widest uppercase text-emerald-400">NetPulse</span>
-                <span class="text-[0.5rem] px-1 py-0.2 rounded font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">v0.1.0</span>
+                <span class="text-xs uppercase tracking-widest np-header-logo-text">NetPulse</span>
+                <span class="text-[0.5rem] px-1 py-0.2 rounded font-mono np-header-logo-version">v0.1.0</span>
               </div>
-              <span class="text-[0.55rem] text-slate-400/50 uppercase tracking-widest mt-0.5 font-semibold">Command Console</span>
+              <span class="text-[0.55rem] uppercase tracking-widest mt-0.5 np-header-logo-subtitle">Command Console</span>
             </div>
           </div>
 
           <!-- Center: Pill Navigation Capsule -->
-          <nav class="hidden lg:flex items-center bg-[var(--np-surface)] border border-slate-600/10 rounded-full p-1 gap-0.5 shadow-inner">
+          <nav class="hidden lg:flex items-center bg-[var(--np-surface-elevated)] border border-[var(--np-border-subtle)] rounded-full p-1 gap-0.5 shadow-inner">
             <button
               v-for="item in navItems"
               :key="item.id"
               type="button"
               @click="navigateTo(item.id)"
-              class="px-4 py-2 rounded-full text-[0.65rem] uppercase tracking-wider font-semibold transition-all duration-150 flex items-center gap-1.5"
-              :class="[
-                isActive(item.id)
-                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 shadow'
-                  : 'text-slate-400/60 hover:text-slate-200 border border-transparent'
-              ]"
+              class="px-4 py-2 rounded-full text-[0.7rem] uppercase tracking-wider transition-all duration-150 flex items-center gap-1.5 border border-transparent np-nav-btn"
+              :class="{ 'active shadow': isActive(item.id) }"
             >
               <span>{{ item.label }}</span>
             </button>
@@ -303,18 +291,18 @@ async function handleForcePasswordChange() {
             <button
               type="button"
               @click="ui.openCommandPalette()"
-              class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#0d0a1b]/60 border border-slate-600/10 text-slate-400/50 hover:text-slate-300 hover:border-slate-600/20 transition-all text-xs"
+              class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full transition-all text-xs np-header-search"
               title="Open command palette"
             >
-              <span class="text-[0.65rem]">Search…</span>
-              <kbd class="text-[0.55rem] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400/60 border border-emerald-500/10">⌘K</kbd>
+              <span class="text-[0.65rem] font-bold">Search…</span>
+              <kbd class="text-[0.55rem] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-bold">⌘K</kbd>
             </button>
 
             <!-- Theme Switcher -->
             <button
               type="button"
               @click="toggleTheme"
-              class="p-2 rounded-full border border-slate-600/10 bg-[#0d0a1b]/60 text-slate-400/70 hover:text-emerald-400 hover:border-emerald-500/20 transition-all"
+              class="p-2 rounded-full transition-all np-header-theme-btn"
               :title="isNightshade ? 'Switch to SysAdmin' : 'Switch to Nightshade'"
             >
               <svg v-if="isNightshade" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -329,30 +317,30 @@ async function handleForcePasswordChange() {
             <div class="relative group">
               <button
                 type="button"
-                class="flex items-center gap-2 pl-2 pr-3 py-1 rounded-full bg-[var(--np-surface-elevated)] border border-slate-600/10 hover:border-slate-600/20 transition-all text-left"
+                class="flex items-center gap-2 pl-2 pr-3 py-1 rounded-full transition-all text-left np-header-profile-btn"
               >
-                <div class="w-6 h-6 rounded-full flex items-center justify-center text-[0.65rem] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                <div class="w-6 h-6 rounded-full flex items-center justify-center text-[0.65rem] font-bold bg-emerald-500/20 text-emerald-600 border border-emerald-500/35">
                   {{ (auth.user?.email?.[0] || "U").toUpperCase() }}
                 </div>
                 <div class="hidden md:flex flex-col text-xs leading-tight">
-                  <span class="text-slate-200 font-medium truncate max-w-[80px]">{{ auth.user?.email?.split('@')[0] || "Operator" }}</span>
-                  <span class="text-[0.55rem] text-emerald-400/60 font-mono uppercase tracking-wider">{{ auth.user?.role || "operator" }}</span>
+                  <span class="truncate max-w-[80px] np-header-profile-name">{{ auth.user?.email?.split('@')[0] || "Operator" }}</span>
+                  <span class="text-[0.55rem] font-mono uppercase tracking-wider np-header-profile-role">{{ auth.user?.role || "operator" }}</span>
                 </div>
-                <svg class="w-3 h-3 text-slate-400/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg class="w-3 h-3 np-header-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
                 </svg>
               </button>
               
               <!-- Dropdown Menu -->
-              <div class="absolute right-0 mt-2 w-48 rounded-xl border border-slate-600/15 bg-[var(--np-glass-bg)] backdrop-blur-md shadow-xl py-1 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200 z-[100]">
-                <div class="px-4 py-2 border-b border-slate-600/10">
-                  <p class="text-[0.6rem] text-slate-400/50 uppercase tracking-widest font-mono">Operator</p>
-                  <p class="text-xs font-semibold text-slate-200 truncate mt-0.5">{{ auth.user?.email || "operator@netpulse.local" }}</p>
+              <div class="absolute right-0 mt-2 w-48 rounded-xl border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)] backdrop-blur-md shadow-xl py-1 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200 z-[100]">
+                <div class="px-4 py-2 border-b border-[var(--np-border-subtle)]">
+                  <p class="text-[0.6rem] text-[var(--np-text-dim)] uppercase tracking-widest font-mono font-bold">Operator</p>
+                  <p class="text-xs font-bold text-[var(--np-text)] truncate mt-0.5">{{ auth.user?.email || "operator@netpulse.local" }}</p>
                 </div>
                 <button
                   type="button"
                   @click="handleLogout"
-                  class="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors text-left"
+                  class="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors text-left font-bold"
                 >
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
@@ -366,7 +354,7 @@ async function handleForcePasswordChange() {
             <button
               type="button"
               @click="mobileMenuOpen = !mobileMenuOpen"
-              class="lg:hidden p-2 rounded-full border border-slate-600/10 bg-[var(--np-surface-elevated)] text-slate-400/70 hover:text-emerald-400 hover:border-emerald-500/20 transition-all"
+              class="lg:hidden p-2 rounded-full border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)] text-[var(--np-text-dim)] hover:text-emerald-500 hover:border-emerald-500/35 transition-all"
             >
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
@@ -387,11 +375,11 @@ async function handleForcePasswordChange() {
       <transition name="drawer">
         <aside
           v-if="mobileMenuOpen"
-          class="fixed top-0 right-0 z-50 w-64 h-full bg-[var(--np-glass-bg)] backdrop-blur-lg border-l border-slate-600/15 p-6 flex flex-col gap-6 lg:hidden shadow-2xl"
+          class="fixed top-0 right-0 z-50 w-64 h-full bg-[var(--np-surface-elevated)] border-l border-[var(--np-border-subtle)] p-6 flex flex-col gap-6 lg:hidden shadow-2xl"
         >
-          <div class="flex items-center justify-between border-b border-slate-600/10 pb-4">
-            <span class="text-xs font-bold uppercase tracking-wider text-slate-400">Navigation</span>
-            <button @click="mobileMenuOpen = false" class="p-1 text-slate-400 hover:text-slate-200">
+          <div class="flex items-center justify-between border-b border-[var(--np-border-subtle)] pb-4">
+            <span class="text-xs font-bold uppercase tracking-wider text-[var(--np-text-dim)]">Navigation</span>
+            <button @click="mobileMenuOpen = false" class="p-1 text-[var(--np-text-muted)] hover:text-[var(--np-text)]">
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
@@ -402,31 +390,27 @@ async function handleForcePasswordChange() {
               :key="item.id"
               type="button"
               @click="navigateTo(item.id)"
-              class="w-full text-left px-4 py-3 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all"
-              :class="[
-                isActive(item.id)
-                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
-                  : 'text-slate-400/70 hover:text-slate-200 border border-transparent'
-              ]"
+              class="w-full text-left px-4 py-3 rounded-xl text-xs uppercase tracking-wider transition-all border border-transparent np-nav-btn"
+              :class="{ 'active': isActive(item.id) }"
             >
               {{ item.label }}
             </button>
           </nav>
 
-          <div class="mt-auto border-t border-slate-600/10 pt-4 flex flex-col gap-3">
+          <div class="mt-auto border-t border-[var(--np-border-subtle)] pt-4 flex flex-col gap-3">
             <div class="flex items-center gap-2 px-1">
-              <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+              <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold bg-emerald-500/20 text-emerald-600 border border-emerald-500/35">
                 {{ (auth.user?.email?.[0] || "U").toUpperCase() }}
               </div>
               <div class="flex flex-col text-xs leading-none">
-                <span class="text-slate-200 font-medium truncate max-w-[120px]">{{ auth.user?.email || "Operator" }}</span>
-                <span class="text-[0.55rem] text-emerald-400/60 font-mono uppercase tracking-wider mt-0.5">{{ auth.user?.role || "operator" }}</span>
+                <span class="text-[var(--np-text)] font-bold truncate max-w-[120px]">{{ auth.user?.email || "Operator" }}</span>
+                <span class="text-[0.55rem] text-emerald-600 font-mono uppercase tracking-wider mt-0.5 font-bold">{{ auth.user?.role || "operator" }}</span>
               </div>
             </div>
             <button
               type="button"
               @click="handleLogout"
-              class="w-full flex items-center justify-center gap-2.5 py-2.5 rounded-xl text-xs font-semibold uppercase tracking-wider bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 transition-all"
+              class="w-full flex items-center justify-center gap-2.5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider bg-rose-500/10 text-rose-500 border border-rose-500/25 hover:bg-rose-500/20 transition-all"
             >
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />

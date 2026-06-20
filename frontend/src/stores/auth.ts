@@ -59,8 +59,16 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
-  function logout() {
-    setToken(null);
+  async function logout() {
+    try {
+      if (token.value) {
+        await axios.post("/api/auth/logout");
+      }
+    } catch (e) {
+      console.error("Logout failed on backend:", e);
+    } finally {
+      setToken(null);
+    }
   }
 
   // Restore token on app init.

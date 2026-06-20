@@ -106,7 +106,7 @@ function truncateMessage(msg: string, len = 60): string {
   return msg.length > len ? msg.slice(0, len) + "..." : msg;
 }
 
-const levelFilter = ref<string>("");
+const levelFilter = ref<string>("network");
 const searchQuery = ref<string>("");
 const autoRefresh = ref(true);
 const refreshInterval = ref<number | null>(null);
@@ -405,7 +405,7 @@ onUnmounted(() => {
           @change="loadLogs"
           class="np-neon-input px-3 py-1.5 text-xs"
         >
-          <option value="">Network Activity</option>
+          <option value="network">Network Activity</option>
           <option value="all">All Levels</option>
           <option value="debug">Debug</option>
           <option value="info">Info</option>

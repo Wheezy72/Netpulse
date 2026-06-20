@@ -290,15 +290,14 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- Tab switcher -->
           <div class="flex items-center gap-1 border-b" style="border-color: var(--np-border);">
             <button
               type="button"
               class="px-3 py-2 text-xs border-b-2 -mb-px transition-colors"
               :class="[
                 activeTab === 'targeted'
-                  ? 'border-[var(--np-accent-primary)] text-purple-50'
-                  : 'border-transparent text-slate-400/50 hover:text-emerald-300 hover:border-slate-500/30'
+                  ? 'border-[var(--np-accent-primary)] text-[var(--np-text)] font-semibold'
+                  : 'border-transparent text-[var(--np-text-dim)] hover:text-[var(--np-text)] hover:border-[var(--np-border-subtle)]'
               ]"
               @click="activeTab = 'targeted'"
             >
@@ -309,8 +308,8 @@ onBeforeUnmount(() => {
               class="px-3 py-2 text-xs border-b-2 -mb-px transition-colors"
               :class="[
                 activeTab === 'playbooks'
-                  ? 'border-[var(--np-accent-primary)] text-purple-50'
-                  : 'border-transparent text-slate-400/50 hover:text-emerald-300 hover:border-slate-500/30'
+                  ? 'border-[var(--np-accent-primary)] text-[var(--np-text)] font-semibold'
+                  : 'border-transparent text-[var(--np-text-dim)] hover:text-[var(--np-text)] hover:border-[var(--np-border-subtle)]'
               ]"
               @click="activeTab = 'playbooks'"
             >
@@ -391,7 +390,7 @@ onBeforeUnmount(() => {
             <div v-if="selectedPlaybook" class="rounded border p-3 bg-[var(--np-surface)]" style="border-color: var(--np-border);">
               <div class="flex items-center justify-between gap-4">
                 <div class="min-w-0">
-                  <p class="text-sm font-semibold text-purple-50 truncate">{{ selectedPlaybook.name }}</p>
+                  <p class="text-sm font-semibold text-[var(--np-text)] truncate">{{ selectedPlaybook.name }}</p>
                   <p class="text-xs text-slate-400/50 mt-0.5">{{ selectedPlaybook.description }}</p>
                 </div>
                 <div class="text-right shrink-0">

@@ -143,7 +143,13 @@ class MemoryLogHandler(logging.Handler):
 
         if level:
             level_lower = level.lower()
-            filtered = [log for log in filtered if log.level == level_lower]
+            if level_lower == "network":
+                filtered = [
+                    log for log in filtered
+                    if log.logger.startswith(("app.tasks", "app.services", "app.core", "netpulse.plugins"))
+                ]
+            else:
+                filtered = [log for log in filtered if log.level == level_lower]
 
         if logger_filter:
             filtered = [log for log in filtered if logger_filter in log.logger]

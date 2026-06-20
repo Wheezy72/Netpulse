@@ -63,6 +63,22 @@ async def get_current_user(
     Checks the Redis session cache first; falls back to the database on a miss.
     """
     token = credentials.credentials
+    redis = get_redis()
+    import hashlib
+    digest = hashlib.sha256(token.encode()).hexdigest()[:32]
+    
+    # Check if token is blacklisted
+    try:
+        if await redis.get(f"np:blacklist:{digest}"):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been blacklisted (logged out)",
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
     try:
         payload = jwt.decode(
             token,
