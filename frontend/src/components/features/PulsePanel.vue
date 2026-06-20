@@ -169,16 +169,14 @@ function buildPulseChartOption(points: InternetHealthPoint[]): any {
 
   const isSysAdminTheme = document.body.classList.contains("theme-sysadmin");
 
-  const axisLineColor = isSysAdminTheme ? "#9ca3af" : "#14b8a655";
-  const axisLabelColor = isSysAdminTheme ? "#4b5563" : "#99f6e4";
-  const splitLineColor = isSysAdminTheme ? "#e5e7eb" : "#134e4a5";
-  const lineColor = isSysAdminTheme ? "#f59e0b" : "#22c55e";
+  const axisLineColor = isSysAdminTheme ? "#cbd5e1" : "#334155";
+  const axisLabelColor = isSysAdminTheme ? "#64748b" : "#94a3b8";
+  const splitLineColor = isSysAdminTheme ? "#f1f5f9" : "#1e293b";
+  const lineColor = isSysAdminTheme ? "#059669" : "#10b981";
   const areaTop = isSysAdminTheme
-    ? "rgba(245,158,11,0.35)"
-    : "rgba(34,197,94,0.6)";
-  const areaBottom = isSysAdminTheme
-    ? "rgba(255,255,255,0.0)"
-    : "rgba(15,23,42,0.1)";
+    ? "rgba(5,150,105,0.18)"
+    : "rgba(16,185,129,0.35)";
+  const areaBottom = "rgba(16,185,129,0.0)";
 
   return {
     animation: true,
@@ -359,18 +357,18 @@ onBeforeUnmount(() => {
     <header class="np-panel-header">
       <div class="flex items-center gap-2">
         <span class="np-panel-title">Pulse: Internet Health</span>
-        <span class="text-[0.6rem] uppercase tracking-[0.18em] text-slate-400 dark:text-teal-300">
+        <span class="text-[0.6rem] uppercase tracking-[0.18em] text-[var(--np-text-dim)]">
           Latency · Jitter · Packet Loss
         </span>
       </div>
-      <div class="flex items-center gap-3 text-xs text-slate-400 dark:text-teal-300">
+      <div class="flex items-center gap-3 text-xs text-[var(--np-text-muted)]">
         <span>Gateway / ISP / Cloudflare</span>
-        <span class="h-1 w-10 rounded-full" :class="isSysAdmin ? 'bg-amber-400/60' : 'bg-emerald-400/60'"></span>
+        <span class="h-1 w-10 rounded-full bg-emerald-500/60"></span>
         <button
           @click="downloadReport"
           :disabled="isDownloadingReport"
           class="ml-2 flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[0.7rem] font-medium transition-colors
-                 border-amber-500/15 dark:border-teal-500/20 bg-gray-900/50 dark:bg-slate-900/50 text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100
+                 border-[var(--np-border-subtle)] bg-[var(--np-surface-hover)] text-[var(--np-text-muted)] hover:text-[var(--np-text)]
                  disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <svg v-if="!isDownloadingReport" xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -388,7 +386,7 @@ onBeforeUnmount(() => {
     <div class="grid gap-4 md:grid-cols-4">
       <div class="md:col-span-3">
         <div
-          class="relative h-48 w-full rounded-md border bg-black/40 border-amber-500/15 dark:border-teal-500/20"
+          class="relative h-48 w-full rounded-md border bg-[var(--np-surface-elevated)] border-[var(--np-border-subtle)]"
         >
           <v-chart
             v-if="!pulseLoading && internetHealthPoints.length"
@@ -398,7 +396,7 @@ onBeforeUnmount(() => {
           />
           <div
             v-else-if="pulseLoading"
-            class="absolute inset-0 flex items-center justify-center text-xs text-slate-400 dark:text-teal-300"
+            class="absolute inset-0 flex items-center justify-center text-xs text-[var(--np-text-muted)]"
           >
             Loading Internet Health...
           </div>
@@ -406,11 +404,11 @@ onBeforeUnmount(() => {
             v-else
             class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center px-4"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 text-amber-500 dark:text-teal-500 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 text-emerald-500 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
             </svg>
-            <span class="text-xs text-slate-400 dark:text-teal-300">Collecting network data...</span>
-            <span class="text-[0.65rem] text-slate-400 dark:text-teal-300 opacity-60">The latency monitor runs every 15 seconds. Charts will appear once enough data points are collected.</span>
+            <span class="text-xs font-semibold text-[var(--np-text)]">Collecting network data...</span>
+            <span class="text-[0.65rem] text-[var(--np-text-dim)]">The latency monitor runs every 15 seconds. Charts will appear once enough data points are collected.</span>
           </div>
         </div>
         <p v-if="pulseError" class="mt-2 text-[0.7rem] text-rose-300">
@@ -419,34 +417,34 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="flex flex-col gap-3 text-xs">
-        <div class="rounded-md border bg-black/50 p-3" :class="isSysAdmin ? 'border-amber-400/40' : 'border-emerald-400/40'">
+        <div class="rounded-md border bg-[var(--np-surface-elevated)] p-3 border-emerald-500/30">
           <div class="flex items-baseline justify-between">
-            <span class="text-[0.6rem] uppercase tracking-[0.18em]" :class="isSysAdmin ? 'text-amber-300' : 'text-emerald-300'">
+            <span class="text-[0.6rem] uppercase tracking-[0.18em] text-[var(--np-success)] font-bold">
               Internet Health
             </span>
-            <span class="text-lg font-semibold" :class="isSysAdmin ? 'text-amber-300' : 'text-emerald-300'">
+            <span class="text-lg font-bold text-[var(--np-success)]">
               {{ latestInternetHealth.toFixed(0) }}%
             </span>
           </div>
         </div>
 
-        <div v-if="liveLatency !== null" class="rounded-md border bg-black/40 p-2 border-amber-500/15 dark:border-teal-500/20">
+        <div v-if="liveLatency !== null" class="rounded-md border bg-[var(--np-surface-elevated)] p-2 border-[var(--np-border-subtle)]">
           <div class="flex items-center gap-1 mb-2">
-            <span class="w-2 h-2 rounded-full animate-pulse" :class="isSysAdmin ? 'bg-green-500' : 'bg-emerald-400'"></span>
-            <span class="text-[0.6rem] uppercase tracking-widest text-slate-400 dark:text-teal-300">Live</span>
+            <span class="w-2 h-2 rounded-full animate-pulse bg-emerald-500"></span>
+            <span class="text-[0.6rem] uppercase tracking-widest text-[var(--np-text-muted)]">Live</span>
           </div>
           <div class="grid grid-cols-3 gap-2 text-center">
             <div>
-              <div class="text-sm font-semibold text-slate-100 dark:text-sky-100">{{ liveLatency?.toFixed(1) ?? '--' }}</div>
-              <div class="text-[0.55rem] text-slate-400 dark:text-teal-300">Latency ms</div>
+              <div class="text-sm font-semibold text-[var(--np-text)]">{{ liveLatency?.toFixed(1) ?? '--' }}</div>
+              <div class="text-[0.55rem] text-[var(--np-text-dim)]">Latency ms</div>
             </div>
             <div>
-              <div class="text-sm font-semibold text-slate-100 dark:text-sky-100">{{ liveJitter?.toFixed(1) ?? '--' }}</div>
-              <div class="text-[0.55rem] text-slate-400 dark:text-teal-300">Jitter ms</div>
+              <div class="text-sm font-semibold text-[var(--np-text)]">{{ liveJitter?.toFixed(1) ?? '--' }}</div>
+              <div class="text-[0.55rem] text-[var(--np-text-dim)]">Jitter ms</div>
             </div>
             <div>
-              <div class="text-sm font-semibold text-slate-100 dark:text-sky-100">{{ livePacketLoss?.toFixed(1) ?? '--' }}</div>
-              <div class="text-[0.55rem] text-slate-400 dark:text-teal-300">Loss %</div>
+              <div class="text-sm font-semibold text-[var(--np-text)]">{{ livePacketLoss?.toFixed(1) ?? '--' }}</div>
+              <div class="text-[0.55rem] text-[var(--np-text-dim)]">Loss %</div>
             </div>
           </div>
         </div>
@@ -455,13 +453,13 @@ onBeforeUnmount(() => {
           <div
             v-for="t in pulseTargets"
             :key="t.target"
-            class="rounded-md border bg-black/40 px-2 py-1.5 border-amber-500/15 dark:border-teal-500/20"
+            class="rounded-md border bg-[var(--np-surface-elevated)] px-2 py-1.5 border-[var(--np-border-subtle)]"
           >
             <div class="flex items-center justify-between">
-              <span class="font-mono text-slate-100 dark:text-sky-100 text-[0.7rem]">
+              <span class="font-mono text-[var(--np-text)] text-[0.7rem]">
                 {{ t.label }}
               </span>
-              <span class="text-[0.7rem] text-slate-100 dark:text-sky-100">
+              <span class="text-[0.7rem] text-[var(--np-text)]">
                 <template v-if="t.latency_ms != null">
                   {{ t.latency_ms.toFixed(1) }} ms
                 </template>
@@ -471,7 +469,7 @@ onBeforeUnmount(() => {
               </span>
             </div>
             <div
-              class="mt-0.5 flex items-center justify-between text-[0.65rem] text-slate-400 dark:text-teal-300"
+              class="mt-0.5 flex items-center justify-between text-[0.65rem] text-[var(--np-text-dim)]"
             >
               <span>
                 Jitter:
@@ -491,7 +489,7 @@ onBeforeUnmount(() => {
           </div>
           <p
             v-if="!pulseTargets.length && !pulseLoading && liveLatency === null"
-            class="text-[0.7rem] text-slate-400 dark:text-teal-300"
+            class="text-[0.7rem] text-[var(--np-text-muted)]"
           >
             Waiting for Pulse data from latency monitor...
           </p>
@@ -520,11 +518,11 @@ onBeforeUnmount(() => {
           }"
         >
           {{ pathDiagnosis.level === 'ok' ? 'All Clear' : 'Issue Detected' }}
-          <span class="font-normal normal-case tracking-normal text-slate-400 dark:text-teal-300 ml-1">
+          <span class="font-normal normal-case tracking-normal text-[var(--np-text-muted)] ml-1">
             — {{ pathDiagnosis.where }}
           </span>
         </span>
-        <p class="mt-0.5 text-[0.7rem] text-slate-400 dark:text-teal-300">{{ pathDiagnosis.detail }}</p>
+        <p class="mt-0.5 text-[0.7rem] text-[var(--np-text-dim)]">{{ pathDiagnosis.detail }}</p>
       </div>
     </div>
   </section>

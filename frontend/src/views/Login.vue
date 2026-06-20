@@ -218,6 +218,7 @@ async function handleSubmit(): Promise<void> {
       {
         username: username.value,
         password: password.value,
+        remember_me: rememberMe.value,
       }
     );
     emit("login-success", { token: data.access_token, rememberMe: rememberMe.value });

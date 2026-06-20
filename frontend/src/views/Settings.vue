@@ -109,6 +109,35 @@ async function loadNetworkSegments(): Promise<void> {
   }
 }
 
+const isDetectingGateway = ref(false);
+
+async function detectGateway(): Promise<void> {
+  isDetectingGateway.value = true;
+  segmentsError.value = null;
+  try {
+    const { data } = await axios.get<{ gateway_ip: string }>("/api/network-segments/detect-gateway");
+    const ip = data.gateway_ip;
+    if (ip) {
+      const octets = ip.split(".");
+      if (octets.length === 4) {
+        newSegment.value.cidr = `${octets[0]}.${octets[1]}.${octets[2]}.0/24`;
+        if (!newSegment.value.name) {
+          newSegment.value.name = `Auto-Detected LAN`;
+        }
+        if (!newSegment.value.description) {
+          newSegment.value.description = `Gateway IP: ${ip}`;
+        }
+      } else {
+        newSegment.value.cidr = ip;
+      }
+    }
+  } catch (e: any) {
+    segmentsError.value = e.response?.data?.detail || "Failed to detect default gateway.";
+  } finally {
+    isDetectingGateway.value = false;
+  }
+}
+
 async function addNetworkSegment(): Promise<void> {
   if (!isAdmin.value) return;
   if (!newSegment.value.name || !newSegment.value.cidr) return;
@@ -414,7 +443,7 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-4 np-fade-in">
-    <div class="flex gap-1 flex-wrap border-b pb-0 border-amber-500/15 dark:border-teal-500/20">
+    <div class="flex gap-1 flex-wrap border-b pb-0 border-[var(--np-border-subtle)]">
       <button
         v-for="tab in [
           { key: 'general', label: 'General' },
@@ -427,20 +456,16 @@ onMounted(async () => {
         :key="tab.key"
         type="button"
         @click="activeSettingsTab = tab.key as any"
-        class="flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium transition-all duration-300 border-b-2 -mb-px"
-        :style="activeSettingsTab === tab.key ? 'border-color: var(--np-accent-primary); color: var(--np-accent-primary);' : ''"
-        :class="[
-          activeSettingsTab === tab.key
-            ? ''
-            : 'border-transparent text-slate-400 dark:text-teal-300 hover:text-slate-100 dark:hover:text-sky-100'
-        ]"
+        class="flex items-center gap-1.5 px-3 py-2.5 text-xs transition-all duration-300 border-b-2 -mb-px np-subtab-btn"
+        :class="{ 'active': activeSettingsTab === tab.key }"
       >
         {{ tab.label }}
       </button>
     </div>
 
-    <div v-if="!isAdmin" class="rounded border p-3 text-[0.75rem]" :class="isNightshade ? 'border-amber-400/30 bg-amber-500/10 text-amber-200' : 'border-amber-500/30 bg-amber-500/10 text-amber-200'">
-      You are signed in as an <span class="font-semibold">Operator</span>. Destructive actions are disabled.
+    <div v-if="!isAdmin" class="rounded-xl border p-3.5 text-xs font-semibold bg-amber-500/5 border-amber-500/20 text-amber-500 flex items-center gap-2">
+      <span>🔒</span>
+      <span>You are signed in as an <span class="font-bold underline">Operator</span>. Destructive settings and actions are locked.</span>
     </div>
 
     <!-- General -->
@@ -499,54 +524,112 @@ onMounted(async () => {
     </section>
 
     <!-- Notifications -->
-    <section v-else-if="activeSettingsTab === 'notifications'" class="np-panel p-4 space-y-4">
-      <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
+    <section v-else-if="activeSettingsTab === 'notifications'" class="np-panel p-4 space-y-6">
+      <header class="np-panel-header -mx-4 -mt-4 mb-4 px-4">
         <div class="flex flex-col">
-          <span class="np-panel-title">Notifications</span>
-          <span class="text-[0.7rem] text-slate-400 dark:text-teal-300">Email and WhatsApp alerts.</span>
+          <span class="np-panel-title text-sm uppercase tracking-wider font-bold">Alert &amp; Notification Routing</span>
+          <span class="text-[0.7rem] text-[var(--np-text-dim)]">Configure notification routes and severity dispatch criteria.</span>
         </div>
       </header>
 
-      <div class="np-settings-section space-y-3 text-xs">
-        <div class="flex items-center justify-between">
-          <span :class="isNightshade ? 'text-teal-100' : 'text-slate-300'">Email alerts</span>
-          <ToggleSwitch v-model="notifications.email_enabled" :theme="theme" />
-        </div>
-        <input v-if="notifications.email_enabled" v-model="notifications.email_address" class="np-neon-input rounded px-3 py-2 text-[0.8rem]" type="email" placeholder="admin@example.com" />
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Dispatch Routes Card -->
+        <div class="p-4 rounded-xl border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)] space-y-4">
+          <div class="flex flex-col gap-1 border-b border-[var(--np-border-subtle)] pb-2 mb-2">
+            <h4 class="text-xs uppercase tracking-wider font-bold text-[var(--np-text)]">Alert Destinations</h4>
+            <p class="text-[0.65rem] text-[var(--np-text-dim)]">Where alert dispatches will be routed.</p>
+          </div>
 
-        <div class="flex items-center justify-between">
-          <span :class="isNightshade ? 'text-teal-100' : 'text-slate-300'">WhatsApp alerts</span>
-          <ToggleSwitch v-model="notifications.whatsapp_enabled" :theme="theme" />
-        </div>
-        <input v-if="notifications.whatsapp_enabled" v-model="notifications.whatsapp_number" class="np-neon-input rounded px-3 py-2 text-[0.8rem]" type="tel" placeholder="+1 555 123 4567" />
+          <div class="space-y-4">
+            <!-- Email Option -->
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <div class="flex flex-col">
+                  <span class="text-xs font-semibold text-[var(--np-text)]">Email Gateway</span>
+                  <span class="text-[0.65rem] text-[var(--np-text-dim)]">Send email notification reports</span>
+                </div>
+                <ToggleSwitch v-model="notifications.email_enabled" :theme="theme" />
+              </div>
+              <input 
+                v-if="notifications.email_enabled" 
+                v-model="notifications.email_address" 
+                class="np-neon-input w-full rounded-lg px-3 py-2 text-xs font-mono" 
+                type="email" 
+                placeholder="admin@example.com" 
+              />
+            </div>
 
-        <div class="grid gap-2 md:grid-cols-2">
-          <div class="flex items-center justify-between">
-            <span :class="isNightshade ? 'text-teal-100' : 'text-slate-300'">Critical</span>
-            <ToggleSwitch v-model="notifications.alert_on_critical" :theme="theme" />
-          </div>
-          <div class="flex items-center justify-between">
-            <span :class="isNightshade ? 'text-teal-100' : 'text-slate-300'">Warning</span>
-            <ToggleSwitch v-model="notifications.alert_on_warning" :theme="theme" />
-          </div>
-          <div class="flex items-center justify-between">
-            <span :class="isNightshade ? 'text-teal-100' : 'text-slate-300'">Device Down</span>
-            <ToggleSwitch v-model="notifications.alert_on_device_down" :theme="theme" />
-          </div>
-          <div class="flex items-center justify-between">
-            <span :class="isNightshade ? 'text-teal-100' : 'text-slate-300'">Daily digest</span>
-            <ToggleSwitch v-model="notifications.daily_digest" :theme="theme" />
+            <!-- WhatsApp Option -->
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <div class="flex flex-col">
+                  <span class="text-xs font-semibold text-[var(--np-text)]">WhatsApp Integration</span>
+                  <span class="text-[0.65rem] text-[var(--np-text-dim)]">Send urgent chat messages via gateway</span>
+                </div>
+                <ToggleSwitch v-model="notifications.whatsapp_enabled" :theme="theme" />
+              </div>
+              <input 
+                v-if="notifications.whatsapp_enabled" 
+                v-model="notifications.whatsapp_number" 
+                class="np-neon-input w-full rounded-lg px-3 py-2 text-xs font-mono" 
+                type="tel" 
+                placeholder="+1 555 123 4567" 
+              />
+            </div>
           </div>
         </div>
 
-        <div class="flex items-center justify-between">
-          <p v-if="notificationsMessage" class="text-[0.7rem]" :class="notificationsMessage.includes('Failed') ? 'text-rose-400' : (isNightshade ? 'text-emerald-400' : 'text-green-500')">
-            {{ notificationsMessage }}
-          </p>
-          <button type="button" class="np-cyber-btn rounded px-4 py-2 text-[0.75rem]" @click="saveNotificationSettings" :disabled="notificationsSaving">
-            {{ notificationsSaving ? 'Saving...' : 'Save Notifications' }}
-          </button>
+        <!-- Alert Policies Card -->
+        <div class="p-4 rounded-xl border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)] space-y-4">
+          <div class="flex flex-col gap-1 border-b border-[var(--np-border-subtle)] pb-2 mb-2">
+            <h4 class="text-xs uppercase tracking-wider font-bold text-[var(--np-text)]">Dispatch Policy</h4>
+            <p class="text-[0.65rem] text-[var(--np-text-dim)]">Define when alerts should be fired.</p>
+          </div>
+
+          <div class="grid grid-cols-1 gap-4">
+            <div class="flex items-center justify-between">
+              <div class="flex flex-col">
+                <span class="text-xs font-semibold text-[var(--np-text)]">Critical Vulnerability Alerts</span>
+                <span class="text-[0.65rem] text-[var(--np-text-dim)]">Fire instantly on CVSS Score >= 9.0</span>
+              </div>
+              <ToggleSwitch v-model="notifications.alert_on_critical" :theme="theme" />
+            </div>
+
+            <div class="flex items-center justify-between">
+              <div class="flex flex-col">
+                <span class="text-xs font-semibold text-[var(--np-text)]">Warning Anomalies</span>
+                <span class="text-[0.65rem] text-[var(--np-text-dim)]">Fire on minor warnings or state changes</span>
+              </div>
+              <ToggleSwitch v-model="notifications.alert_on_warning" :theme="theme" />
+            </div>
+
+            <div class="flex items-center justify-between">
+              <div class="flex flex-col">
+                <span class="text-xs font-semibold text-[var(--np-text)]">Host Offline Detection</span>
+                <span class="text-[0.65rem] text-[var(--np-text-dim)]">Notify when an active host goes offline</span>
+              </div>
+              <ToggleSwitch v-model="notifications.alert_on_device_down" :theme="theme" />
+            </div>
+
+            <div class="flex items-center justify-between">
+              <div class="flex flex-col">
+                <span class="text-xs font-semibold text-[var(--np-text)]">Daily Console Digest</span>
+                <span class="text-[0.65rem] text-[var(--np-text-dim)]">Send daily network metrics summary</span>
+              </div>
+              <ToggleSwitch v-model="notifications.daily_digest" :theme="theme" />
+            </div>
+          </div>
         </div>
+      </div>
+
+      <div class="flex items-center justify-between border-t border-[var(--np-border-subtle)] pt-4">
+        <p v-if="notificationsMessage" class="text-[0.7rem] font-mono" :class="notificationsMessage.includes('Failed') ? 'text-rose-400' : 'text-emerald-400'">
+          {{ notificationsMessage }}
+        </p>
+        <div v-else></div>
+        <button type="button" class="np-cyber-btn rounded-xl px-5 py-2.5 text-xs font-bold uppercase tracking-wider" @click="saveNotificationSettings" :disabled="notificationsSaving">
+          {{ notificationsSaving ? 'Saving...' : 'Save Settings Policy' }}
+        </button>
       </div>
     </section>
 
@@ -555,7 +638,7 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Network Segments</span>
-          <span class="text-[0.7rem] text-slate-400 dark:text-teal-300">Subnets for scheduled scanning.</span>
+          <span class="text-[0.7rem] text-[var(--np-text-dim)] font-semibold">Subnets for scheduled scanning.</span>
         </div>
         <button v-if="isAdmin" type="button" class="np-cyber-btn rounded px-3 py-1.5 text-[0.75rem]" @click="showAddSegment = !showAddSegment">
           {{ showAddSegment ? 'Cancel' : '+ Add Segment' }}
@@ -566,7 +649,17 @@ onMounted(async () => {
         <p class="np-settings-section-title">New segment</p>
         <div class="grid gap-3 md:grid-cols-2">
           <input v-model="newSegment.name" class="np-neon-input rounded px-3 py-2 text-[0.8rem]" placeholder="Name" />
-          <input v-model="newSegment.cidr" class="np-neon-input rounded px-3 py-2 text-[0.8rem] font-mono" placeholder="192.168.1.0/24" />
+          <div class="relative flex items-center">
+            <input v-model="newSegment.cidr" class="np-neon-input rounded pl-3 pr-24 py-2 text-[0.8rem] font-mono w-full" placeholder="192.168.1.0/24" />
+            <button
+              type="button"
+              class="absolute right-1 text-[0.65rem] px-2 py-1 rounded bg-[var(--np-surface-hover)] border border-[var(--np-border-subtle)] text-[var(--np-accent-primary)] hover:text-[var(--np-text)] transition-all font-semibold disabled:opacity-50"
+              @click="detectGateway"
+              :disabled="isDetectingGateway"
+            >
+              {{ isDetectingGateway ? 'Detecting...' : 'Auto-Detect' }}
+            </button>
+          </div>
           <input v-model.number="newSegment.vlan_id" class="np-neon-input rounded px-3 py-2 text-[0.8rem]" placeholder="VLAN (optional)" type="number" />
           <input v-model="newSegment.description" class="np-neon-input rounded px-3 py-2 text-[0.8rem]" placeholder="Description" />
         </div>
@@ -575,38 +668,33 @@ onMounted(async () => {
         </div>
       </div>
 
-      <p v-if="segmentsLoading" class="text-[0.75rem] text-slate-400 dark:text-teal-300">Loading...</p>
+      <p v-if="segmentsLoading" class="text-[0.75rem] text-[var(--np-text-dim)] font-semibold">Loading...</p>
       <p v-else-if="segmentsError" class="text-[0.75rem] text-rose-400">{{ segmentsError }}</p>
 
       <div v-else class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <div
           v-for="seg in segments"
           :key="seg.id"
-          class="rounded-lg border p-4"
-          :class="isNightshade ? 'border-teal-400/30 bg-black/30' : 'border-amber-600/20 bg-slate-800/30'"
+          class="np-info-card"
         >
           <div class="flex items-start justify-between gap-3">
             <div>
-              <h4 class="font-semibold text-[0.85rem]" :class="isNightshade ? 'text-teal-200' : 'text-amber-200'">{{ seg.name }}</h4>
-              <p class="font-mono text-[0.75rem] mt-1" :class="isNightshade ? 'text-teal-400' : 'text-amber-400'">{{ seg.cidr }}</p>
-              <p v-if="seg.vlan_id" class="text-[0.7rem] mt-1 text-slate-400 dark:text-teal-300">VLAN {{ seg.vlan_id }}</p>
-              <p v-if="seg.description" class="text-[0.7rem] mt-1 text-slate-400 dark:text-teal-300">{{ seg.description }}</p>
+              <h4 class="np-info-card-title">{{ seg.name }}</h4>
+              <p class="np-info-card-value mt-1">{{ seg.cidr }}</p>
+              <p v-if="seg.vlan_id" class="np-info-card-text mt-1">VLAN {{ seg.vlan_id }}</p>
+              <p v-if="seg.description" class="np-info-card-text mt-1">{{ seg.description }}</p>
             </div>
 
             <div class="flex flex-col gap-2 items-end">
               <button
                 type="button"
-                class="rounded px-2 py-1 text-[0.65rem] uppercase tracking-wide font-medium transition-all border"
+                class="rounded px-2 py-1 text-[0.65rem] uppercase tracking-wide font-medium transition-all border animate-none"
                 :disabled="!isAdmin"
                 @click="toggleSegmentScan(seg)"
                 :class="[
                   seg.scan_enabled
-                    ? isNightshade
-                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-400/40'
-                      : 'bg-green-600/15 text-green-400 border-green-500/40'
-                    : isNightshade
-                      ? 'bg-gray-500/10 text-gray-400 border-gray-500/30'
-                      : 'bg-slate-600/10 text-slate-400 border-slate-500/30',
+                    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/35'
+                    : 'bg-slate-500/10 text-slate-400 border-slate-500/30',
                   !isAdmin ? 'opacity-50 cursor-not-allowed' : ''
                 ]"
               >
@@ -616,8 +704,7 @@ onMounted(async () => {
               <button
                 v-if="isAdmin"
                 type="button"
-                class="rounded px-2 py-1 text-[0.65rem] uppercase tracking-wide font-medium transition-all border"
-                :class="isNightshade ? 'border-rose-400/40 text-rose-300 hover:bg-rose-500/20' : 'border-red-500/40 text-red-400 hover:bg-red-600/20'"
+                class="rounded px-2 py-1 text-[0.65rem] uppercase tracking-wide font-medium transition-all border border-red-500/40 text-red-500 hover:bg-red-600/20"
                 @click="deleteSegment(seg)"
               >
                 Delete
@@ -633,7 +720,7 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Scan Scheduler</span>
-          <span class="text-[0.7rem] text-slate-400 dark:text-teal-300">Configure automatic scans.</span>
+          <span class="text-[0.7rem] text-[var(--np-text-dim)] font-semibold">Configure automatic scans.</span>
         </div>
       </header>
 
@@ -688,27 +775,27 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Threat Intelligence</span>
-          <span class="text-[0.7rem] text-slate-400 dark:text-teal-300">AbuseIPDB configuration.</span>
+          <span class="text-[0.7rem] text-[var(--np-text-dim)] font-semibold">AbuseIPDB configuration.</span>
         </div>
       </header>
 
       <div class="np-settings-section space-y-3 text-xs">
         <div class="flex items-center justify-between">
-          <span :class="isNightshade ? 'text-teal-100' : 'text-slate-300'">Enable AbuseIPDB</span>
+          <span :class="isNightshade ? 'text-teal-100' : 'text-slate-700 font-bold'">Enable AbuseIPDB</span>
           <ToggleSwitch v-model="threatIntel.abuseipdb_enabled" :theme="theme" />
         </div>
 
         <label class="flex flex-col gap-1">
-          <span :class="isNightshade ? 'text-teal-200' : 'text-slate-300'">Max age (days)</span>
+          <span :class="isNightshade ? 'text-teal-200' : 'text-slate-700 font-bold'">Max age (days)</span>
           <input v-model.number="threatIntel.abuseipdb_max_age" type="number" min="1" max="365" class="np-neon-input rounded px-3 py-2 text-[0.8rem]" />
         </label>
 
-        <p class="text-[0.7rem]" :class="threatIntel.abuseipdb_api_key_configured ? (isNightshade ? 'text-emerald-400' : 'text-green-400') : 'text-amber-300'">
+        <p class="text-[0.7rem] font-bold" :class="threatIntel.abuseipdb_api_key_configured ? 'text-emerald-400' : 'text-rose-400'">
           {{ threatIntel.abuseipdb_api_key_configured ? 'API key configured via environment.' : 'API key not configured.' }}
         </p>
 
         <div class="flex items-center justify-between">
-          <p v-if="threatIntelMessage" class="text-[0.7rem]" :class="threatIntelMessage.includes('Failed') ? 'text-rose-400' : (isNightshade ? 'text-emerald-400' : 'text-green-500')">
+          <p v-if="threatIntelMessage" class="text-[0.7rem]" :class="threatIntelMessage.includes('Failed') ? 'text-rose-400' : 'text-emerald-400'">
             {{ threatIntelMessage }}
           </p>
           <button type="button" class="np-cyber-btn rounded px-4 py-2 text-[0.75rem]" @click="saveThreatIntelSettings" :disabled="threatIntelSaving">
@@ -723,12 +810,12 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Backup</span>
-          <span class="text-[0.7rem] text-slate-400 dark:text-teal-300">Export / restore database snapshots.</span>
+          <span class="text-[0.7rem] text-[var(--np-text-dim)] font-semibold">Export / restore database snapshots.</span>
         </div>
       </header>
 
       <div v-if="!isAdmin" class="np-settings-section">
-        <p class="text-[0.75rem] text-slate-400 dark:text-teal-300">Backup export/restore is admin-only.</p>
+        <p class="text-[0.75rem] text-[var(--np-text-dim)] font-semibold">Backup export/restore is admin-only.</p>
       </div>
 
       <div v-else class="space-y-4">
@@ -741,17 +828,17 @@ onMounted(async () => {
 
         <div class="np-settings-section">
           <p class="np-settings-section-title">Available Backups</p>
-          <p v-if="backupsLoading" class="text-[0.75rem] text-slate-400 dark:text-teal-300">Loading...</p>
-          <div v-else-if="backups.length === 0" class="text-[0.75rem] text-slate-400 dark:text-teal-300">No backups found.</div>
+          <p v-if="backupsLoading" class="text-[0.75rem] text-[var(--np-text-dim)] font-semibold">Loading...</p>
+          <div v-else-if="backups.length === 0" class="text-[0.75rem] text-[var(--np-text-dim)] font-semibold">No backups found.</div>
           <div v-else class="space-y-2">
-            <div v-for="b in backups" :key="b.filename" class="flex items-center justify-between rounded border p-3" :class="isNightshade ? 'border-teal-400/20 bg-black/30' : 'border-amber-500/20 bg-slate-800/30'">
+            <div v-for="b in backups" :key="b.filename" class="flex items-center justify-between np-info-card">
               <div class="min-w-0">
-                <p class="font-mono text-[0.75rem] truncate" :class="isNightshade ? 'text-teal-200' : 'text-amber-200'">{{ b.filename }}</p>
-                <p class="text-[0.65rem] text-slate-400 dark:text-teal-300">{{ formatFileSize(b.size) }} · {{ new Date(b.created_at).toLocaleString() }}</p>
+                <p class="font-mono text-[0.75rem] truncate np-info-card-value">{{ b.filename }}</p>
+                <p class="text-[0.65rem] np-info-card-text mt-1">{{ formatFileSize(b.size) }} · {{ new Date(b.created_at).toLocaleString() }}</p>
               </div>
               <div class="flex gap-2">
-                <button type="button" class="rounded px-2.5 py-1 text-[0.65rem] font-medium border" :class="isNightshade ? 'border-teal-400/40 text-teal-300 hover:bg-teal-500/15' : 'border-amber-600/40 text-amber-300 hover:bg-amber-600/15'" @click="downloadBackup(b.filename)">Download</button>
-                <button type="button" class="rounded px-2.5 py-1 text-[0.65rem] font-medium border" :class="isNightshade ? 'border-rose-400/40 text-rose-300 hover:bg-rose-500/20' : 'border-red-500/40 text-red-400 hover:bg-red-600/20'" @click="deleteBackup(b.filename)">Delete</button>
+                <button type="button" class="rounded px-2.5 py-1 text-[0.65rem] font-medium border border-[var(--np-border-subtle)] text-[var(--np-text)] hover:bg-[var(--np-surface-hover)]" @click="downloadBackup(b.filename)">Download</button>
+                <button type="button" class="rounded px-2.5 py-1 text-[0.65rem] font-medium border border-rose-500/40 text-rose-500 hover:bg-rose-500/20" @click="deleteBackup(b.filename)">Delete</button>
               </div>
             </div>
           </div>
@@ -759,7 +846,7 @@ onMounted(async () => {
 
         <div class="np-settings-section">
           <p class="np-settings-section-title">Restore from Backup</p>
-          <p class="text-[0.7rem]" :class="isNightshade ? 'text-rose-300/80' : 'text-red-400/80'">⚠ This will replace existing data in the restored tables.</p>
+          <p class="text-[0.7rem] font-bold text-rose-400">⚠ This will replace existing data in the restored tables.</p>
           <div class="flex items-center gap-3 flex-wrap mt-2">
             <input type="file" accept=".json" @change="onBackupFileChange" class="np-neon-input rounded px-3 py-2 text-[0.8rem]" />
             <button type="button" class="np-cyber-btn rounded px-4 py-2 text-[0.75rem]" @click="restoreBackup" :disabled="backupRestoring || !backupRestoreFile">
@@ -767,18 +854,18 @@ onMounted(async () => {
             </button>
           </div>
 
-          <div v-if="restoreResult" class="mt-3 rounded border p-3" :class="isNightshade ? 'border-emerald-400/30 bg-emerald-500/10' : 'border-green-500/30 bg-green-600/10'">
-            <p class="text-[0.75rem] font-medium mb-2" :class="isNightshade ? 'text-emerald-300' : 'text-green-400'">Restore Complete</p>
+          <div v-if="restoreResult" class="mt-3 rounded border p-3 bg-emerald-500/10 border-emerald-500/35">
+            <p class="text-[0.75rem] font-bold mb-2 text-emerald-400">Restore Complete</p>
             <div class="space-y-1">
               <div v-for="(count, table) in restoreResult.tables" :key="table" class="flex items-center justify-between text-[0.7rem]">
-                <span class="text-slate-400 dark:text-teal-300">{{ table }}</span>
-                <span class="font-mono" :class="isNightshade ? 'text-teal-300' : 'text-amber-300'">{{ count }} records</span>
+                <span class="text-[var(--np-text-dim)] font-semibold">{{ table }}</span>
+                <span class="font-mono text-[var(--np-nav-active-text)] font-extrabold">{{ count }} records</span>
               </div>
             </div>
           </div>
         </div>
 
-        <p v-if="backupMessage" class="text-[0.7rem]" :class="backupMessage.includes('Failed') ? 'text-rose-400' : (isNightshade ? 'text-emerald-400' : 'text-green-500')">
+        <p v-if="backupMessage" class="text-[0.7rem]" :class="backupMessage.includes('Failed') ? 'text-rose-400' : 'text-emerald-400'">
           {{ backupMessage }}
         </p>
       </div>

@@ -1,8 +1,73 @@
 from functools import lru_cache
+import sys
+import subprocess
 from typing import List
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def detect_default_gateway() -> str:
+    """Auto-detect the default gateway IP on Windows, Linux, or macOS."""
+    # Try Scapy first
+    try:
+        from scapy.all import conf
+        route = conf.route.route("0.0.0.0")
+        if route and len(route) >= 3 and route[2] and route[2] != "0.0.0.0":
+            return str(route[2])
+    except Exception:
+        pass
+
+    # Try /proc/net/route for Linux
+    try:
+        import struct
+        import socket
+        with open("/proc/net/route", "r") as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) >= 3 and parts[1] == "00000000":
+                    gw_hex = parts[2]
+                    return socket.inet_ntoa(struct.pack("<L", int(gw_hex, 16)))
+    except Exception:
+        pass
+
+    # Try subprocess-based routing table parsers for Windows/macOS/Linux
+    system = sys.platform.lower()
+
+    if "win" in system:
+        # Windows route print
+        try:
+            out = subprocess.check_output(["route", "print", "0.0.0.0"], text=True, stderr=subprocess.DEVNULL)
+            for line in out.splitlines():
+                parts = line.strip().split()
+                if len(parts) >= 4 and parts[0] == "0.0.0.0" and parts[1] == "0.0.0.0":
+                    return parts[2]
+        except Exception:
+            pass
+
+    elif "darwin" in system:
+        # macOS route -n get default
+        try:
+            out = subprocess.check_output(["route", "-n", "get", "default"], text=True, stderr=subprocess.DEVNULL)
+            for line in out.splitlines():
+                if "gateway" in line.lower():
+                    parts = line.strip().split()
+                    if len(parts) >= 2:
+                        return parts[1]
+        except Exception:
+            pass
+
+    # Fallback to ip route on Linux/macOS
+    try:
+        out = subprocess.check_output(["ip", "route", "show", "default"], text=True, stderr=subprocess.DEVNULL)
+        parts = out.strip().split()
+        if len(parts) >= 3 and parts[1] == "via":
+            return parts[2]
+    except Exception:
+        pass
+
+    return "192.168.1.1"
+
 
 """
 Central application configuration.
@@ -45,9 +110,15 @@ class Settings(BaseSettings):
     rabbitmq_url: str = "amqp://netpulse:netpulse@rabbitmq:5672/netpulse"
 
     # Network monitoring targets (Pulse)
-    pulse_gateway_ip: str = "192.168.1.1"
+    pulse_gateway_ip: str = "auto"
     pulse_isp_ip: str = "8.8.8.8"
     pulse_cloudflare_ip: str = "1.1.1.1"
+
+    @model_validator(mode="after")
+    def resolve_gateway_ip(self) -> "Settings":
+        if self.pulse_gateway_ip == "auto":
+            self.pulse_gateway_ip = detect_default_gateway()
+        return self
 
     # Rogue DHCP detection allowlist (MAC addresses).
     # Recommended env var format:

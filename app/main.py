@@ -96,18 +96,38 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     existing tables are never dropped or altered, so Alembic migrations remain
     the authoritative mechanism for schema changes in production.
     """
+    import logging
+    logger = logging.getLogger("app.main")
     setup_logging()
     await init_pool()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        # Convert metrics table to TimescaleDB hypertable
-        from sqlalchemy import text
+
+    # Retry database connection on startup to avoid container race conditions
+    max_retries = 10
+    retry_delay = 3.0
+    for attempt in range(1, max_retries + 1):
         try:
-            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"))
-            await conn.execute(text("SELECT create_hypertable('metrics', 'timestamp', if_not_exists => TRUE);"))
-        except Exception:
-            # Silently fallback if timescaledb extension is not present (e.g. SQLite / normal PG tests)
-            pass
+            # 1. Create all base tables
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            
+            # 2. Try to setup TimescaleDB hypertable in a separate transaction
+            try:
+                async with engine.begin() as conn:
+                    from sqlalchemy import text
+                    await conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"))
+                    await conn.execute(text("SELECT create_hypertable('metrics', 'timestamp', if_not_exists => TRUE);"))
+            except Exception as e:
+                # Silently fallback if timescaledb extension is not present (e.g. SQLite / normal PG tests)
+                logger.warning(f"Could not setup TimescaleDB hypertable: {e}")
+
+            logger.info("Successfully connected to the database and initialized schema.")
+            break
+        except Exception as e:
+            if attempt == max_retries:
+                logger.critical(f"Failed to connect to database after {max_retries} attempts: {e}")
+                raise
+            logger.warning(f"Database connection attempt {attempt}/{max_retries} failed: {e}. Retrying in {retry_delay}s...")
+            await asyncio.sleep(retry_delay)
     if settings.environment.lower() != "production" and settings.bootstrap_admin_enabled:
         async with async_session_factory() as session:  # type: ignore
             result = await session.execute(select(User).limit(1))  # type: ignore

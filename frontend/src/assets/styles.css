@@ -61,44 +61,66 @@
   --np-gradient-mid: rgba(255, 255, 255, 0.05);
   --np-gradient-end: rgba(255, 255, 255, 0.01);
 
+  --np-input-bg: rgba(0, 0, 0, 0.6);
+  --np-header-bg: rgba(0, 0, 0, 0.3);
+  --np-thead-bg: rgba(0, 0, 0, 0.6);
+
   --np-sans-family: "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif;
   --np-mono-family: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Navigation capsule styling */
+  --np-nav-active-bg: rgba(16, 185, 129, 0.15);
+  --np-nav-active-text: #34d399;
+  --np-nav-active-border: rgba(16, 185, 129, 0.2);
+  --np-nav-inactive-text: rgba(148, 163, 184, 0.6);
+  --np-nav-inactive-hover: #e2e8f0;
 }
 
-/* ── SysAdmin (default: Industrial Graphite & Amber) ── */
+/* ── SysAdmin (Premium Light Theme) ── */
 .theme-sysadmin {
-  --np-bg: #050505;
-  --np-surface: #0f0f11;
-  --np-surface-elevated: #18181b;
-  --np-surface-hover: #27272a;
+  --np-bg: #e2e8f0;            /* Slate 200 - softer background to reduce glare */
+  --np-surface: #ffffff;       /* Pure White */
+  --np-surface-elevated: #f1f5f9; /* Slate 100 */
+  --np-surface-hover: #f8fafc;    /* Slate 50 */
 
-  --np-accent-primary: #f59e0b;   /* Industrial Amber Warning */
-  --np-accent-secondary: #d97706; /* Deep Amber */
-  --np-accent-tertiary: #10b981;  /* Emerald */
-  --np-accent-muted: #78716c;     /* Stone Muted */
+  --np-accent-primary: #0f172a;   /* Stark Slate 900 */
+  --np-accent-secondary: #1e293b; /* Slate 800 */
+  --np-accent-tertiary: #334155;  /* Slate 700 */
+  --np-accent-muted: #475569;     /* Slate 600 */
 
-  --np-text: #fafafa;
-  --np-text-muted: #d4d4d8;
-  --np-text-dim: #71717a;
+  --np-text: #020617;             /* Slate 950 - high contrast text */
+  --np-text-muted: #1e293b;       /* Slate 800 - dark, highly readable secondary text */
+  --np-text-dim: #334155;         /* Slate 700 - dark, highly readable tertiary text */
 
-  --np-border: rgba(245, 158, 11, 0.15);
-  --np-border-subtle: rgba(245, 158, 11, 0.06);
-  --np-border-bright: rgba(245, 158, 11, 0.45);
+  --np-border: rgba(15, 23, 42, 0.25);        /* Higher contrast border */
+  --np-border-subtle: rgba(15, 23, 42, 0.15); /* More visible subtle border */
+  --np-border-bright: rgba(15, 23, 42, 0.5);
 
-  --np-success: #10b981;
-  --np-warning: #f59e0b;
-  --np-danger: #ef4444;
-  --np-info: #3b82f6;
+  --np-success: #059669;          /* Emerald Success */
+  --np-warning: #d97706;          /* Warning remains amber only for alerts/warnings */
+  --np-danger: #e11d48;           /* Danger */
+  --np-info: #0284c7;             /* Info */
 
-  --np-glass-bg: rgba(15, 15, 17, 0.9);
-  --np-glass-border: rgba(245, 158, 11, 0.12);
+  --np-glass-bg: rgba(255, 255, 255, 0.9);    /* Slightly more opaque to reduce background bleed */
+  --np-glass-border: rgba(15, 23, 42, 0.15);
 
-  --np-gradient-start: rgba(245, 158, 11, 0.25);
-  --np-gradient-mid: rgba(217, 119, 6, 0.1);
-  --np-gradient-end: rgba(16, 185, 129, 0.02);
+  --np-gradient-start: rgba(15, 23, 42, 0.08);
+  --np-gradient-mid: rgba(15, 23, 42, 0.04);
+  --np-gradient-end: rgba(15, 23, 42, 0);
+
+  --np-input-bg: #ffffff;
+  --np-header-bg: rgba(15, 23, 42, 0.05);
+  --np-thead-bg: rgba(15, 23, 42, 0.08);
 
   --np-sans-family: "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif;
   --np-mono-family: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Navigation capsule styling */
+  --np-nav-active-bg: rgba(5, 150, 105, 0.15);
+  --np-nav-active-text: #059669;
+  --np-nav-active-border: rgba(5, 150, 105, 0.25);
+  --np-nav-inactive-text: #020617; /* Slate 950 - bold and black */
+  --np-nav-inactive-hover: #000000; /* Pure black on hover */
 }
 
 /* Apply default font families to html/body */
@@ -198,7 +220,7 @@ html, body {
   justify-content: space-between;
   border-bottom: 1px solid var(--np-border-subtle);
   padding: 0.75rem 1rem;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--np-header-bg);
   border-radius: 0.75rem 0.75rem 0 0;
 }
 
@@ -254,7 +276,7 @@ html, body {
    INPUTS
    ============================================ */
 .np-neon-input {
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--np-input-bg);
   border: 1px solid var(--np-border);
   color: var(--np-text);
   font-family: var(--np-mono-family);
@@ -469,7 +491,7 @@ table {
 }
 
 thead {
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--np-thead-bg);
 }
 
 th {
@@ -520,3 +542,117 @@ tbody tr:hover {
 .np-fade-leave-to {
   opacity: 0;
 }
+
+/* ============================================
+   EXPLICIT HIGH-VISIBILITY HEADER & NAV CLASSES
+   ============================================ */
+.np-nav-btn {
+  color: var(--np-nav-inactive-text) !important;
+  font-weight: 800 !important;
+}
+.np-nav-btn:hover {
+  color: var(--np-nav-inactive-hover) !important;
+}
+.np-nav-btn.active {
+  color: var(--np-nav-active-text) !important;
+  background-color: var(--np-nav-active-bg) !important;
+  border-color: var(--np-nav-active-border) !important;
+}
+
+.np-header-search {
+  background-color: var(--np-surface-elevated) !important;
+  border: 1.5px solid var(--np-border-subtle) !important;
+  color: var(--np-text-muted) !important;
+}
+.np-header-search:hover {
+  border-color: var(--np-border) !important;
+  color: var(--np-text) !important;
+}
+
+.np-header-theme-btn {
+  background-color: var(--np-surface-elevated) !important;
+  border: 1.5px solid var(--np-border-subtle) !important;
+  color: var(--np-text-dim) !important;
+}
+.np-header-theme-btn:hover {
+  color: var(--np-nav-active-text) !important;
+  border-color: var(--np-nav-active-border) !important;
+}
+
+.np-header-profile-btn {
+  background-color: var(--np-surface-elevated) !important;
+  border: 1.5px solid var(--np-border-subtle) !important;
+}
+.np-header-profile-btn:hover {
+  border-color: var(--np-border) !important;
+}
+.np-header-profile-name {
+  color: var(--np-text) !important;
+  font-weight: 800 !important;
+}
+.np-header-profile-role {
+  color: var(--np-nav-active-text) !important;
+  font-weight: 800 !important;
+}
+.np-header-chevron {
+  color: var(--np-text-dim) !important;
+}
+
+.np-header-logo-text {
+  color: var(--np-nav-active-text) !important;
+  font-weight: 800 !important;
+}
+.np-header-logo-version {
+  background-color: var(--np-nav-active-bg) !important;
+  color: var(--np-nav-active-text) !important;
+  border: 1px solid var(--np-nav-active-border) !important;
+  font-weight: 800 !important;
+}
+.np-header-logo-subtitle {
+  color: var(--np-text-dim) !important;
+  font-weight: 800 !important;
+}
+
+/* ============================================
+   HIGH-VISIBILITY SUBTABS & TABS NAVBAR
+   ============================================ */
+.np-subtab-btn {
+  color: var(--np-text-muted) !important;
+  font-weight: 800 !important;
+  border-bottom: 2px solid transparent !important;
+}
+.np-subtab-btn:hover {
+  color: var(--np-nav-active-text) !important;
+}
+.np-subtab-btn.active {
+  color: var(--np-nav-active-text) !important;
+  border-bottom-color: var(--np-nav-active-text) !important;
+}
+
+/* ============================================
+   THEME-AWARE INFO CARDS (SEGMENTS, BACKUPS)
+   ============================================ */
+.np-info-card {
+  background-color: var(--np-surface-elevated) !important;
+  border: 1.5px solid var(--np-border-subtle) !important;
+  border-radius: 0.75rem !important;
+  padding: 1rem !important;
+}
+.np-info-card-title {
+  color: var(--np-text) !important;
+  font-weight: 800 !important;
+  font-size: 0.85rem !important;
+}
+.np-info-card-value {
+  color: var(--np-nav-active-text) !important;
+  font-weight: 800 !important;
+  font-family: var(--np-mono-family) !important;
+  font-size: 0.75rem !important;
+}
+.np-info-card-text {
+  color: var(--np-text-dim) !important;
+  font-weight: 800 !important;
+  font-size: 0.7rem !important;
+}
+
+

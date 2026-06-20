@@ -431,7 +431,7 @@ onMounted(async () => {
         </div>
         <button
           type="button"
-          class="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-200/80 hover:text-fuchsia-200 hover:bg-slate-500/10 transition-colors text-left"
+          class="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-[var(--np-text-muted)] hover:text-[var(--np-accent-primary)] hover:bg-[var(--np-surface-hover)] transition-colors text-left"
           @click.stop="quickAction('ping', contextMenu.device!)"
         >
           <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -485,10 +485,8 @@ onMounted(async () => {
         class="px-4 py-2.5 text-xs uppercase tracking-wider font-semibold transition-all duration-200 border-b-2 -mb-px"
         :class="[
           activeTab === tab
-            ? isNightshade
-              ? 'border-emerald-500 text-emerald-400'
-              : 'border-amber-500 text-amber-400'
-            : 'border-transparent text-slate-400/50 hover:text-emerald-300 hover:border-slate-500/30',
+            ? 'border-[var(--np-accent-primary)] text-[var(--np-accent-primary)]'
+            : 'border-transparent text-[var(--np-text-dim)] hover:text-[var(--np-text)] hover:border-[var(--np-border-subtle)]',
         ]"
       >
         {{ tab === 'inventory' ? 'Inventory' : tab === 'uptime' ? 'Uptime Monitor' : 'SNMP Monitor' }}
@@ -603,8 +601,8 @@ onMounted(async () => {
               @contextmenu.prevent="openContextMenu($event, d)"
             >
               <td class="px-3" :class="infoMode === 'compact' ? 'py-1' : 'py-2.5'">
-                <div class="font-mono text-purple-50">{{ d.ip_address }}</div>
-                <div v-if="infoMode !== 'compact'" class="text-[0.65rem] text-slate-400/50 mt-0.5">{{ d.hostname || d.mac_address || 'Unknown' }}</div>
+                <div class="font-mono text-[var(--np-text)] font-semibold">{{ d.ip_address }}</div>
+                <div v-if="infoMode !== 'compact'" class="text-[0.65rem] text-[var(--np-text-dim)] mt-0.5">{{ d.hostname || d.mac_address || 'Unknown' }}</div>
               </td>
               <td class="px-3 hidden sm:table-cell" :class="infoMode === 'compact' ? 'py-1' : 'py-2.5'">
                 <span class="sp-badge">{{ d.is_gateway ? 'Gateway' : (d.device_type || 'Unknown') }}</span>

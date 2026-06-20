@@ -361,8 +361,8 @@ watch(
     <!-- Header Section -->
     <header class="flex items-end justify-between px-1 shrink-0">
       <div>
-        <p class="text-[0.65rem] uppercase tracking-[0.45em] text-white/30">Network Control Posture</p>
-        <h1 class="mt-2 text-2xl font-semibold tracking-tight text-white">Operator Toolbox</h1>
+        <p class="text-[0.65rem] uppercase tracking-[0.45em] text-[var(--np-text-dim)] font-extrabold">Network Control Posture</p>
+        <h1 class="mt-2 text-2xl font-extrabold tracking-tight text-[var(--np-text)]">Operator Toolbox</h1>
       </div>
       <div class="flex items-center gap-2">
         <button
@@ -385,10 +385,8 @@ watch(
           v-for="t in ['scanning', 'diagnostics', 'automation']"
           :key="t"
           @click="activeTab = (t as ActiveTab)"
-          class="px-4 py-2 text-xs font-semibold tracking-wider uppercase border-b-2 -mb-px transition-colors"
-          :class="activeTab === t
-            ? 'border-emerald-500 text-emerald-400'
-            : 'border-transparent text-slate-400/40 hover:text-emerald-300'"
+          class="px-4 py-2 text-xs uppercase tracking-wider transition-colors np-subtab-btn"
+          :class="{ 'active': activeTab === t }"
         >
           {{ t === 'scanning' ? 'Port Scanner' : t === 'diagnostics' ? 'Diagnostic Probes' : 'Automation Scripts' }}
         </button>

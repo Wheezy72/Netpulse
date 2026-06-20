@@ -110,7 +110,7 @@ services:
       RABBITMQ_URL: amqp://netpulse:${RABBITMQ_PASSWORD:-netpulse}@rabbitmq:5672/netpulse
       SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
       ENVIRONMENT: production
-      PULSE_GATEWAY_IP: ${PULSE_GATEWAY_IP:-192.168.1.1}
+      PULSE_GATEWAY_IP: ${PULSE_GATEWAY_IP:-auto}
       PULSE_ISP_IP: ${PULSE_ISP_IP:-8.8.8.8}
       PULSE_CLOUDFLARE_IP: ${PULSE_CLOUDFLARE_IP:-1.1.1.1}
       SCRIPTS_BASE_DIR: /app/scripts

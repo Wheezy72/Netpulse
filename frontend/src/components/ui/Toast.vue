@@ -90,10 +90,10 @@ function getColors(type: ToastMessage["type"]): { bg: string; border: string; te
     case "info":
     default:
       return {
-        bg: cyber ? "bg-emerald-500/20" : "bg-amber-500/20",
-        border: cyber ? "border-emerald-400/50" : "border-amber-400/50",
-        text: cyber ? "text-fuchsia-100" : "text-amber-100",
-        icon: cyber ? "text-emerald-400" : "text-amber-400",
+        bg: "bg-sky-500/10",
+        border: "border-sky-500/20",
+        text: cyber ? "text-sky-200" : "text-sky-800",
+        icon: cyber ? "text-sky-400" : "text-sky-600",
       };
   }
 }

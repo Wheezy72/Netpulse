@@ -48,3 +48,11 @@ async def test_create_network_segment_validation() -> None:
         )
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "Invalid CIDR format"
+
+
+@pytest.mark.asyncio
+async def test_detect_gateway() -> None:
+    from app.api.routes.network_segments import detect_gateway
+    res = await detect_gateway(_user=None)  # type: ignore[arg-type]
+    assert "gateway_ip" in res
+    assert len(res["gateway_ip"]) > 0

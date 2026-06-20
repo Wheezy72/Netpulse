@@ -384,10 +384,10 @@ onMounted(() => {
   <div class="space-y-4">
     <header class="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h1 class="text-xl font-semibold" :class="isNightshade ? 'text-slate-100' : 'text-amber-400'">
+        <h1 class="text-xl font-extrabold text-[var(--np-text)]">
           Packet Browser
         </h1>
-        <p class="text-xs text-slate-400">
+        <p class="text-xs text-[var(--np-text-dim)] font-bold">
           Browse parsed packet headers with virtualized rendering.
         </p>
       </div>
