@@ -123,12 +123,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Successfully connected to the database and initialized schema.")
             break
         except Exception as e:
+            await engine.dispose()  # Dispose pool to prevent PendingRollbackError on subsequent retry attempts
             if attempt == max_retries:
                 logger.critical(f"Failed to connect to database after {max_retries} attempts: {e}")
                 raise
             logger.warning(f"Database connection attempt {attempt}/{max_retries} failed: {e}. Retrying in {retry_delay}s...")
             await asyncio.sleep(retry_delay)
-    if settings.environment.lower() != "production" and settings.bootstrap_admin_enabled:
+    if settings.bootstrap_admin_enabled:
         async with async_session_factory() as session:  # type: ignore
             result = await session.execute(select(User).limit(1))  # type: ignore
             if result.scalar_one_or_none() is None:

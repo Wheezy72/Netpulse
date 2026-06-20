@@ -109,13 +109,17 @@ services:
       REDIS_URL: redis://redis:6379/0
       RABBITMQ_URL: amqp://netpulse:${RABBITMQ_PASSWORD:-netpulse}@rabbitmq:5672/netpulse
       SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
-      ENVIRONMENT: production
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      BOOTSTRAP_ADMIN_ENABLED: ${BOOTSTRAP_ADMIN_ENABLED:-true}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@netpulse.local}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-changeme}
       PULSE_GATEWAY_IP: ${PULSE_GATEWAY_IP:-auto}
       PULSE_ISP_IP: ${PULSE_ISP_IP:-8.8.8.8}
       PULSE_CLOUDFLARE_IP: ${PULSE_CLOUDFLARE_IP:-1.1.1.1}
       SCRIPTS_BASE_DIR: /app/scripts
       PCAP_STORAGE_DIR: /app/data/pcaps
-      CORS_ALLOW_ORIGINS: '["http://localhost:8000"]'
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-'["http://localhost:8000"]'}
     volumes:
       - app_data:/app/data
     ports:
@@ -146,7 +150,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       RABBITMQ_URL: amqp://netpulse:${RABBITMQ_PASSWORD:-netpulse}@rabbitmq:5672/netpulse
       SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
-      ENVIRONMENT: production
+      ENVIRONMENT: ${ENVIRONMENT:-production}
       SCRIPTS_BASE_DIR: /app/scripts
       PCAP_STORAGE_DIR: /app/data/pcaps
     volumes:
@@ -175,7 +179,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@pgbouncer:5432/netpulse
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
-      ENVIRONMENT: production
+      ENVIRONMENT: ${ENVIRONMENT:-production}
       SCRIPTS_BASE_DIR: /app/scripts
       PCAP_STORAGE_DIR: /app/data/pcaps
     volumes:
