@@ -259,6 +259,9 @@ async def validation_exception_handler(
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catch-all handler – prevents leaking internal details to clients."""
+    import logging
+    logger = logging.getLogger("app.main")
+    logger.error(f"Unhandled exception during {request.method} {request.url.path}: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
         content={"error": {"code": 500, "message": "Internal server error"}},
