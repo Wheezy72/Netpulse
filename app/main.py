@@ -144,11 +144,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 session.add(bootstrap_user)
                 await session.commit()  # type: ignore
     passive_monitor_task: asyncio.Task[None] | None = None
+    peer_discovery_task: asyncio.Task[None] | None = None
     try:
+        # Start peer discovery on the local network segment
+        from app.services.peer_discovery import start_peer_discovery
+        peer_discovery_task = asyncio.create_task(start_peer_discovery())
+        
         if settings.enable_passive_monitor:
             passive_monitor_task = asyncio.create_task(run_passive_monitor())
         yield
     finally:
+        if peer_discovery_task is not None:
+            peer_discovery_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await peer_discovery_task
         if passive_monitor_task is not None:
             passive_monitor_task.cancel()
             with suppress(asyncio.CancelledError):

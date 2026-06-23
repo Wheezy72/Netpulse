@@ -98,11 +98,12 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health/live || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8000/api/health/live || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 60s
+      # Run as root in container to allow raw sockets and packet capture capabilties
     user: "0"
     environment:
       DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@pgbouncer:5432/netpulse
@@ -124,6 +125,7 @@ services:
       - app_data:/app/data
     ports:
       - "8000:8000"
+      - "50080:50080/udp"
     cap_add:
       - NET_RAW
       - NET_ADMIN

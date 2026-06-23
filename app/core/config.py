@@ -8,65 +8,108 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def detect_default_gateway() -> str:
-    """Auto-detect the default gateway IP on Windows, Linux, or macOS."""
+    """Auto-detect the default gateway IP on Windows, Linux, or macOS.
+    
+    If running within a containerized Docker network, automatically performs
+    a low-TTL traceroute probe to escape the bridge network namespace and
+    detect the host physical default gateway IP.
+    """
+    detected_gw = None
+
     # Try Scapy first
     try:
         from scapy.all import conf
         route = conf.route.route("0.0.0.0")
         if route and len(route) >= 3 and route[2] and route[2] != "0.0.0.0":
-            return str(route[2])
+            detected_gw = str(route[2])
     except Exception:
         pass
 
     # Try /proc/net/route for Linux
-    try:
-        import struct
-        import socket
-        with open("/proc/net/route", "r") as f:
-            for line in f:
-                parts = line.strip().split()
-                if len(parts) >= 3 and parts[1] == "00000000":
-                    gw_hex = parts[2]
-                    return socket.inet_ntoa(struct.pack("<L", int(gw_hex, 16)))
-    except Exception:
-        pass
+    if not detected_gw:
+        try:
+            import struct
+            import socket
+            with open("/proc/net/route", "r") as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) >= 3 and parts[1] == "00000000":
+                        gw_hex = parts[2]
+                        detected_gw = socket.inet_ntoa(struct.pack("<L", int(gw_hex, 16)))
+                        break
+        except Exception:
+            pass
 
     # Try subprocess-based routing table parsers for Windows/macOS/Linux
-    system = sys.platform.lower()
-
-    if "win" in system:
-        # Windows route print
-        try:
-            out = subprocess.check_output(["route", "print", "0.0.0.0"], text=True, stderr=subprocess.DEVNULL)
-            for line in out.splitlines():
-                parts = line.strip().split()
-                if len(parts) >= 4 and parts[0] == "0.0.0.0" and parts[1] == "0.0.0.0":
-                    return parts[2]
-        except Exception:
-            pass
-
-    elif "darwin" in system:
-        # macOS route -n get default
-        try:
-            out = subprocess.check_output(["route", "-n", "get", "default"], text=True, stderr=subprocess.DEVNULL)
-            for line in out.splitlines():
-                if "gateway" in line.lower():
+    if not detected_gw:
+        system = sys.platform.lower()
+        if "win" in system:
+            try:
+                out = subprocess.check_output(["route", "print", "0.0.0.0"], text=True, stderr=subprocess.DEVNULL)
+                for line in out.splitlines():
                     parts = line.strip().split()
-                    if len(parts) >= 2:
-                        return parts[1]
-        except Exception:
-            pass
+                    if len(parts) >= 4 and parts[0] == "0.0.0.0" and parts[1] == "0.0.0.0":
+                        detected_gw = parts[2]
+                        break
+            except Exception:
+                pass
+        elif "darwin" in system:
+            try:
+                out = subprocess.check_output(["route", "-n", "get", "default"], text=True, stderr=subprocess.DEVNULL)
+                for line in out.splitlines():
+                    if "gateway" in line.lower():
+                        parts = line.strip().split()
+                        if len(parts) >= 2:
+                            detected_gw = parts[1]
+                            break
+            except Exception:
+                pass
 
     # Fallback to ip route on Linux/macOS
-    try:
-        out = subprocess.check_output(["ip", "route", "show", "default"], text=True, stderr=subprocess.DEVNULL)
-        parts = out.strip().split()
-        if len(parts) >= 3 and parts[1] == "via":
-            return parts[2]
-    except Exception:
-        pass
+    if not detected_gw:
+        try:
+            out = subprocess.check_output(["ip", "route", "show", "default"], text=True, stderr=subprocess.DEVNULL)
+            parts = out.strip().split()
+            if len(parts) >= 3 and parts[1] == "via":
+                detected_gw = parts[2]
+        except Exception:
+            pass
 
-    return "192.168.1.1"
+    if not detected_gw:
+        detected_gw = "192.168.1.1"
+
+    # If the gateway is in the private Docker network range, attempt to escape the container namespace
+    if detected_gw.startswith("172."):
+        try:
+            import ipaddress
+            ip_val = ipaddress.ip_address(detected_gw)
+            docker_nets = [ipaddress.ip_network(f"172.{i}.0.0/12") for i in range(16, 32)]
+            is_docker = any(ip_val in net for net in docker_nets)
+            if is_docker:
+                # Perform a low-TTL traceroute to 8.8.8.8 to find the first non-Docker hop
+                try:
+                    out = subprocess.check_output(
+                        ["traceroute", "-m", "5", "-q", "1", "-w", "1", "8.8.8.8"],
+                        text=True,
+                        stderr=subprocess.DEVNULL
+                    )
+                    for line in out.splitlines():
+                        parts = line.strip().split()
+                        if len(parts) >= 3:
+                            for part in parts:
+                                clean = part.strip("()")
+                                try:
+                                    chk = ipaddress.ip_address(clean)
+                                    if not any(chk in net for net in docker_nets) and clean != "127.0.0.1" and clean != "8.8.8.8":
+                                        return clean
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    return detected_gw
 
 
 """

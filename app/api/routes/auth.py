@@ -32,16 +32,9 @@ _RATE_LIMIT_KEY_PREFIX = "np:login_attempts:"
 _RATE_LIMIT_MAX_ATTEMPTS = 5
 _RATE_LIMIT_WINDOW_SECONDS = 300
 
-_RESET_TOKEN_KEY_PREFIX = "np:reset_token:"
-_RESET_TOKEN_TTL_SECONDS = 3600
-
 
 def _rate_limit_key_for_ip(client_ip: str) -> str:
     return f"{_RATE_LIMIT_KEY_PREFIX}{client_ip}"
-
-
-def _reset_token_key(token: str) -> str:
-    return f"{_RESET_TOKEN_KEY_PREFIX}{token}"
 
 
 async def _enforce_login_rate_limit(request: Request) -> None:
@@ -79,27 +72,6 @@ async def _enforce_login_rate_limit(request: Request) -> None:
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many login attempts. Please try again later.",
         )
-
-
-async def _store_password_reset_token_in_redis(token: str, user_email: str) -> None:
-    redis_client = get_redis()
-    reset_token_key = _reset_token_key(token)
-    await redis_client.hset(reset_token_key, mapping={"email": user_email})
-    await redis_client.expire(reset_token_key, _RESET_TOKEN_TTL_SECONDS)
-
-
-async def _consume_password_reset_token_from_redis(token: str) -> str | None:
-    """Return the email for the token and delete it (tokens are single-use)."""
-    redis_client = get_redis()
-    reset_token_key = _reset_token_key(token)
-    token_data = await redis_client.hgetall(reset_token_key)
-    if not token_data:
-        return None
-    await redis_client.delete(reset_token_key)
-    email_value = token_data.get("email")
-    if isinstance(email_value, (bytes, bytearray, memoryview)):
-        return bytes(email_value).decode("utf-8")
-    return email_value
 
 
 class TokenResponse(BaseModel):
@@ -394,13 +366,19 @@ async def forgot_password(
     user = result.scalar_one_or_none()
 
     if user is None or user.auth_provider != "local":
+        # Return generic message to prevent user enumeration
         return {"message": "If an account with that email exists, a reset link has been generated."}
 
     token = secrets.token_urlsafe(32)
-    await _store_password_reset_token_in_redis(token=token, user_email=user.email)
+    import hashlib
+    hashed_token = hashlib.sha256(token.encode()).hexdigest()
 
-    # Log only that a reset was requested, never log the plaintext token
-    logger.warning("Password reset requested for email: %s", user.email)
+    user.reset_token = hashed_token
+    user.reset_token_expires = datetime.utcnow() + timedelta(hours=1)
+    await db.commit()
+
+    # Log the plaintext token to the console so the administrator can copy-paste it
+    logger.warning("PASSWORD RESET REQUESTED FOR %s. RESET TOKEN: %s", user.email, token)
 
     return {"message": "If an account with that email exists, a reset link has been generated."}
 
@@ -419,23 +397,28 @@ async def reset_password(
             detail="Password must be at least 6 characters.",
         )
 
-    associated_email = await _consume_password_reset_token_from_redis(payload.token)
-    if associated_email is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset token.",
-        )
+    import hashlib
+    hashed_token = hashlib.sha256(payload.token.encode()).hexdigest()
 
-    result = await db.execute(select(User).where(User.email == associated_email))
+    # Find the user with the matching, unexpired reset token
+    result = await db.execute(
+        select(User).where(
+            User.reset_token == hashed_token,
+            User.reset_token_expires > datetime.utcnow()
+        )
+    )
     user = result.scalar_one_or_none()
 
     if not user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User not found.",
+            detail="Invalid or expired reset token.",
         )
 
     user.hashed_password = get_password_hash(payload.new_password)
+    user.reset_token = None
+    user.reset_token_expires = None
+    user.force_password_change = False
     await db.commit()
 
     return {"message": "Password has been reset successfully. You can now sign in."}
