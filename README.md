@@ -188,6 +188,13 @@ cargo clippy         # lint (zero-warning policy)
 </tr>
 </table>
 
+### Enterprise Security & Infrastructure
+*   **Database-Backed Password Reset**: Standard, secure password recovery. Token generation is saved in the database with a 1-hour expiration and SHA-256 hashing.
+*   **Peer-to-Peer Auto-Discovery**: Multiple Netpulse instances on the same network auto-discover each other using signed UDP broadcasts (port 50080). Admin credentials dynamically synchronize across peers, preventing password change prompts on new logins within the same network.
+*   **Smart Gateway Detection**: Dynamic, container-aware gateway detection. On container startup, Netpulse performs a low-TTL traceroute probe to escape Docker bridge networks and identify the host's physical default gateway.
+*   **Modern Cryptography**: Direct use of `argon2-cffi` for password hashing and HMAC-SHA256 signature verification for peer-to-peer instance traffic.
+*   **Optimized Docker Images**: Small container footprint using multi-stage builds and automated cleanup.
+
 ---
 
 ## Stack

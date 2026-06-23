@@ -8,7 +8,8 @@ from typing import Annotated, AsyncGenerator, Optional
 from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +18,7 @@ from app.core.redis import get_redis
 from app.db.session import async_session_factory
 from app.models.user import User, UserRole
 
-pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+ph = PasswordHasher()
 security_scheme = HTTPBearer(auto_error=True)
 
 
@@ -32,11 +33,17 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return ph.verify(hashed_password, plain_password)
+    except VerifyMismatchError:
+        return False
+    except Exception:
+        # Fallback in case of invalid hashes/malformed passwords
+        return False
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    return ph.hash(password)
 
 
 def create_access_token(

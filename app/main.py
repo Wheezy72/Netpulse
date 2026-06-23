@@ -123,12 +123,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Successfully connected to the database and initialized schema.")
             break
         except Exception as e:
+            await engine.dispose()  # Dispose pool to prevent PendingRollbackError on subsequent retry attempts
             if attempt == max_retries:
                 logger.critical(f"Failed to connect to database after {max_retries} attempts: {e}")
                 raise
             logger.warning(f"Database connection attempt {attempt}/{max_retries} failed: {e}. Retrying in {retry_delay}s...")
             await asyncio.sleep(retry_delay)
-    if settings.environment.lower() != "production" and settings.bootstrap_admin_enabled:
+    if settings.bootstrap_admin_enabled:
         async with async_session_factory() as session:  # type: ignore
             result = await session.execute(select(User).limit(1))  # type: ignore
             if result.scalar_one_or_none() is None:
@@ -143,11 +144,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 session.add(bootstrap_user)
                 await session.commit()  # type: ignore
     passive_monitor_task: asyncio.Task[None] | None = None
+    peer_discovery_task: asyncio.Task[None] | None = None
     try:
+        # Start peer discovery on the local network segment
+        from app.services.peer_discovery import start_peer_discovery
+        peer_discovery_task = asyncio.create_task(start_peer_discovery())
+        
         if settings.enable_passive_monitor:
             passive_monitor_task = asyncio.create_task(run_passive_monitor())
         yield
     finally:
+        if peer_discovery_task is not None:
+            peer_discovery_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await peer_discovery_task
         if passive_monitor_task is not None:
             passive_monitor_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -258,6 +268,9 @@ async def validation_exception_handler(
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catch-all handler – prevents leaking internal details to clients."""
+    import logging
+    logger = logging.getLogger("app.main")
+    logger.error(f"Unhandled exception during {request.method} {request.url.path}: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
         content={"error": {"code": 500, "message": "Internal server error"}},

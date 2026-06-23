@@ -234,7 +234,7 @@ pip install -q \
   python-nmap \
   reportlab \
   "python-jose[cryptography]" \
-  "passlib[bcrypt]" \
+  "argon2-cffi" \
   slowapi \
   httpx
 
