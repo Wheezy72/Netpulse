@@ -1,9 +1,9 @@
 from functools import lru_cache
 import sys
 import subprocess
-from typing import List
+from typing import List, Any
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_validator, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -274,6 +274,23 @@ class Settings(BaseSettings):
     cors_allow_origins: List[str] = Field(
         default_factory=lambda: ["http://localhost:5000", "http://localhost:5173"]
     )
+
+    @field_validator("cors_allow_origins", mode="before")
+    @classmethod
+    def parse_cors_allow_origins(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            # Clean enclosing single or double quotes
+            v = v.strip().strip("'\"").strip()
+            # If it looks like a JSON list, parse it
+            if v.startswith("[") and v.endswith("]"):
+                try:
+                    import json
+                    return json.loads(v)
+                except Exception:
+                    pass
+            # Comma-separated list fallback
+            return [x.strip() for x in v.split(",") if x.strip()]
+        return v
 
     # Script governance.
     allowed_prebuilt_scripts: List[str] = Field(
