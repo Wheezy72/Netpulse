@@ -254,7 +254,7 @@ async function handleForcePasswordChange() {
       <!-- Standard Shell -->
       <template v-else>
       <header class="sticky top-0 z-40 w-full border-b border-[var(--np-border-subtle)] bg-[var(--np-glass-bg)] backdrop-blur-md transition-all duration-200">
-        <div class="max-w-[95%] mx-auto px-4 h-16 flex items-center justify-between gap-4">
+        <div class="w-full mx-auto px-4 md:px-6 h-16 flex items-center justify-between gap-4">
           
           <!-- Left: Logo & Netpulse title -->
           <div class="flex items-center gap-2.5 shrink-0">
@@ -422,7 +422,7 @@ async function handleForcePasswordChange() {
       </transition>
 
       <!-- Main content view (contained within standard maximum width layout) -->
-      <main class="flex-1 max-w-[95%] w-full mx-auto px-4 md:px-6 py-6 overflow-y-auto relative z-10">
+      <main class="flex-1 w-full mx-auto px-4 md:px-6 py-6 overflow-y-auto relative z-10">
         <RouterView v-slot="{ Component }">
           <component
             :is="Component"
