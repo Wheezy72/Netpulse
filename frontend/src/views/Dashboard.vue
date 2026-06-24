@@ -43,17 +43,33 @@ const assets = ref<Asset[]>([])
 async function fetchLiveDevices() {
   try {
     const { data } = await axios.get('/api/devices')
-    assets.value = data.map((d: any) => ({
-      id: d.id,
-      ip: d.ip_address,
-      hostname: d.hostname || d.ip_address,
-      role: d.device_type || (d.is_gateway ? 'Gateway Router' : 'Network Host'),
-      status: 'online',
-      lastSeen: new Date(d.last_seen).toLocaleTimeString(),
-      platform: d.device_type?.includes('windows') ? 'windows' : 'linux', // Fallback icon styling
-      riskLevel: d.is_gateway ? 'Medium' : 'Low',
-      riskValue: d.is_gateway ? 50 : 20
-    }))
+    assets.value = data.map((d: any) => {
+      const typeLower = (d.device_type || '').toLowerCase();
+      let platformVal: 'aws' | 'gcp' | 'azure' | 'linux' | 'windows' | 'cisco' = 'linux';
+      if (typeLower.includes('windows')) {
+        platformVal = 'windows';
+      } else if (typeLower.includes('cisco') || typeLower.includes('switch')) {
+        platformVal = 'cisco';
+      } else if (typeLower.includes('aws')) {
+        platformVal = 'aws';
+      } else if (typeLower.includes('azure')) {
+        platformVal = 'azure';
+      } else if (typeLower.includes('gcp')) {
+        platformVal = 'gcp';
+      }
+      
+      return {
+        id: d.id,
+        ip: d.ip_address,
+        hostname: d.hostname || d.ip_address,
+        role: d.device_type || (d.is_gateway ? 'Gateway Router' : 'Network Host'),
+        status: 'online',
+        lastSeen: new Date(d.last_seen).toLocaleTimeString(),
+        platform: platformVal,
+        riskLevel: d.is_gateway ? 'Medium' : 'Low',
+        riskValue: d.is_gateway ? 50 : 20
+      };
+    })
     if (assets.value.length > 0) {
       selectAsset(assets.value[0])
     }
