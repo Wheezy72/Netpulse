@@ -89,16 +89,14 @@ async def run_nmap_scan(db: AsyncSession, target: str) -> List[DetectedService]:
 
 
 async def passive_arp_discovery(db: AsyncSession, iface: str = "eth0", duration: int = 10) -> None:
-    """Perform passive ARP-based discovery on the given interface.
-
-    Listens for ARP traffic for a limited duration (seconds) and upserts
-    Device entries with IP/MAC/last_seen. This function is meant to be
-    invoked periodically by a Celery task, not as a permanent daemon.
+    """Perform passive ARP-based discovery on the given interface, combined with
+    an active background ARP sweep on local subnets to ensure high-accuracy device detection.
     """
 
     def _capture() -> list[tuple[str, str]]:
         observed: list[tuple[str, str]] = []
 
+        # 1. Passive sniff
         def _handler(pkt) -> None:
             if pkt.haslayer(ARP):
                 arp_layer = pkt[ARP]
@@ -112,7 +110,50 @@ async def passive_arp_discovery(db: AsyncSession, iface: str = "eth0", duration:
             store=False,
             timeout=duration,
         )
-        return observed
+
+        # 2. Active ARP sweep on local subnets to automatically detect all devices
+        try:
+            from scapy.all import srp
+            from scapy.utils import ltoa
+            
+            # Identify the default physical interface (or fall back to the given interface)
+            default_iface = None
+            try:
+                default_iface = conf.route.route("0.0.0.0")[0]
+            except Exception:
+                pass
+            iface_to_scan = default_iface or iface or conf.iface
+
+            # Find all directly attached subnets
+            subnets = []
+            for net, msk, gw, route_iface, addr, metric in conf.route.routes:
+                if route_iface == iface_to_scan and gw == '0.0.0.0' and msk != 0 and msk != 0xffffffff:
+                    net_str = ltoa(net)
+                    if not (net_str.startswith("127.") or net_str.startswith("224.") or net_str.startswith("240.") or net_str.startswith("255.")):
+                        prefix = bin(msk & 0xffffffff).count('1')
+                        # Only scan subnets that are /20 or smaller to prevent massive scan loops
+                        if prefix >= 20:
+                            subnets.append(f"{net_str}/{prefix}")
+
+            # Send active unicast-reply-eliciting ARP requests across the subnets
+            for subnet in subnets:
+                try:
+                    ans, unans = srp(
+                        Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=subnet),
+                        iface=iface_to_scan,
+                        timeout=2.0,
+                        retry=0,
+                        verbose=False
+                    )
+                    for snd, rcv in ans:
+                        if rcv.haslayer(ARP) and rcv[ARP].psrc and rcv[ARP].hwsrc:
+                            observed.append((rcv[ARP].psrc, rcv[ARP].hwsrc))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        return list(set(observed))
 
     pairs = await asyncio.to_thread(_capture)
     now = datetime.now(timezone.utc)

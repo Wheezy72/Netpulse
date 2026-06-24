@@ -92,6 +92,7 @@ services:
       network: host
     container_name: netpulse-app
     restart: unless-stopped
+    network_mode: host
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -106,9 +107,9 @@ services:
       # Run as root in container to allow raw sockets and packet capture capabilties
     user: "0"
     environment:
-      DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@pgbouncer:5432/netpulse
-      REDIS_URL: redis://redis:6379/0
-      RABBITMQ_URL: amqp://netpulse:${RABBITMQ_PASSWORD:-netpulse}@rabbitmq:5672/netpulse
+      DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@127.0.0.1:5432/netpulse
+      REDIS_URL: redis://127.0.0.1:6379/0
+      RABBITMQ_URL: amqp://netpulse:${RABBITMQ_PASSWORD:-netpulse}@127.0.0.1:5672/netpulse
       SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
       ENVIRONMENT: ${ENVIRONMENT:-production}
       BOOTSTRAP_ADMIN_ENABLED: ${BOOTSTRAP_ADMIN_ENABLED:-true}
@@ -123,9 +124,6 @@ services:
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["http://localhost:8000"]}
     volumes:
       - app_data:/app/data
-    ports:
-      - "8000:8000"
-      - "50080:50080/udp"
     cap_add:
       - NET_RAW
       - NET_ADMIN
@@ -137,6 +135,7 @@ services:
       network: host
     container_name: netpulse-worker
     restart: unless-stopped
+    network_mode: host
     depends_on:
       app:
         condition: service_healthy
@@ -148,9 +147,9 @@ services:
     command: ["celery", "-A", "app.core.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=4", "--max-tasks-per-child=100"]
     user: "0"
     environment:
-      DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@pgbouncer:5432/netpulse
-      REDIS_URL: redis://redis:6379/0
-      RABBITMQ_URL: amqp://netpulse:${RABBITMQ_PASSWORD:-netpulse}@rabbitmq:5672/netpulse
+      DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@127.0.0.1:5432/netpulse
+      REDIS_URL: redis://127.0.0.1:6379/0
+      RABBITMQ_URL: amqp://netpulse:${RABBITMQ_PASSWORD:-netpulse}@127.0.0.1:5672/netpulse
       SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
       ENVIRONMENT: ${ENVIRONMENT:-production}
       SCRIPTS_BASE_DIR: /app/scripts
@@ -168,6 +167,7 @@ services:
       network: host
     container_name: netpulse-beat
     restart: unless-stopped
+    network_mode: host
     depends_on:
       app:
         condition: service_healthy
@@ -178,8 +178,8 @@ services:
     command: ["celery", "-A", "app.core.celery_app.celery_app", "beat", "--loglevel=info"]
     user: "0"
     environment:
-      DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@pgbouncer:5432/netpulse
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@127.0.0.1:5432/netpulse
+      REDIS_URL: redis://127.0.0.1:6379/0
       SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
       ENVIRONMENT: ${ENVIRONMENT:-production}
       SCRIPTS_BASE_DIR: /app/scripts
