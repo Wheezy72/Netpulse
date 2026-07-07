@@ -106,3 +106,32 @@ class TestPostgresUrlSchemeConversion:
         reload(cfg_mod)
         s = cfg_mod.Settings()
         assert s.database_url.startswith("postgresql+asyncpg://")
+
+
+class TestCorsAllowOrigins:
+    """Settings.cors_allow_origins parsing tests."""
+
+    def test_parses_json_list(self, monkeypatch):
+        monkeypatch.setenv("CORS_ALLOW_ORIGINS", '["http://localhost:1234", "http://localhost:5678"]')
+        from importlib import reload
+        import app.core.config as cfg_mod
+        reload(cfg_mod)
+        s = cfg_mod.Settings()
+        assert s.cors_allow_origins == ["http://localhost:1234", "http://localhost:5678"]
+
+    def test_parses_comma_separated_list(self, monkeypatch):
+        monkeypatch.setenv("CORS_ALLOW_ORIGINS", "http://localhost:1234, http://localhost:5678")
+        from importlib import reload
+        import app.core.config as cfg_mod
+        reload(cfg_mod)
+        s = cfg_mod.Settings()
+        assert s.cors_allow_origins == ["http://localhost:1234", "http://localhost:5678"]
+
+    def test_handles_empty_string(self, monkeypatch):
+        monkeypatch.setenv("CORS_ALLOW_ORIGINS", "")
+        from importlib import reload
+        import app.core.config as cfg_mod
+        reload(cfg_mod)
+        s = cfg_mod.Settings()
+        assert s.cors_allow_origins == []
+

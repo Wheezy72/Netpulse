@@ -271,7 +271,7 @@ class Settings(BaseSettings):
     abuseipdb_max_age_days: int = 90
 
     # CORS configuration
-    cors_allow_origins: List[str] = Field(
+    cors_allow_origins: Any = Field(
         default_factory=lambda: ["http://localhost:5000", "http://localhost:5173"]
     )
 
