@@ -210,9 +210,9 @@ if not exist ".venv" (
 call .venv\Scripts\activate.bat
 
 pip install --upgrade pip -q
-pip install -q fastapi "uvicorn[standard]" "sqlalchemy[asyncio]" asyncpg pydantic pydantic-settings celery redis scapy python-nmap reportlab "python-jose[cryptography]" "argon2-cffi" slowapi httpx
+pip install -q -r requirements.txt
 
-echo [+] Python dependencies installed
+echo [+] Python dependencies installed from requirements.txt
 
 :: ========================================
 :: Frontend Setup

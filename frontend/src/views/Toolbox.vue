@@ -15,8 +15,10 @@ const emit = defineEmits<{ (e: "toast", type: "success" | "error" | "warning" | 
 
 const isNightshade = computed(() => props.theme === "nightshade");
 
+import PacketBrowser from "./PacketBrowser.vue";
+
 // --- Tab Management ---
-type ActiveTab = "scanning" | "diagnostics" | "automation";
+type ActiveTab = "scanning" | "diagnostics" | "automation" | "packets";
 const activeTab = ref<ActiveTab>("scanning");
 
 // --- General State ---
@@ -382,13 +384,13 @@ watch(
       <!-- Toolbox Tab Switcher -->
       <div class="flex items-center border-b border-slate-600/10 px-4 py-2 gap-1 bg-black/20">
         <button
-          v-for="t in ['scanning', 'diagnostics', 'automation']"
+          v-for="t in ['scanning', 'diagnostics', 'automation', 'packets']"
           :key="t"
           @click="activeTab = (t as ActiveTab)"
           class="px-4 py-2 text-xs uppercase tracking-wider transition-colors np-subtab-btn"
           :class="{ 'active': activeTab === t }"
         >
-          {{ t === 'scanning' ? 'Port Scanner' : t === 'diagnostics' ? 'Diagnostic Probes' : 'Automation Scripts' }}
+          {{ t === 'scanning' ? 'Port Scanner' : t === 'diagnostics' ? 'Diagnostic Probes' : t === 'automation' ? 'Automation Scripts' : 'Packet Browser' }}
         </button>
       </div>
 
@@ -621,6 +623,13 @@ watch(
             </div>
 
           </div>
+        </div>
+
+        <!-- ======================================= -->
+        <!-- TAB 4: PACKET BROWSER                   -->
+        <!-- ======================================= -->
+        <div v-if="activeTab === 'packets'">
+          <PacketBrowser :theme="props.theme" />
         </div>
 
       </div>

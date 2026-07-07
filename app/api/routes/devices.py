@@ -181,15 +181,42 @@ async def get_topology(
             )
         )
 
-    # Simple "star" topology: connect everything to gateway if present,
-    # otherwise to the first device.
-    gateway = next((d for d in devices if d.is_gateway), devices[0])
+    device_ip_to_id = {d.ip_address: d.id for d in devices}
     edges: list[TopologyEdge] = []
 
-    for d in devices:
-        if d.id == gateway.id:
-            continue
-        edges.append(TopologyEdge(source=gateway.id, target=d.id, kind="l3"))
+    # Attempt to load discovered topology links from metrics
+    try:
+        from app.models.metric import Metric
+        link_stmt = select(Metric).where(Metric.metric_type == "topology_link")
+        link_result = await db.execute(link_stmt)
+        link_metrics = link_result.scalars().all()
+        
+        seen_links = set()
+        for lm in link_metrics:
+            tags = lm.tags or {}
+            src_ip = tags.get("source_ip")
+            tgt_ip = tags.get("target_ip")
+            if src_ip in device_ip_to_id and tgt_ip in device_ip_to_id:
+                link_key = tuple(sorted([device_ip_to_id[src_ip], device_ip_to_id[tgt_ip]]))
+                if link_key not in seen_links:
+                    seen_links.add(link_key)
+                    edges.append(
+                        TopologyEdge(
+                            source=device_ip_to_id[src_ip],
+                            target=device_ip_to_id[tgt_ip],
+                            kind=tags.get("kind", "l2"),
+                        )
+                    )
+    except Exception:
+        pass
+
+    # Fallback to star topology if no links discovered
+    if not edges:
+        gateway = next((d for d in devices if d.is_gateway), devices[0])
+        for d in devices:
+            if d.id == gateway.id:
+                continue
+            edges.append(TopologyEdge(source=gateway.id, target=d.id, kind="l3"))
 
     return TopologyResponse(nodes=nodes, edges=edges)
 
@@ -333,3 +360,83 @@ async def get_device_detail(
         scripts=script_summaries,
         metrics=metrics,
     )
+
+
+class SwitchConfigResponse(BaseModel):
+    filename: str
+    size_bytes: int
+    modified_at: datetime
+    content_preview: Optional[str] = None
+
+
+@router.get(
+    "/{device_id}/configs",
+    response_model=List[SwitchConfigResponse],
+    summary="Get backups/configs for a specific switch/router",
+    dependencies=[Depends(require_compliance_role())],
+)
+async def get_device_configs(
+    device_id: int,
+    db: AsyncSession = Depends(db_session),
+) -> List[SwitchConfigResponse]:
+    device = await db.get(Device, device_id)
+    if device is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    search_paths = [Path("/data/backups"), Path("data/backups")]
+    found_files = []
+
+    prefixes = []
+    if device.hostname:
+        prefixes.append(device.hostname)
+    prefixes.append(device.ip_address)
+
+    for base_path in search_paths:
+        if base_path.exists() and base_path.is_dir():
+            for p in base_path.glob("*.cfg"):
+                name = p.name
+                if any(name.startswith(f"{prefix}-") for prefix in prefixes):
+                    stat = p.stat()
+                    preview = ""
+                    try:
+                        with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                            preview = "".join(f.readline() for _ in range(5))
+                    except Exception:
+                        pass
+                    found_files.append(
+                        SwitchConfigResponse(
+                            filename=p.name,
+                            size_bytes=stat.st_size,
+                            modified_at=datetime.fromtimestamp(stat.st_mtime),
+                            content_preview=preview,
+                        )
+                    )
+
+    found_files.sort(key=lambda x: x.modified_at, reverse=True)
+    return found_files
+
+
+@router.get(
+    "/{device_id}/configs/{filename}",
+    summary="Download/View a specific backup configuration file",
+    dependencies=[Depends(require_compliance_role())],
+)
+async def get_device_config_content(
+    device_id: int,
+    filename: str,
+    db: AsyncSession = Depends(db_session),
+):
+    device = await db.get(Device, device_id)
+    if device is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    search_paths = [Path("/data/backups"), Path("data/backups")]
+    for base_path in search_paths:
+        filepath = base_path / filename
+        if filepath.exists() and filepath.is_file():
+            return FileResponse(filepath, media_type="text/plain")
+
+    raise HTTPException(status_code=404, detail="Configuration file not found")

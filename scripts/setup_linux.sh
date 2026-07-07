@@ -221,24 +221,9 @@ fi
 source .venv/bin/activate
 
 pip install --upgrade pip -q
-pip install -q \
-  fastapi \
-  "uvicorn[standard]" \
-  "sqlalchemy[asyncio]" \
-  asyncpg \
-  pydantic \
-  pydantic-settings \
-  celery \
-  redis \
-  scapy \
-  python-nmap \
-  reportlab \
-  "python-jose[cryptography]" \
-  "argon2-cffi" \
-  slowapi \
-  httpx
+pip install -q -r "$ROOT_DIR/requirements.txt"
 
-print_success "Python dependencies installed"
+print_success "Python dependencies installed from requirements.txt"
 
 print_status "Setting up frontend..."
 cd "$ROOT_DIR/frontend"

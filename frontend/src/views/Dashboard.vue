@@ -3,6 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 import PulsePanel from '../components/features/PulsePanel.vue'
 
+import { resolveOui } from '../utils/oui'
+
 type Theme = 'nightshade' | 'sysadmin'
 
 interface Props {
@@ -23,12 +25,27 @@ interface Asset {
   platform: 'aws' | 'gcp' | 'azure' | 'linux' | 'windows' | 'cisco'
   riskLevel: 'Low' | 'Medium' | 'High' | 'Critical'
   riskValue: number // 10-100 for visual bars
+  is_gateway?: boolean
 }
 
 interface AssetDetail extends Asset {
-  cpu: number
-  memory: string
-  ports: { number: number; service: string; state: string }[]
+  mac_address?: string | null
+  type_guess?: string | null
+  zone?: string | null
+  is_gateway?: boolean
+  vulnerabilities: {
+    id: number
+    title: string
+    severity: string
+    port?: number | null
+    detected_at?: string | null
+  }[]
+  scripts: {
+    id: number
+    script_name: string
+    status: string
+    created_at: string
+  }[]
 }
 
 const targetRange = ref('')
@@ -64,14 +81,15 @@ async function fetchLiveDevices() {
         hostname: d.hostname || d.ip_address,
         role: d.device_type || (d.is_gateway ? 'Gateway Router' : 'Network Host'),
         status: 'online',
-        lastSeen: new Date(d.last_seen).toLocaleTimeString(),
+        lastSeen: d.last_seen ? new Date(d.last_seen).toLocaleTimeString() : 'Unknown',
         platform: platformVal,
         riskLevel: d.is_gateway ? 'Medium' : 'Low',
-        riskValue: d.is_gateway ? 50 : 20
+        riskValue: d.is_gateway ? 50 : 20,
+        is_gateway: d.is_gateway
       };
     })
     if (assets.value.length > 0) {
-      selectAsset(assets.value[0])
+      await selectAsset(assets.value[0])
     }
   } catch (error) {
     console.error("Failed to load real devices:", error)
@@ -108,19 +126,29 @@ const executeScan = () => {
   }, 1800)
 }
 
-const selectAsset = (asset: Asset) => {
-  if (selectedAsset.value?.id === asset.id) return
-
-  selectedAsset.value = {
-    ...asset,
-    cpu: Math.floor(Math.random() * 80 + 5),
-    memory: (Math.random() * 32 + 4).toFixed(1),
-    ports: asset.status === 'online' ? [
-      { number: 22, service: 'ssh', state: 'open' },
-      { number: 80, service: 'http', state: 'open' },
-      { number: 443, service: 'https', state: 'open' },
-      { number: 161, service: 'snmp', state: 'open' }
-    ] : []
+const selectAsset = async (asset: Asset) => {
+  try {
+    const { data } = await axios.get<any>(`/api/devices/${asset.id}/detail`)
+    selectedAsset.value = {
+      ...asset,
+      mac_address: data.device.mac_address,
+      type_guess: data.type_guess,
+      zone: data.device.zone,
+      is_gateway: data.device.is_gateway,
+      vulnerabilities: data.vulnerabilities || [],
+      scripts: data.scripts || []
+    }
+  } catch (error) {
+    console.error("Failed to load device detail:", error)
+    selectedAsset.value = {
+      ...asset,
+      mac_address: null,
+      type_guess: null,
+      zone: null,
+      is_gateway: asset.is_gateway || false,
+      vulnerabilities: [],
+      scripts: []
+    }
   }
 }
 
@@ -280,65 +308,101 @@ onMounted(() => {
         <div class="flex flex-col gap-5">
           <div v-if="selectedAsset" class="rounded-2xl bg-[var(--np-glass-bg)] border border-[var(--np-glass-border)] shadow-lg flex flex-col p-5 h-full min-h-[450px]">
             <div class="flex items-center justify-between border-b border-[var(--np-border-subtle)] pb-3 mb-4">
-              <span class="text-xs font-bold uppercase tracking-wider text-[var(--np-accent-primary)]">Node telemetry</span>
+              <span class="text-xs font-bold uppercase tracking-wider text-[var(--np-accent-primary)]">Node details</span>
               <span class="text-[0.55rem] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">Online</span>
             </div>
 
-            <div class="flex-1 space-y-5">
+            <div class="flex-1 space-y-5 overflow-y-auto custom-scrollbar pr-1">
               <div class="flex flex-col gap-1">
                 <span class="text-[0.55rem] uppercase tracking-wider text-[var(--np-text-dim)] font-bold">Address</span>
                 <span class="text-lg font-bold font-mono text-[var(--np-text)]">{{ selectedAsset.ip }}</span>
                 <span class="text-[0.65rem] text-[var(--np-accent-primary)]/80 font-semibold font-mono">{{ selectedAsset.hostname }} ({{ selectedAsset.role }})</span>
+                <router-link
+                  :to="{ path: '/topology', query: { select: selectedAsset.id } }"
+                  class="np-cyber-btn mt-2 text-center text-[10px] py-1 border-purple-500/40 text-purple-400 hover:bg-purple-500/10"
+                >
+                  Locate in Topology Map
+                </router-link>
               </div>
 
-              <div class="grid grid-cols-2 gap-3.5 pt-2">
-                <div class="p-3 rounded-xl bg-[var(--np-surface-elevated)] border border-[var(--np-border-subtle)] flex flex-col gap-1">
-                  <span class="text-[0.55rem] text-[var(--np-text-dim)] uppercase tracking-widest font-bold">CPU Load</span>
-                  <div class="flex items-end justify-between">
-                    <span class="text-base font-bold font-mono text-[var(--np-accent-primary)]">{{ selectedAsset.cpu }}%</span>
-                    <span class="text-[0.5rem] text-[var(--np-text-dim)]/80 uppercase">Normal</span>
-                  </div>
-                  <div class="h-1.5 w-full rounded-full bg-[var(--np-bg)] overflow-hidden mt-1">
-                    <div class="h-full rounded-full bg-[var(--np-accent-primary)]" :style="{ width: `${selectedAsset.cpu}%` }"></div>
-                  </div>
+              <!-- Real Details Table -->
+              <dl class="space-y-2 text-xs border-t border-[var(--np-border-subtle)] pt-4">
+                <div class="flex justify-between">
+                  <dt class="text-[var(--np-text-dim)]">MAC Address</dt>
+                  <dd class="font-mono text-[var(--np-text)]">{{ selectedAsset.mac_address || '—' }}</dd>
                 </div>
-
-                <div class="p-3 rounded-xl bg-[var(--np-surface-elevated)] border border-[var(--np-border-subtle)] flex flex-col gap-1">
-                  <span class="text-[0.55rem] text-[var(--np-text-dim)] uppercase tracking-widest font-bold">Memory</span>
-                  <div class="flex items-end justify-between">
-                    <span class="text-base font-bold font-mono text-[var(--np-accent-primary)]">{{ selectedAsset.memory }} GB</span>
-                    <span class="text-[0.5rem] text-[var(--np-text-dim)]/80 uppercase">Used</span>
-                  </div>
-                  <div class="h-1.5 w-full rounded-full bg-[var(--np-bg)] overflow-hidden mt-1">
-                    <div class="h-full rounded-full bg-[var(--np-accent-primary)]" :style="{ width: `${(parseFloat(selectedAsset.memory) / 32) * 100}%` }"></div>
-                  </div>
+                <div class="flex justify-between">
+                  <dt class="text-[var(--np-text-dim)]">Vendor (OUI)</dt>
+                  <dd class="text-[var(--np-text)]">
+                    {{ selectedAsset.mac_address ? (resolveOui(selectedAsset.mac_address) ?? 'Unknown') : '—' }}
+                  </dd>
                 </div>
-              </div>
+                <div class="flex justify-between">
+                  <dt class="text-[var(--np-text-dim)]">Type</dt>
+                  <dd class="text-[var(--np-text)]">{{ selectedAsset.type_guess || selectedAsset.role || '—' }}</dd>
+                </div>
+                <div class="flex justify-between">
+                  <dt class="text-[var(--np-text-dim)]">Zone</dt>
+                  <dd class="text-[var(--np-text)]">{{ selectedAsset.zone || '—' }}</dd>
+                </div>
+                <div class="flex justify-between">
+                  <dt class="text-[var(--np-text-dim)]">Gateway</dt>
+                  <dd :class="[selectedAsset.is_gateway ? 'text-emerald-400 font-bold' : 'text-[var(--np-text-dim)]']">
+                    {{ selectedAsset.is_gateway ? 'Yes' : 'No' }}
+                  </dd>
+                </div>
+                <div class="flex justify-between">
+                  <dt class="text-[var(--np-text-dim)]">Last Seen</dt>
+                  <dd class="text-[var(--np-text)]">{{ selectedAsset.lastSeen }}</dd>
+                </div>
+              </dl>
 
-              <div class="space-y-2 pt-2">
-                <span class="text-[0.55rem] uppercase tracking-widest text-[var(--np-text-dim)] font-bold block">Audited Services</span>
+              <!-- Real Vulnerabilities section -->
+              <div class="space-y-2 pt-2 border-t border-[var(--np-border-subtle)]">
+                <span class="text-[0.55rem] uppercase tracking-widest text-[var(--np-text-dim)] font-bold block">
+                  Vulnerabilities ({{ selectedAsset.vulnerabilities?.length || 0 }})
+                </span>
                 <div class="space-y-1.5">
-                  <div v-for="port in selectedAsset.ports" :key="port.number" class="flex justify-between items-center rounded-lg p-2.5 bg-[var(--np-surface-elevated)] border border-[var(--np-border-subtle)]">
-                    <div class="flex items-center gap-3">
-                      <span class="font-mono text-xs font-bold text-[var(--np-accent-primary)] w-10">#{{ port.number }}</span>
-                      <span class="text-[0.65rem] text-[var(--np-text-muted)] font-mono">{{ port.service.toUpperCase() }}</span>
+                  <div v-for="vuln in selectedAsset.vulnerabilities" :key="vuln.id" class="flex justify-between items-center rounded-lg p-2.5 bg-[var(--np-surface-elevated)] border border-[var(--np-border-subtle)]">
+                    <div class="flex items-center gap-2">
+                      <span :class="[
+                        vuln.severity === 'critical' ? 'text-red-500 font-bold' :
+                        vuln.severity === 'high' ? 'text-orange-500 font-bold' :
+                        vuln.severity === 'medium' ? 'text-yellow-500 font-bold' :
+                        'text-emerald-400'
+                      ]" class="font-mono text-[0.65rem] shrink-0">
+                        [{{ vuln.severity.toUpperCase() }}]
+                      </span>
+                      <span class="text-[0.65rem] text-[var(--np-text)] truncate max-w-[180px]">{{ vuln.title }}</span>
                     </div>
-                    <span class="text-[0.55rem] px-2 py-0.5 rounded font-mono font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">{{ port.state }}</span>
+                    <span v-if="vuln.port" class="text-[0.65rem] font-mono text-[var(--np-text-dim)]">:{{ vuln.port }}</span>
                   </div>
-                  <div v-if="!selectedAsset.ports?.length" class="text-xs font-mono py-4 text-[var(--np-text-dim)] text-center">No services audited yet.</div>
+                  <div v-if="!selectedAsset.vulnerabilities?.length" class="text-xs font-mono py-2 text-[var(--np-text-dim)] text-center">No vulnerabilities detected.</div>
                 </div>
               </div>
 
-              <div class="p-3.5 rounded-xl border border-red-500/20 bg-red-500/5 flex items-start gap-3 mt-4" v-if="selectedAsset.riskLevel === 'Critical' || selectedAsset.riskLevel === 'High'">
-                <div class="h-6 w-6 rounded flex items-center justify-center bg-red-500/10 text-red-400 shrink-0 text-xs font-bold">⚠</div>
-                <div class="flex flex-col leading-snug">
-                  <span class="text-[0.65rem] font-bold text-red-400 uppercase tracking-wide">Threat Exposure Warning</span>
-                  <span class="text-[0.58rem] text-[var(--np-text-muted)] mt-1">This node has exposed management ports and credentials that could lead to lateral takeover.</span>
+              <!-- Real Scripts execution section -->
+              <div class="space-y-2 pt-2 border-t border-[var(--np-border-subtle)]">
+                <span class="text-[0.55rem] uppercase tracking-widest text-[var(--np-text-dim)] font-bold block">
+                  Recent Script Jobs
+                </span>
+                <div class="space-y-1.5">
+                  <div v-for="s in selectedAsset.scripts" :key="s.id" class="flex justify-between items-center rounded-lg p-2 bg-[var(--np-surface-elevated)] border border-[var(--np-border-subtle)] text-[0.65rem]">
+                    <span class="font-mono text-[var(--np-text)] truncate max-w-[180px]">{{ s.script_name }}</span>
+                    <span :class="[
+                      s.status === 'success' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
+                      s.status === 'failed' ? 'text-red-400 bg-red-500/10 border-red-500/20' :
+                      'text-yellow-400 bg-yellow-500/10 border-yellow-500/20'
+                    ]" class="px-1.5 py-0.5 rounded font-mono border text-[0.55rem] uppercase">
+                      {{ s.status }}
+                    </span>
+                  </div>
+                  <div v-if="!selectedAsset.scripts?.length" class="text-xs font-mono py-2 text-[var(--np-text-dim)] text-center">No scripts executed.</div>
                 </div>
               </div>
             </div>
 
-            <div class="border-t border-[var(--np-border-subtle)] pt-4 mt-6 flex flex-col gap-2">
+            <div class="border-t border-[var(--np-border-subtle)] pt-4 mt-4 flex flex-col gap-2">
               <button 
                 v-if="isAdmin"
                 class="w-full py-2.5 text-[0.6rem] font-bold uppercase tracking-widest bg-transparent hover:bg-rose-500/10 text-rose-400 border border-rose-500/30 rounded-xl transition-all"

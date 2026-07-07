@@ -325,3 +325,121 @@ async def websocket_metrics(websocket: WebSocket) -> None:
     except Exception:
         metrics_clients.discard(websocket)
         await websocket.close(code=1011)
+
+
+@router.websocket("/ssh")
+async def websocket_ssh(websocket: WebSocket) -> None:
+    """Provide an interactive SSH terminal over WebSocket."""
+    await websocket.accept()
+
+    token = websocket.query_params.get("token")
+    ip = websocket.query_params.get("ip")
+    username = websocket.query_params.get("username", "admin")
+    password = websocket.query_params.get("password", "")
+    port_str = websocket.query_params.get("port", "22")
+
+    if not token or not ip:
+        await websocket.send_text("\r\n[error] Missing token or target IP address.\r\n")
+        await websocket.close(code=4400)
+        return
+
+    try:
+        port = int(port_str)
+    except ValueError:
+        await websocket.send_text("\r\n[error] Invalid port number.\r\n")
+        await websocket.close(code=4400)
+        return
+
+    async with async_session_factory() as db:
+        user = await _get_user_from_token(token, db)
+        if user is None or not user.is_active:
+            await websocket.send_text("\r\n[error] Unauthorized.\r\n")
+            await websocket.close(code=4401)
+            return
+
+    import paramiko
+    import json
+    import logging
+    logger = logging.getLogger("app.ws.ssh")
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    await websocket.send_text(f"\r\nConnecting to {username}@{ip}:{port}...\r\n")
+
+    def _connect():
+        client.connect(
+            hostname=ip,
+            port=port,
+            username=username,
+            password=password,
+            timeout=10,
+            allow_agent=False,
+            look_for_keys=False
+        )
+        return client.invoke_shell(term="xterm", width=80, height=24)
+
+    try:
+        chan = await asyncio.to_thread(_connect)
+    except Exception as e:
+        await websocket.send_text(f"\r\n[error] Connection failed: {e}\r\n")
+        await websocket.close(code=1011)
+        client.close()
+        return
+
+    await websocket.send_text("Connected!\r\n\r\n")
+
+    chan.setblocking(0)
+
+    async def shell_reader():
+        try:
+            while True:
+                def _read():
+                    if chan.recv_ready():
+                        return chan.recv(4096)
+                    return None
+
+                data = await asyncio.to_thread(_read)
+                if data:
+                    await websocket.send_text(data.decode("utf-8", errors="replace"))
+                elif chan.exit_status_ready():
+                    await websocket.send_text("\r\n[session closed by remote host]\r\n")
+                    break
+                else:
+                    await asyncio.sleep(0.02)
+        except Exception as exc:
+            logger.error(f"SSH reader error: {exc}")
+        finally:
+            try:
+                await websocket.close()
+            except Exception:
+                pass
+
+    async def ws_reader():
+        try:
+            while True:
+                data = await websocket.receive_text()
+                if data.startswith("{") and data.endswith("}"):
+                    try:
+                        msg = json.loads(data)
+                        if msg.get("type") == "resize":
+                            cols = msg.get("cols", 80)
+                            rows = msg.get("rows", 24)
+                            chan.resize_pty(width=cols, height=rows)
+                            continue
+                    except Exception:
+                        pass
+                # Send to channel
+                def _send(d):
+                    chan.send(d.encode("utf-8"))
+                await asyncio.to_thread(_send, data)
+        except Exception:
+            pass
+        finally:
+            try:
+                chan.close()
+            except Exception:
+                pass
+            client.close()
+
+    await asyncio.gather(shell_reader(), ws_reader())

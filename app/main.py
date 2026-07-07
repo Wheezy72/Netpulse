@@ -145,11 +145,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 await session.commit()  # type: ignore
     passive_monitor_task: asyncio.Task[None] | None = None
     peer_discovery_task: asyncio.Task[None] | None = None
+    flow_collector_task: asyncio.Task[None] | None = None
     try:
         # Start peer discovery on the local network segment
         from app.services.peer_discovery import start_peer_discovery
         peer_discovery_task = asyncio.create_task(start_peer_discovery())
         
+        # Start NetFlow flow collector daemon
+        from app.services.flow_collector import start_flow_collector
+        flow_collector_task = asyncio.create_task(start_flow_collector())
+
         if settings.enable_passive_monitor:
             passive_monitor_task = asyncio.create_task(run_passive_monitor())
         yield
@@ -158,6 +163,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             peer_discovery_task.cancel()
             with suppress(asyncio.CancelledError):
                 await peer_discovery_task
+        if flow_collector_task is not None:
+            flow_collector_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await flow_collector_task
         if passive_monitor_task is not None:
             passive_monitor_task.cancel()
             with suppress(asyncio.CancelledError):

@@ -19,6 +19,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
+    path: "/topology",
+    name: "topology",
+    component: () => import("../views/InteractiveTopology.vue"),
+    meta: { requiresAuth: true },
+  },
+  {
     path: "/toolbox",
     name: "toolbox",
     component: () => import("../views/Toolbox.vue"),
@@ -26,9 +32,7 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: "/packets",
-    name: "packets",
-    component: () => import("../views/PacketBrowser.vue"),
-    meta: { requiresAuth: true },
+    redirect: "/toolbox",
   },
   {
     path: "/logs",

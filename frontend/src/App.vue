@@ -48,9 +48,9 @@ watch([Meta_k, Ctrl_k], ([mk, ck]) => {
 
 const navItems = [
   { id: "dashboard", label: "Dashboard", icon: "dashboard" },
+  { id: "topology", label: "Interactive Map", icon: "topology" },
   { id: "devices", label: "Devices", icon: "devices" },
-  { id: "toolbox", label: "Toolbox", icon: "toolbox" },
-  { id: "packets", label: "Packets", icon: "packets" },
+  { id: "toolbox", label: "Operator Toolbox", icon: "toolbox" },
   { id: "logs", label: "Logs", icon: "logs" },
   { id: "settings", label: "Settings", icon: "settings" },
 ] as const;
