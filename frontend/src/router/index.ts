@@ -41,6 +41,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
+    path: "/offline-assistant",
+    name: "offline-assistant",
+    component: () => import("../views/OfflineAssistant.vue"),
+    meta: { requiresAuth: true },
+  },
+  {
     path: "/settings",
     name: "settings",
     component: () => import("../views/Settings.vue"),

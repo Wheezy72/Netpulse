@@ -52,6 +52,7 @@ const navItems = [
   { id: "devices", label: "Devices", icon: "devices" },
   { id: "toolbox", label: "Operator Toolbox", icon: "toolbox" },
   { id: "logs", label: "Logs", icon: "logs" },
+  { id: "offline-assistant", label: "Backup Friend", icon: "offline-assistant" },
   { id: "settings", label: "Settings", icon: "settings" },
 ] as const;
 

@@ -309,6 +309,9 @@ class Settings(BaseSettings):
             "malformed_xmas_scan.py",
             "malformed_overlap_fragments.py",
             "replay_pcap.py",
+            "broadcast_storm_mitigation.py",
+            "rogue_dhcp_mitigation.py",
+            "bgp_peer_isolation.py",
         ]
     )
 
