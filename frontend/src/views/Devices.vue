@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, onMounted, ref, nextTick } from "vue";
-import Uptime from "./Uptime.vue";
+import { Download, ExternalLink, FileText, Route, ScanSearch, Search, TriangleAlert, Wifi, X } from "lucide-vue-next";
+
 import DeviceDrawer from "../components/features/DeviceDrawer.vue";
+import { noticeStyle, useDeviceDiscovery } from "../composables/useDeviceDiscovery";
 import { resolveOui } from "../utils/oui";
 
 const props = defineProps<{
   theme: "nightshade" | "sysadmin";
   isAdmin?: boolean;
-  infoMode?: "full" | "compact";
 }>();
 
 const isNightshade = computed(() => props.theme === "nightshade");
@@ -30,7 +31,22 @@ function closeDrawer() {
   drawerDeviceId.value = null;
 }
 
-const activeTab = ref<string>("inventory");
+/** Reload the inventory after the drawer's deep scan changed a device. */
+function onDeviceUpdated(): void {
+  void loadDevices();
+}
+
+// Device discovery: finds hosts only, no port scanning. Deep per-device detail
+// is requested separately from the drawer.
+const discoverTarget = ref("");
+const { discovering, notice: discoveryNotice, discover } = useDeviceDiscovery();
+
+async function runDiscovery(): Promise<void> {
+  const result = await discover(discoverTarget.value);
+  if (result) {
+    await Promise.all([loadDevices(), loadZones()]);
+  }
+}
 
 type DeviceRow = {
   id: number;
@@ -76,13 +92,6 @@ type DeviceDetail = {
   }[];
 };
 
-type SnmpResultRow = {
-  oid: string;
-  label: string;
-  value: string;
-  type: string;
-};
-
 const devices = ref<DeviceRow[]>([]);
 const zones = ref<string[]>([]);
 const selectedZone = ref<string | null>(null);
@@ -102,16 +111,6 @@ const aiError = ref<string | null>(null);
 
 const blockedDevices = ref<Set<string>>(new Set());
 const kickLoadingIp = ref<string | null>(null);
-
-const snmpTarget = ref("");
-const snmpCommunity = ref("public");
-const snmpVersion = ref("2c");
-const snmpLoading = ref(false);
-const snmpError = ref<string | null>(null);
-const snmpResults = ref<SnmpResultRow[]>([]);
-const snmpWalkOid = ref("1.3.6.1.2.1.1");
-const snmpWalkLoading = ref(false);
-const snmpWalkResults = ref<SnmpResultRow[]>([]);
 
 // Right-click context menu
 const contextMenu = ref<{ visible: boolean; x: number; y: number; device: DeviceRow | null }>({
@@ -371,43 +370,6 @@ async function attemptKick(ip: string): Promise<void> {
   }
 }
 
-async function snmpPoll(): Promise<void> {
-  if (!snmpTarget.value.trim()) return;
-  snmpLoading.value = true;
-  snmpError.value = null;
-  snmpResults.value = [];
-  try {
-    const { data } = await axios.post<{ results: SnmpResultRow[] }>("/api/snmp/poll", {
-      target: snmpTarget.value.trim(),
-      community: snmpCommunity.value,
-      version: snmpVersion.value,
-    });
-    snmpResults.value = data.results;
-  } catch (e: any) {
-    snmpError.value = e.response?.data?.detail || "SNMP poll failed";
-  } finally {
-    snmpLoading.value = false;
-  }
-}
-
-async function snmpWalk(): Promise<void> {
-  if (!snmpTarget.value.trim() || !snmpWalkOid.value.trim()) return;
-  snmpWalkLoading.value = true;
-  snmpError.value = null;
-  snmpWalkResults.value = [];
-  try {
-    const { data } = await axios.post<{ results: SnmpResultRow[] }>("/api/snmp/walk", {
-      target: snmpTarget.value.trim(),
-      community: snmpCommunity.value,
-      oid: snmpWalkOid.value.trim(),
-    });
-    snmpWalkResults.value = data.results;
-  } catch (e: any) {
-    snmpError.value = e.response?.data?.detail || "SNMP walk failed";
-  } finally {
-    snmpWalkLoading.value = false;
-  }
-}
 
 onMounted(async () => {
   await Promise.all([loadZones(), loadDevices(), loadBlockedDevices()]);
@@ -426,7 +388,7 @@ onMounted(async () => {
         style="border-color: var(--np-glass-border);"
         :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
       >
-        <div class="px-3 py-1.5 border-b text-[0.6rem] uppercase tracking-widest text-slate-400/50" style="border-color: var(--np-border-subtle);">
+        <div class="px-3 py-1.5 border-b text-[0.6rem] uppercase tracking-widest text-[var(--np-text-dim)]/50" style="border-color: var(--np-border-subtle);">
           {{ contextMenu.device.ip_address }}
         </div>
         <button
@@ -434,9 +396,7 @@ onMounted(async () => {
           class="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-[var(--np-text-muted)] hover:text-[var(--np-accent-primary)] hover:bg-[var(--np-surface-hover)] transition-colors text-left"
           @click.stop="quickAction('ping', contextMenu.device!)"
         >
-          <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
-          </svg>
+          <Wifi class="w-3.5 h-3.5 shrink-0" :stroke-width="1.7" />
           Ping Sweep
         </button>
         <button
@@ -444,9 +404,7 @@ onMounted(async () => {
           class="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800/60 transition-colors text-left"
           @click.stop="quickAction('trace', contextMenu.device!)"
         >
-          <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
-          </svg>
+          <Route class="w-3.5 h-3.5 shrink-0" :stroke-width="1.7" />
           Traceroute
         </button>
         <button
@@ -454,9 +412,7 @@ onMounted(async () => {
           class="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800/60 transition-colors text-left"
           @click.stop="quickAction('portscan', contextMenu.device!)"
         >
-          <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-          </svg>
+          <ScanSearch class="w-3.5 h-3.5 shrink-0" :stroke-width="1.7" />
           Port Scan (Quick)
         </button>
         <div class="border-t my-1" style="border-color: var(--np-border-subtle);"></div>
@@ -465,9 +421,7 @@ onMounted(async () => {
           class="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800/60 transition-colors text-left"
           @click.stop="openDrawer(contextMenu.device!)"
         >
-          <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-          </svg>
+          <ExternalLink class="w-3.5 h-3.5 shrink-0" :stroke-width="1.7" />
           View Details
         </button>
       </div>
@@ -475,30 +429,12 @@ onMounted(async () => {
   </Teleport>
 
   <div class="space-y-4">
-    <!-- Tab bar -->
-    <div class="flex items-center gap-1 border-b" style="border-color: var(--np-border);">
-      <button
-        v-for="tab in ['inventory', 'uptime', 'snmp']"
-        :key="tab"
-        type="button"
-        @click="activeTab = tab"
-        class="px-4 py-2.5 text-xs uppercase tracking-wider font-semibold transition-all duration-200 border-b-2 -mb-px"
-        :class="[
-          activeTab === tab
-            ? 'border-[var(--np-accent-primary)] text-[var(--np-accent-primary)]'
-            : 'border-transparent text-[var(--np-text-dim)] hover:text-[var(--np-text)] hover:border-[var(--np-border-subtle)]',
-        ]"
-      >
-        {{ tab === 'inventory' ? 'Inventory' : tab === 'uptime' ? 'Uptime Monitor' : 'SNMP Monitor' }}
-      </button>
-    </div>
-
-    <!-- Inventory tab -->
-    <div v-if="activeTab === 'inventory'" class="np-panel p-4 space-y-4">
+    <!-- Inventory -->
+    <div class="np-panel p-4 space-y-4">
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Devices</span>
-          <span class="text-[0.7rem] text-slate-400/50">
+          <span class="text-[0.7rem] text-[var(--np-text-dim)]/50">
             Inventory of discovered hosts. Right-click any row for quick actions.
           </span>
         </div>
@@ -508,9 +444,7 @@ onMounted(async () => {
             class="np-cyber-btn flex items-center gap-1"
             title="Download Device Inventory CSV"
           >
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-            </svg>
+            <Download class="w-3.5 h-3.5" :stroke-width="1.7" />
             CSV
           </button>
           <button
@@ -518,20 +452,58 @@ onMounted(async () => {
             class="np-cyber-btn flex items-center gap-1"
             title="Download Device Inventory PDF"
           >
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-            </svg>
+            <FileText class="w-3.5 h-3.5" :stroke-width="1.7" />
             PDF
           </button>
         </div>
       </header>
 
+      <!-- Discovery: hosts only, deliberately no port scan -->
+      <div
+        class="flex flex-col gap-2 rounded border p-3 lg:flex-row lg:items-center"
+        :style="{ borderColor: 'var(--np-border)', background: 'var(--np-surface-elevated)' }"
+      >
+        <div class="flex-1">
+          <p class="text-[0.65rem] uppercase tracking-widest" :style="{ color: 'var(--np-text-dim)' }">
+            Find devices
+          </p>
+          <p class="mt-0.5 text-[0.7rem]" :style="{ color: 'var(--np-text-muted)' }">
+            Discovery only — finds hosts, scans no ports. Leave blank to sweep the attached subnets.
+          </p>
+        </div>
+        <input
+          v-model="discoverTarget"
+          type="text"
+          placeholder="192.168.1.0/24 (optional)"
+          class="np-neon-input px-3 py-1.5 text-xs lg:w-56"
+          @keyup.enter="runDiscovery"
+        />
+        <button
+          type="button"
+          class="np-cyber-btn flex items-center justify-center disabled:cursor-not-allowed disabled:opacity-40"
+          :style="{ color: 'var(--np-accent-primary)', borderColor: 'var(--np-accent-primary)' }"
+          :disabled="discovering || !isAdmin"
+          :title="isAdmin ? 'Sweep for hosts and add them to the inventory' : 'Admin access required to scan'"
+          @click="runDiscovery"
+        >
+          {{ discovering ? 'Scanning…' : 'Scan for devices' }}
+        </button>
+      </div>
+
+      <!-- Discovery result -->
+      <div
+        v-if="discoveryNotice"
+        class="flex items-center justify-between rounded border p-2 text-xs"
+        :style="noticeStyle(discoveryNotice.kind)"
+      >
+        <span>{{ discoveryNotice.text }}</span>
+        <button class="ml-3 opacity-70 hover:opacity-100" aria-label="Dismiss" @click="discoveryNotice = null"><X class="h-3.5 w-3.5" :stroke-width="1.7" /></button>
+      </div>
+
       <!-- Search + zone filter -->
       <div class="flex flex-col sm:flex-row gap-2">
         <div class="relative flex-1">
-          <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+          <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--np-text-dim)]" :stroke-width="1.7" />
           <input
             v-model="search"
             type="text"
@@ -568,7 +540,7 @@ onMounted(async () => {
         }"
       >
         <span>{{ actionNotice.message }}</span>
-        <button @click="actionNotice = null" class="opacity-70 hover:opacity-100 ml-3">✕</button>
+        <button @click="actionNotice = null" class="opacity-70 hover:opacity-100 ml-3" aria-label="Dismiss"><X class="h-3.5 w-3.5" :stroke-width="1.7" /></button>
       </div>
 
       <!-- Skeleton loader -->
@@ -583,7 +555,7 @@ onMounted(async () => {
 
       <!-- Device table -->
       <div v-else class="overflow-x-auto rounded border" style="border-color: var(--np-border);">
-        <table class="w-full text-left text-xs">
+        <table class="w-full text-left text-xs tabular-nums">
           <thead>
             <tr>
               <th class="px-3 py-2">Target</th>
@@ -596,24 +568,25 @@ onMounted(async () => {
             <tr
               v-for="d in filteredDevices"
               :key="d.id"
-              class="cursor-pointer transition-colors hover:bg-white/[0.03]"
+              class="cursor-pointer transition-colors hover:bg-[var(--np-surface-hover)]"
               @click="openDrawer(d)"
               @contextmenu.prevent="openContextMenu($event, d)"
             >
-              <td class="px-3" :class="infoMode === 'compact' ? 'py-1' : 'py-2.5'">
+              <td class="px-3" :class="'py-2.5'">
                 <div class="font-mono text-[var(--np-text)] font-semibold">{{ d.ip_address }}</div>
-                <div v-if="infoMode !== 'compact'" class="text-[0.65rem] text-[var(--np-text-dim)] mt-0.5">{{ d.hostname || d.mac_address || 'Unknown' }}</div>
+                <div class="text-[0.65rem] text-[var(--np-text-dim)] mt-0.5">{{ d.hostname || d.mac_address || 'Unknown' }}</div>
               </td>
-              <td class="px-3 hidden sm:table-cell" :class="infoMode === 'compact' ? 'py-1' : 'py-2.5'">
+              <td class="px-3 hidden sm:table-cell" :class="'py-2.5'">
                 <span class="sp-badge">{{ d.is_gateway ? 'Gateway' : (d.device_type || 'Unknown') }}</span>
               </td>
-              <td class="px-3 hidden md:table-cell text-slate-400/50" :class="infoMode === 'compact' ? 'py-1' : 'py-2.5'">
+              <td class="px-3 hidden md:table-cell text-[var(--np-text-dim)]/50" :class="'py-2.5'">
                 {{ d.zone || '—' }}
               </td>
-              <td class="px-3 text-center" :class="infoMode === 'compact' ? 'py-1' : 'py-2.5'" @click.stop>
+              <td class="px-3 text-center" :class="'py-2.5'" @click.stop>
                 <div v-if="blockedDevices.has(d.ip_address)" class="flex flex-col gap-1 items-center justify-center">
                   <span class="sp-badge-danger flex items-center gap-1 rounded cursor-help px-2 py-0.5" title="Manual router intervention required to drop MAC.">
-                    ⚠ ROGUE
+                    <TriangleAlert class="h-3 w-3" :stroke-width="1.7" />
+                    Rogue
                   </span>
                   <button
                     type="button"
@@ -629,7 +602,7 @@ onMounted(async () => {
               </td>
             </tr>
             <tr v-if="filteredDevices.length === 0">
-              <td colspan="4" class="px-3 py-6 text-center text-slate-400/30">
+              <td colspan="4" class="px-3 py-6 text-center text-[var(--np-text-dim)]/30">
                 No devices found.
               </td>
             </tr>
@@ -638,15 +611,6 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Uptime tab -->
-    <div v-if="activeTab === 'uptime'" class="np-panel p-4">
-      <Uptime :is-admin="isAdmin" :theme="props.theme" />
-    </div>
-
-    <!-- SNMP tab -->
-    <div v-if="activeTab === 'snmp'" class="np-panel p-4 space-y-4">
-      <p class="text-xs text-slate-400/50">SNMP Polling interface active.</p>
-    </div>
   </div>
 
   <!-- Device detail drawer -->
@@ -654,7 +618,9 @@ onMounted(async () => {
     :device-id="drawerDeviceId"
     :open="drawerOpen"
     :theme="props.theme"
+    :is-admin="isAdmin"
     @close="closeDrawer"
+    @updated="onDeviceUpdated"
   />
 </template>
 

@@ -44,3 +44,8 @@ class Device(Base):
         back_populates="device",
         cascade="all, delete-orphan",
     )
+    ports: Mapped[List["DevicePort"]] = relationship(
+        "DevicePort",
+        back_populates="device",
+        cascade="all, delete-orphan",
+    )

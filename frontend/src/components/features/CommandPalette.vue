@@ -8,6 +8,19 @@
 import { ref, computed, watch, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
 import { useMagicKeys, onClickOutside } from "@vueuse/core";
+import type { Component } from "vue";
+import {
+  LayoutDashboard,
+  Monitor,
+  Moon,
+  PanelLeft,
+  ScrollText,
+  Search,
+  Settings,
+  Sun,
+  Wrench,
+} from "lucide-vue-next";
+
 import { useUiStore } from "../../stores/ui";
 
 const ui = useUiStore();
@@ -39,21 +52,20 @@ interface Command {
   label: string;
   hint?: string;
   group: CommandGroup;
-  icon: string;
+  icon: Component;
   action: () => void;
 }
 
 // All navigable commands / actions.
 const allCommands: Command[] = [
-  { label: "Dashboard", hint: "Command center overview", group: "Navigation", icon: "▦", action: () => router.push("/dashboard") },
-  { label: "Devices", hint: "Host inventory & SNMP", group: "Navigation", icon: "⬡", action: () => router.push("/devices") },
-  { label: "Toolbox", hint: "Scans & diagnostics", group: "Navigation", icon: "⊘", action: () => router.push("/toolbox") },
-  { label: "Packet Browser", hint: "Live packet capture", group: "Navigation", icon: "◎", action: () => router.push("/packets") },
-  { label: "Logs", hint: "Application & syslog", group: "Navigation", icon: "≡", action: () => router.push("/logs") },
-  { label: "Settings", hint: "Provider & system config", group: "Navigation", icon: "⚙", action: () => router.push("/settings") },
-  { label: "Theme: Nightshade", hint: "Fuchsia accent", group: "Theme", icon: "◑", action: () => ui.setTheme("nightshade") },
-  { label: "Theme: SysAdmin", hint: "Amber accent", group: "Theme", icon: "◐", action: () => ui.setTheme("sysadmin") },
-  { label: "Toggle Sidebar", hint: "Collapse / expand nav", group: "Actions", icon: "◫", action: () => ui.toggleSidebar() },
+  { label: "Dashboard", hint: "Network overview at a glance", group: "Navigation", icon: LayoutDashboard, action: () => router.push("/dashboard") },
+  { label: "Devices", hint: "Host inventory and status", group: "Navigation", icon: Monitor, action: () => router.push("/devices") },
+  { label: "Toolbox", hint: "Scans and diagnostics", group: "Navigation", icon: Wrench, action: () => router.push("/toolbox") },
+  { label: "Logs", hint: "Application and syslog", group: "Navigation", icon: ScrollText, action: () => router.push("/logs") },
+  { label: "Settings", hint: "Account, alerts and system", group: "Navigation", icon: Settings, action: () => router.push("/settings") },
+  { label: "Theme: Nightshade", hint: "Dark", group: "Theme", icon: Moon, action: () => ui.setTheme("nightshade") },
+  { label: "Theme: SysAdmin", hint: "Light", group: "Theme", icon: Sun, action: () => ui.setTheme("sysadmin") },
+  { label: "Toggle Sidebar", hint: "Collapse or expand nav", group: "Actions", icon: PanelLeft, action: () => ui.toggleSidebar() },
 ];
 
 const filtered = computed(() => {
@@ -106,7 +118,6 @@ function hoverCmd(cmd: Command) {
   if (idx !== -1) selectedIdx.value = idx;
 }
 
-const isNightshade = computed(() => ui.theme === "nightshade");
 </script>
 
 <template>
@@ -114,7 +125,7 @@ const isNightshade = computed(() => ui.theme === "nightshade");
     <Transition name="np-fade">
       <div
         v-if="ui.commandPaletteOpen"
-        class="fixed inset-0 z-[100] flex items-start justify-center pt-20 sm:pt-28 bg-black/70 backdrop-blur-sm"
+        class="fixed inset-0 z-[100] flex items-start justify-center pt-20 sm:pt-28 bg-[var(--np-surface-elevated)] backdrop-blur-sm"
         @click.self="close"
       >
         <div
@@ -127,15 +138,13 @@ const isNightshade = computed(() => ui.theme === "nightshade");
             class="flex items-center gap-3 px-4 py-3.5 border-b"
             style="border-color: var(--np-glass-border);"
           >
-            <svg class="w-4 h-4 shrink-0" style="color: var(--np-text-dim);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
+            <Search class="w-4 h-4 shrink-0" style="color: var(--np-text-dim);" :stroke-width="1.7" />
             <input
               autofocus
               v-model="query"
               type="text"
               placeholder="Search commands, views, actions…"
-              class="flex-1 bg-transparent outline-none text-sm placeholder:text-slate-400/30 font-sans"
+              class="flex-1 bg-transparent outline-none text-sm placeholder:text-[var(--np-text-dim)]/30 font-sans"
               style="color: var(--np-text);"
               @keydown.up.prevent="selectUp"
               @keydown.down.prevent="selectDown"
@@ -161,9 +170,7 @@ const isNightshade = computed(() => ui.theme === "nightshade");
                   role="option"
                   :aria-selected="isSelected(cmd)"
                   class="flex items-center gap-3 px-4 py-2.5 cursor-pointer text-sm transition-colors duration-100"
-                  :class="isSelected(cmd)
-                    ? isNightshade ? 'bg-emerald-500/10 text-purple-50' : 'bg-amber-500/10 text-purple-50'
-                    : ''"
+                  :class="isSelected(cmd) ? 'bg-[var(--np-accent-soft)] text-[var(--np-accent)]' : ''"
                   :style="!isSelected(cmd) ? { color: 'var(--np-text-muted)' } : {}"
                   @mouseenter="hoverCmd(cmd)"
                   @click="execute(cmd)"
@@ -171,16 +178,15 @@ const isNightshade = computed(() => ui.theme === "nightshade");
                   <!-- Left indicator bar for selected -->
                   <span
                     class="w-0.5 h-4 rounded-full shrink-0 transition-colors"
-                    :class="isSelected(cmd)
-                      ? isNightshade ? 'bg-emerald-500' : 'bg-amber-500'
-                      : 'bg-transparent'"
+                    :class="isSelected(cmd) ? 'bg-[var(--np-accent)]' : 'bg-transparent'"
                   ></span>
-                  <span class="w-4 text-center shrink-0 font-mono text-xs"
-                    :class="isSelected(cmd)
-                      ? isNightshade ? 'text-emerald-400' : 'text-amber-400'
-                      : ''"
+                  <component
+                    :is="cmd.icon"
+                    class="w-4 h-4 shrink-0"
+                    :class="isSelected(cmd) ? 'text-[var(--np-accent)]' : ''"
                     :style="!isSelected(cmd) ? { color: 'var(--np-text-dim)' } : {}"
-                  >{{ cmd.icon }}</span>
+                    :stroke-width="1.7"
+                  />
                   <span class="flex-1 font-medium">{{ cmd.label }}</span>
                   <span v-if="cmd.hint" class="text-[0.7rem] truncate max-w-[140px]" style="color: var(--np-text-dim);">{{ cmd.hint }}</span>
                 </li>

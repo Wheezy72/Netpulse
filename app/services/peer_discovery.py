@@ -87,21 +87,21 @@ class PeerDiscoveryProtocol(asyncio.DatagramProtocol):
             message = json.loads(data.decode("utf-8"))
             payload = message.get("payload")
             signature = message.get("signature")
-            
+
             if not payload or not signature:
                 return
-            
+
             # Verify signature to protect against malicious network injection
             if not _verify_signature(payload, signature):
                 logger.warning(f"Received untrusted or unsigned peer message from {addr[0]}")
                 return
-            
+
             # Verify timestamp to prevent replay attacks (30s window)
             current_time = time.time()
             if abs(current_time - payload.get("timestamp", 0)) > 30:
                 logger.warning(f"Replay attempt or out-of-sync clock message from {addr[0]}")
                 return
-            
+
             # Prevent processing our own messages
             if payload.get("sender_id") == INSTANCE_ID:
                 return
@@ -120,7 +120,7 @@ class PeerDiscoveryProtocol(asyncio.DatagramProtocol):
     async def handle_ping(self, payload: Dict[str, Any], addr: tuple[str, int]):
         peer_has_changed = payload.get("admin_password_changed", False)
         our_has_changed = await check_is_admin_password_changed()
-        
+
         # If the peer has changed password but we haven't, request sync
         if peer_has_changed and not our_has_changed:
             logger.info(f"Found peer {addr[0]} with changed admin credentials. Requesting sync...")
@@ -145,11 +145,11 @@ class PeerDiscoveryProtocol(asyncio.DatagramProtocol):
     def send_signed_message(self, payload: Dict[str, Any], addr: tuple[str, int] | str):
         if not self.transport:
             return
-        
+
         signature = _sign_payload(payload)
         message = {"payload": payload, "signature": signature}
         data = json.dumps(message).encode("utf-8")
-        
+
         if isinstance(addr, str):
             self.transport.sendto(data, (addr, UDP_PORT))
         else:
@@ -186,16 +186,16 @@ class PeerDiscoveryProtocol(asyncio.DatagramProtocol):
 async def start_peer_discovery() -> None:
     """Start peer discovery background listener and broadcaster loop."""
     loop = asyncio.get_running_loop()
-    
+
     # Create socket for UDP broadcast
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    
+
     # On Linux/macOS, REUSEPORT allows multiple processes to bind to the same port
     if hasattr(socket, "SO_REUSEPORT"):
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        
+
     try:
         sock.bind(("0.0.0.0", UDP_PORT))
     except Exception as e:

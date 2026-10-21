@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import ipaddress
 import re
 import shlex
-import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -14,11 +12,19 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_user, require_admin
-from app.core.config import settings
 from app.db.session import async_session_factory
 from app.models.scan_job import ScanJob, ScanJobStatus
 from app.models.user import User
+from app.services.nmap_capabilities import (
+    CATALOG_VERSION,
+    NMAP_INSTALL_HINT,
+    NmapUnavailableError,
+    available_profiles,
+    detect_capabilities,
+    plan_command,
+)
 from app.services.nmap_runner import run_scan_job
+from app.services.scan_policy import is_restricted_target, validate_target
 
 router = APIRouter()
 
@@ -67,9 +73,24 @@ SCRIPT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*\*?$")
 
 
 class NmapCommandRequest(BaseModel):
-    command: str
+    command: str | None = None
+    profile: str | None = None
     target: str
     save_results: bool = True
+
+
+class NmapPlanRequest(BaseModel):
+    profile: str
+    target: str
+    ports: str | None = None
+
+
+class NmapPlanResponse(BaseModel):
+    profile: str
+    argv: List[str]
+    display: str
+    notes: List[str]
+    vuln_scripts: List[str]
 
 
 class ScanResult(BaseModel):
@@ -106,7 +127,9 @@ def _read_artifact_tail(path: str | None, max_bytes: int = 64_000) -> str | None
 def _job_to_scan_result(job: ScanJob, include_output: bool = True) -> ScanResult:
     output = _read_artifact_tail(job.artifact_path) if include_output else None
 
-    command = (job.arguments or {}).get("command") or ""
+    args = job.arguments or {}
+    # Planner-driven jobs store the rendered command instead of raw input.
+    command = args.get("command") or args.get("rendered_command") or ""
     summary: Dict[str, Any] | None = job.result_summary if isinstance(job.result_summary, dict) else None
     ai_briefing: str | None = None
     if summary:
@@ -128,21 +151,12 @@ def _job_to_scan_result(job: ScanJob, include_output: bool = True) -> ScanResult
 
 
 def _validate_target(target: str) -> bool:
-    # Basic safety check; allows IP/hostname/CIDR-ish patterns.
-    target = target.strip()
-    if not target or len(target) > 255:
-        return False
-    if any(ch.isspace() for ch in target):
-        return False
-    if target.startswith("-"):
-        return False
-    # Avoid command injection primitives; nmap gets target as its own arg anyway.
-    for bad in [";", "|", "&", "`", "$", "\n", "\r"]:
-        if bad in target:
-            return False
-    return True
+    """Basic safety check for a user-supplied target.
 
-
+    Thin delegate to app.services.scan_policy so the API layer and the
+    discovery service validate targets exactly the same way.
+    """
+    return validate_target(target)
 def _validate_script_list(value: str) -> None:
     scripts = [s.strip() for s in value.split(",") if s.strip()]
     if not scripts:
@@ -227,46 +241,71 @@ def get_scan_type_from_command(command: str) -> str:
 
 
 def _is_restricted_segment(target: str) -> bool:
-    """Return True if the target falls within a configured restricted/fragile VLAN CIDR.
+    """True when the target sits inside a restricted/fragile VLAN CIDR.
 
-    These ranges must never be scanned with active techniques (SYN probes, etc.).
-    Passive ARP / Zeek is the only allowed discovery method for these segments.
-    
-    Supports both new (restricted_vlan_cidrs) and legacy (medical_iot_vlan_cidrs)
-    configuration variables for backward compatibility. Deduplicates CIDRs to avoid
-    redundant checks during migration.
+    Thin delegate to app.services.scan_policy; the rule itself (including
+    the legacy medical_iot_vlan_cidrs fallback) lives there so the nmap
+    pipeline and device discovery cannot drift apart.
     """
-    # Merge and deduplicate both old and new config for backward compatibility
-    cidrs_set = set(settings.restricted_vlan_cidrs or [])
-    if settings.medical_iot_vlan_cidrs:
-        cidrs_set.update(settings.medical_iot_vlan_cidrs)
-    
-    if not cidrs_set:
-        return False
-
-    try:
-        # Handle plain IP or CIDR notation from the target string.
-        addr = ipaddress.ip_address(target.split("/")[0])
-    except ValueError:
-        # Hostname target – cannot classify statically.
-        # Operators must ensure restricted/fragile VLANs are not reachable by hostname.
-        return False  # Allow the scan; hostname safety must be enforced at network level.
-
-    for cidr in cidrs_set:
-        try:
-            if addr in ipaddress.ip_network(cidr, strict=False):
-                return True
-        except ValueError:
-            continue
-    return False
-
-
+    return is_restricted_target(target)
 def _contains_active_syn_flags(command: str) -> bool:
     """Return True if the command contains flags that trigger active SYN probing."""
     # -sS (SYN stealth), -sA (ACK), -sW (Window), -sM (Maimon) – all send raw packets.
     active_flags = {"-sS", "-sA", "-sW", "-sM", "-sZ"}
     tokens = set(shlex.split(command))
     return bool(tokens & active_flags)
+
+
+@router.get("/capabilities")
+async def get_nmap_capabilities(
+    _user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """What this nmap install supports, from the cached capability probe."""
+    caps = detect_capabilities()
+    return {
+        "available": caps.available,
+        "version": caps.version,
+        "privileged": caps.privileged,
+        "script_categories": sorted(caps.script_categories),
+        "vuln_script_count": len(caps.vuln_scripts),
+        "catalog_version": CATALOG_VERSION,
+        "scripts_dir": caps.scripts_dir,
+        "detected_at": caps.detected_at,
+    }
+
+
+@router.get("/profiles")
+async def get_nmap_profiles(
+    _user: User = Depends(get_current_user),
+) -> List[Dict[str, str]]:
+    """Named scan profiles the planner accepts."""
+    return available_profiles()
+
+
+@router.post("/plan")
+async def plan_nmap_command(
+    request: NmapPlanRequest,
+    _user: User = Depends(get_current_user),
+) -> NmapPlanResponse:
+    """Preview the exact argv a profile would run, without executing it."""
+    if not _validate_target(request.target):
+        raise HTTPException(status_code=400, detail="Invalid target format")
+
+    caps = detect_capabilities()
+    try:
+        plan = plan_command(request.profile, request.target, caps, ports=request.ports)
+    except NmapUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return NmapPlanResponse(
+        profile=plan.profile,
+        argv=plan.argv,
+        display=plan.display,
+        notes=plan.notes,
+        vuln_scripts=plan.vuln_scripts,
+    )
 
 
 @router.post("/execute", response_model=ScanResult)
@@ -276,34 +315,78 @@ async def execute_nmap(
     db: AsyncSession = Depends(db_session),
     current_user: User = Depends(require_admin),
 ) -> ScanResult:
-    if not shutil.which("nmap"):
-        raise HTTPException(status_code=503, detail="nmap is not installed on this system")
-
     if not _validate_target(request.target):
         raise HTTPException(status_code=400, detail="Invalid target format")
 
-    # Block active SYN scans against restricted/fragile VLAN segments.
-    # These segments must only be monitored passively (ARP / Zeek).
-    if _is_restricted_segment(request.target) and _contains_active_syn_flags(request.command):
+    has_command = bool(request.command and request.command.strip())
+    has_profile = bool(request.profile and request.profile.strip())
+    if has_command == has_profile:
         raise HTTPException(
-            status_code=403,
-            detail=(
-                "Active scanning is strictly prohibited on designated fragile or restricted subnets. "
-                "Use passive discovery methods instead."
-            ),
+            status_code=400,
+            detail="Provide exactly one of 'command' or 'profile'",
         )
 
-    safe_args = _parse_safe_nmap_args(request.command, request.target)
-    command_str = " ".join(safe_args)
+    caps = detect_capabilities()
+    if not caps.available:
+        # Do not enqueue a job that is guaranteed to fail.
+        raise HTTPException(status_code=503, detail=NMAP_INSTALL_HINT)
 
-    job = ScanJob(
-        target=request.target,
-        profile=get_scan_type_from_command(command_str),
-        arguments={
+    if has_profile:
+        try:
+            plan = plan_command(request.profile or "", request.target, caps)
+        except NmapUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        # Block active SYN scans against restricted/fragile VLAN segments.
+        # These segments must only be monitored passively (ARP / Zeek); the
+        # planner emits -sS only when raw-socket privileges are available.
+        if _is_restricted_segment(request.target) and "-sS" in plan.argv:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Active scanning is strictly prohibited on designated fragile or restricted subnets. "
+                    "Use passive discovery methods instead."
+                ),
+            )
+
+        safe_args = plan.argv
+        command_str = plan.display
+        job_profile = next(
+            (item["label"] for item in available_profiles() if item["id"] == plan.profile),
+            plan.profile,
+        )
+        job_arguments: Dict[str, Any] = {
+            "profile": plan.profile,
+            "safe_args": safe_args,
+            "rendered_command": command_str,
+        }
+    else:
+        # Block active SYN scans against restricted/fragile VLAN segments.
+        # These segments must only be monitored passively (ARP / Zeek).
+        if _is_restricted_segment(request.target) and _contains_active_syn_flags(request.command or ""):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Active scanning is strictly prohibited on designated fragile or restricted subnets. "
+                    "Use passive discovery methods instead."
+                ),
+            )
+
+        safe_args = _parse_safe_nmap_args(request.command or "", request.target)
+        command_str = " ".join(safe_args)
+        job_profile = get_scan_type_from_command(command_str)
+        job_arguments = {
             "command": request.command,
             "safe_args": safe_args,
             "rendered_command": command_str,
-        },
+        }
+
+    job = ScanJob(
+        target=request.target,
+        profile=job_profile,
+        arguments=job_arguments,
         status=ScanJobStatus.PENDING,
         requested_by_user_id=current_user.id,
     )

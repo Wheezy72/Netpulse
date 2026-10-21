@@ -5,17 +5,14 @@ Alerting utilities.
 
 Handles:
 - Email alerts via SMTP.
-- WhatsApp (or similar) alerts via a generic HTTP webhook.
 - Periodic scanning of new high/critical vulnerabilities to trigger alerts.
 - Generic system alerts (e.g. scan completion, reports, health degradation).
 """
 
 import asyncio
-import json
 import smtplib
 from email.message import EmailMessage
-from typing import Any, Iterable, List, Tuple
-from urllib.request import Request, urlopen
+from typing import List, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,65 +62,16 @@ def _send_email_sync(subject: str, body: str) -> None:
     msg["To"] = settings.alert_email_to
     msg.set_content(body)
 
-    host = settings.smtp_host
-    port = settings.smtp_port
-    username = settings.smtp_username
-    password = settings.smtp_password
-
-    with smtplib.SMTP(host, port, timeout=10) as server:
+    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as server:
         server.starttls()
-        if username and password:
-            server.login(username, password)
+        if settings.smtp_username and settings.smtp_password:
+            server.login(settings.smtp_username, settings.smtp_password)
         server.send_message(msg)
 
 
 async def send_email_alert(subject: str, body: str) -> None:
     """Async wrapper around SMTP send."""
     await asyncio.to_thread(_send_email_sync, subject, body)
-
-
-def _send_whatsapp_sync(message: str) -> None:
-    """
-    Send a WhatsApp-style alert via a generic HTTP webhook.
-
-    This is intentionally generic; in a real deployment you would point this
-    at your provider (e.g. Twilio, Vonage) and adjust the payload accordingly.
-    """
-    if not settings.enable_whatsapp_alerts:
-        return
-    if not (
-        settings.whatsapp_api_url
-        and settings.whatsapp_api_token
-        and settings.whatsapp_recipient
-    ):
-        return
-
-    payload = {
-        "to": settings.whatsapp_recipient,
-        "message": message,
-    }
-    data = json.dumps(payload).encode("utf-8")
-    req = Request(
-        settings.whatsapp_api_url,
-        data=data,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {settings.whatsapp_api_token}",
-        },
-        method="POST",
-    )
-    # Best-effort; errors are swallowed to avoid interfering with core workflows.
-    try:
-        with urlopen(req, timeout=10) as resp:  # noqa: S310
-            resp.read()
-    except Exception:
-        # In production you would log this somewhere central.
-        return
-
-
-async def send_whatsapp_alert(message: str) -> None:
-    """Async wrapper around generic WhatsApp/webhook send."""
-    await asyncio.to_thread(_send_whatsapp_sync, message)
 
 
 async def send_system_alert(
@@ -139,93 +87,27 @@ async def send_system_alert(
     severity: str | None = None,
 ) -> None:
     """
-    Send a generic system alert via configured channels.
+    Send a generic system alert via email.
 
     Parameters
     ----------
     subject:
-        Human-readable subject line (used as email subject and in templates).
+        Human-readable subject line (used as email subject).
     body:
         Detailed body text.
     event_type:
         Logical event type, e.g. "vuln", "scan", "report", "health", "device".
-        Used to select per-event channels and WhatsApp templates.
+        Kept for call-site compatibility; routing is email-only.
     channel:
-        Override channel routing ("email", "whatsapp", "both", "none").
-        If omitted, per-event channel settings in `Settings` are used.
-    device_name:
-        Optional device hostname for template rendering.
-    device_ip:
-        Optional device IP address for template rendering.
-    device_mac:
-        Optional device MAC address for template rendering.
-    segment_name:
-        Optional network segment name for template rendering.
-    severity:
-        Optional severity level for template rendering.
+        Optional channel hint. "none" suppresses the alert entirely; any other
+        value (including legacy values) results in the email alert.
+    device_name, device_ip, device_mac, segment_name, severity:
+        Optional device/context values kept for call-site compatibility.
     """
-    event_key = (event_type or "").lower()
-
-    # Determine channel if not explicitly provided.
-    if channel is None:
-        if event_key == "vuln":
-            channel = settings.alert_vuln_channel
-        elif event_key == "scan":
-            channel = settings.alert_scan_channel
-        elif event_key == "report":
-            channel = settings.alert_report_channel
-        elif event_key == "health":
-            channel = settings.alert_health_channel
-        elif event_key == "device":
-            channel = settings.alert_device_channel
-        else:
-            channel = "both"
-
-    channel = (channel or "both").lower()
-
-    if channel == "none":
+    if (channel or "").lower() == "none":
         return
 
-    tasks = []
-
-    if channel in {"email", "both"}:
-        tasks.append(send_email_alert(subject, body))
-
-    if channel in {"whatsapp", "both"}:
-        # Choose per-event template if available.
-        template = settings.whatsapp_message_template
-        if event_key == "vuln":
-            template = settings.whatsapp_vuln_template or template
-        elif event_key == "scan":
-            template = settings.whatsapp_scan_template or template
-        elif event_key == "report":
-            template = settings.whatsapp_report_template or template
-        elif event_key == "health":
-            template = settings.whatsapp_health_template or template
-        elif event_key == "device":
-            template = settings.whatsapp_device_template or template
-
-        # Build template context with all available variables
-        from datetime import datetime
-        template_vars = {
-            "subject": subject,
-            "body": body,
-            "device_name": device_name or "N/A",
-            "device_ip": device_ip or "N/A",
-            "device_mac": device_mac or "N/A",
-            "segment_name": segment_name or "N/A",
-            "severity": severity or "N/A",
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-        try:
-            formatted = template.format(**template_vars)
-        except KeyError:
-            # Fallback if template has invalid placeholders
-            formatted = template.format(subject=subject, body=body)
-        tasks.append(send_whatsapp_alert(formatted))
-
-    if tasks:
-        await asyncio.gather(*tasks)
+    await send_email_alert(subject, body)
 
 
 async def process_vulnerability_alerts(db: AsyncSession) -> None:

@@ -1,440 +1,484 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import axios from 'axios'
-import PulsePanel from '../components/features/PulsePanel.vue'
+/**
+ * Dashboard — a deliberately small overview.
+ *
+ * Device detail, inventory search and node drawers live on the Devices and
+ * Topology pages. This page answers three questions only: how big is the
+ * fleet, is it responding, and what is on it. Everything shown here is
+ * derived from real data — no placeholder risks, platforms or health scores.
+ */
+import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
+import axios from "axios";
+import { useDeviceDiscovery } from "../composables/useDeviceDiscovery";
 
-import { resolveOui } from '../utils/oui'
+type Theme = "nightshade" | "sysadmin";
 
-type Theme = 'nightshade' | 'sysadmin'
+const props = defineProps<{ theme: Theme; isAdmin: boolean }>();
+const router = useRouter();
 
-interface Props {
-  theme: Theme
-  isAdmin: boolean
+const loading = ref(false);
+const error = ref<string | null>(null);
+
+interface DeviceRow {
+  id: number;
+  hostname: string | null;
+  ip_address: string;
+  device_type: string | null;
+  os: string | null;
+  vendor: string | null;
+  zone: string | null;
+  is_gateway: boolean;
+  last_seen: string | null;
 }
 
-const props = defineProps<Props>()
-const isNightshade = computed(() => props.theme === 'nightshade')
+const devices = ref<DeviceRow[]>([]);
 
-interface Asset {
-  id: number
-  ip: string
-  hostname: string
-  role: string
-  status: 'online' | 'offline'
-  lastSeen: string
-  platform: 'aws' | 'gcp' | 'azure' | 'linux' | 'windows' | 'cisco'
-  riskLevel: 'Low' | 'Medium' | 'High' | 'Critical'
-  riskValue: number // 10-100 for visual bars
-  is_gateway?: boolean
+// Resolve chart colours from the live theme tokens instead of hardcoding the
+// dark theme's emerald. Switching themes now re-reads the same variables the
+// rest of the UI uses.
+const accent = ref("#10b981");
+const accentStrong = ref("#34d399");
+const mutedText = ref("#94a3b8");
+const faintText = ref("#64748b");
+const chartBorder = ref("rgba(255,255,255,0.12)");
+
+function readThemeColors() {
+  const styles = getComputedStyle(document.body);
+  accent.value = styles.getPropertyValue("--np-accent").trim() || accent.value;
+  accentStrong.value = styles.getPropertyValue("--np-accent-strong").trim() || accentStrong.value;
+  mutedText.value = styles.getPropertyValue("--np-text-muted").trim() || mutedText.value;
+  faintText.value = styles.getPropertyValue("--np-text-dim").trim() || faintText.value;
+  chartBorder.value = styles.getPropertyValue("--np-border").trim() || chartBorder.value;
+  warningColor.value = styles.getPropertyValue("--np-warning").trim() || warningColor.value;
 }
 
-interface AssetDetail extends Asset {
-  mac_address?: string | null
-  type_guess?: string | null
-  zone?: string | null
-  is_gateway?: boolean
-  vulnerabilities: {
-    id: number
-    title: string
-    severity: string
-    port?: number | null
-    detected_at?: string | null
-  }[]
-  scripts: {
-    id: number
-    script_name: string
-    status: string
-    created_at: string
-  }[]
+function alpha(hex: string, percent: number): string {
+  const value = hex.replace("#", "");
+  if (value.length !== 6) return `rgba(16, 185, 129, ${percent / 100})`;
+  const r = parseInt(value.slice(0, 2), 16);
+  const g = parseInt(value.slice(2, 4), 16);
+  const b = parseInt(value.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${percent / 100})`;
 }
 
-const targetRange = ref('')
-const selectedAction = ref('find')
-const loading = ref(false)
-const selectedAsset = ref<AssetDetail | null>(null)
-const searchQuery = ref('')
-const selectedZoneFilter = ref('all')
+const ONLINE_WINDOW_MS = 10 * 60 * 1000;
 
-const assets = ref<Asset[]>([])
+function isOnline(device: DeviceRow): boolean {
+  if (!device.last_seen) return false;
+  const seen = new Date(device.last_seen).getTime();
+  if (Number.isNaN(seen)) return false;
+  return Date.now() - seen <= ONLINE_WINDOW_MS;
+}
 
-async function fetchLiveDevices() {
+// Ping status -----------------------------------------------------------------
+// Replaces the old "Devices by role" chart: role counts were static trivia,
+// while per-device ping answers tell the operator what to fix right now.
+
+interface PingResultRow {
+  id: number;
+  hostname: string | null;
+  ip_address: string;
+  status: "up" | "slow" | "down";
+  latency_ms: number | null;
+  last_seen: string | null;
+}
+
+interface PingStatusResponse {
+  checked_at: string;
+  summary: { up: number; slow: number; down: number; total: number };
+  results: PingResultRow[];
+}
+
+const pingChecking = ref(false);
+const pingError = ref<string | null>(null);
+const pingResults = ref<PingResultRow[]>([]);
+const pingSummary = ref<PingStatusResponse["summary"] | null>(null);
+
+const answering = computed(() =>
+  pingResults.value
+    .filter((r) => r.status !== "down" && r.latency_ms !== null)
+    .sort((a, b) => (b.latency_ms ?? 0) - (a.latency_ms ?? 0))
+);
+const notResponding = computed(() => pingResults.value.filter((r) => r.status === "down"));
+const warningColor = ref("#f59e0b");
+
+async function checkPingStatus() {
+  pingChecking.value = true;
+  pingError.value = null;
   try {
-    const { data } = await axios.get('/api/devices')
-    assets.value = data.map((d: any) => {
-      const typeLower = (d.device_type || '').toLowerCase();
-      let platformVal: 'aws' | 'gcp' | 'azure' | 'linux' | 'windows' | 'cisco' = 'linux';
-      if (typeLower.includes('windows')) {
-        platformVal = 'windows';
-      } else if (typeLower.includes('cisco') || typeLower.includes('switch')) {
-        platformVal = 'cisco';
-      } else if (typeLower.includes('aws')) {
-        platformVal = 'aws';
-      } else if (typeLower.includes('azure')) {
-        platformVal = 'azure';
-      } else if (typeLower.includes('gcp')) {
-        platformVal = 'gcp';
-      }
-      
-      return {
-        id: d.id,
-        ip: d.ip_address,
-        hostname: d.hostname || d.ip_address,
-        role: d.device_type || (d.is_gateway ? 'Gateway Router' : 'Network Host'),
-        status: 'online',
-        lastSeen: d.last_seen ? new Date(d.last_seen).toLocaleTimeString() : 'Unknown',
-        platform: platformVal,
-        riskLevel: d.is_gateway ? 'Medium' : 'Low',
-        riskValue: d.is_gateway ? 50 : 20,
-        is_gateway: d.is_gateway
-      };
-    })
-    if (assets.value.length > 0) {
-      await selectAsset(assets.value[0])
-    }
-  } catch (error) {
-    console.error("Failed to load real devices:", error)
+    const { data } = await axios.get<PingStatusResponse>("/api/devices/ping-status", {
+      params: { limit: 12 },
+    });
+    pingResults.value = data.results;
+    pingSummary.value = data.summary;
+  } catch {
+    pingError.value = "The ping check could not run. Is the backend reachable?";
+  } finally {
+    pingChecking.value = false;
   }
 }
 
-// Filter assets based on search query
-const filteredAssets = computed(() => {
-  return assets.value.filter(asset => {
-    const matchesSearch = asset.ip.includes(searchQuery.value) || 
-                          asset.hostname.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-                          asset.role.toLowerCase().includes(searchQuery.value.toLowerCase())
-    
-    if (selectedZoneFilter.value === 'all') return matchesSearch
-    if (selectedZoneFilter.value === 'dmz') return matchesSearch && ['gcp', 'cisco'].includes(asset.platform)
-    if (selectedZoneFilter.value === 'internal') return matchesSearch && ['aws', 'azure', 'linux', 'windows'].includes(asset.platform)
-    return matchesSearch
-  })
-})
-
-const sanitizeInput = (e: Event) => {
-  const raw = (e.target as HTMLInputElement).value
-  targetRange.value = raw.replace(/[^0-9a-fA-F.:/-]/g, '')
+function labelFor(row: PingResultRow): string {
+  return row.hostname || row.ip_address;
 }
 
-const executeScan = () => {
-  if (!targetRange.value) return
-
-  loading.value = true
-  selectedAsset.value = null
-
-  setTimeout(() => {
-    loading.value = false
-  }, 1800)
-}
-
-const selectAsset = async (asset: Asset) => {
+async function loadDevices() {
+  loading.value = true;
+  error.value = null;
   try {
-    const { data } = await axios.get<any>(`/api/devices/${asset.id}/detail`)
-    selectedAsset.value = {
-      ...asset,
-      mac_address: data.device.mac_address,
-      type_guess: data.type_guess,
-      zone: data.device.zone,
-      is_gateway: data.device.is_gateway,
-      vulnerabilities: data.vulnerabilities || [],
-      scripts: data.scripts || []
-    }
-  } catch (error) {
-    console.error("Failed to load device detail:", error)
-    selectedAsset.value = {
-      ...asset,
-      mac_address: null,
-      type_guess: null,
-      zone: null,
-      is_gateway: asset.is_gateway || false,
-      vulnerabilities: [],
-      scripts: []
-    }
+    const { data } = await axios.get<DeviceRow[]>("/api/devices");
+    devices.value = data;
+  } catch {
+    error.value = "Could not load the device inventory.";
+  } finally {
+    loading.value = false;
   }
 }
 
-// Custom tooltip states
-const activeBarTooltip = ref<number | null>(null)
+const totalDevices = computed(() => devices.value.length);
+const onlineDevices = computed(() => devices.value.filter(isOnline).length);
+const gatewayCount = computed(() => devices.value.filter((d) => d.is_gateway).length);
+const zoneCount = computed(
+  () => new Set(devices.value.map((d) => d.zone).filter(Boolean)).size
+);
+const availability = computed(() =>
+  totalDevices.value ? Math.round((onlineDevices.value / totalDevices.value) * 100) : 0
+);
 
-// Cleared mock datasets to ensure 100% real telemetry
-const zonesData = ref<any[]>([])
-const accessTypeData = ref<any[]>([])
+const stats = computed(() => [
+  {
+    id: "total",
+    label: "Devices",
+    value: totalDevices.value,
+    hint: "In the inventory",
+  },
+  {
+    id: "online",
+    label: "Responding",
+    value: onlineDevices.value,
+    hint: `Seen in the last 10 minutes`,
+  },
+  {
+    id: "gateways",
+    label: "Gateways",
+    value: gatewayCount.value,
+    hint: "Default-route nodes",
+  },
+  {
+    id: "zones",
+    label: "Zones",
+    value: zoneCount.value,
+    hint: "Distinct segments",
+  },
+]);
 
-onMounted(() => {
-  fetchLiveDevices()
-})
+const gaugeOption = computed(() => ({
+  series: [
+    {
+      type: "gauge",
+      startAngle: 220,
+      endAngle: -40,
+      min: 0,
+      max: 100,
+      radius: "94%",
+      center: ["50%", "58%"],
+      progress: {
+        show: true,
+        width: 12,
+        roundCap: true,
+        itemStyle: { color: accent.value },
+      },
+      axisLine: { lineStyle: { width: 12, color: [[1, chartBorder.value]] } },
+      pointer: { show: false },
+      axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: { show: false },
+      anchor: { show: false },
+      title: {
+        show: true,
+        offsetCenter: [0, "36%"],
+        color: faintText.value,
+        fontSize: 10,
+        fontFamily: "JetBrains Mono, monospace",
+      },
+      detail: {
+        valueAnimation: true,
+        fontSize: 28,
+        fontWeight: 700,
+        offsetCenter: [0, "2%"],
+        color: accent.value,
+        formatter: "{value}%",
+      },
+      data: [{ value: availability.value, name: "RESPONDING" }],
+    },
+  ],
+}));
+
+const pingChartOption = computed(() => {
+  const rows = answering.value;
+  return {
+    tooltip: {
+      trigger: "item",
+      backgroundColor: "transparent",
+      borderWidth: 0,
+      textStyle: { color: mutedText.value, fontSize: 11 },
+      formatter: (params: any) => {
+        const row = rows[params.dataIndex];
+        if (!row) return "";
+        return `${labelFor(row)}: ${row.latency_ms?.toFixed(1) ?? "?"} ms`;
+      },
+    },
+    grid: { left: 4, right: 16, top: 8, bottom: 4, containLabel: true },
+    xAxis: {
+      type: "value",
+      axisLabel: {
+        color: faintText.value,
+        fontSize: 10,
+        fontFamily: "JetBrains Mono, monospace",
+        formatter: "{value} ms",
+      },
+      splitLine: { lineStyle: { color: chartBorder.value, type: "dashed" } },
+    },
+    yAxis: {
+      type: "category",
+      inverse: true,
+      data: rows.map(labelFor),
+      axisLabel: {
+        color: faintText.value,
+        fontSize: 10,
+        fontFamily: "JetBrains Mono, monospace",
+        width: 110,
+        overflow: "truncate",
+      },
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: chartBorder.value } },
+    },
+    series: [
+      {
+        type: "bar",
+        data: rows.map((row) => ({
+          value: Number((row.latency_ms ?? 0).toFixed(1)),
+          itemStyle: {
+            color: row.status === "slow" ? warningColor.value : accent.value,
+            borderRadius: [0, 6, 6, 0],
+          },
+        })),
+        barMaxWidth: 16,
+        emphasis: { itemStyle: { color: accentStrong.value } },
+      },
+    ],
+  };
+});
+
+const { discovering, discover } = useDeviceDiscovery();
+const sweepNote = ref<string | null>(null);
+
+async function runDiscovery() {
+  sweepNote.value = null;
+  await discover(null);
+  await loadDevices();
+  sweepNote.value = "Sweep finished — the inventory has been refreshed.";
+}
+
+watch(
+  () => props.theme,
+  async () => {
+    await nextTick();
+    readThemeColors();
+  }
+);
+
+onMounted(async () => {
+  await nextTick();
+  readThemeColors();
+  await loadDevices();
+  void checkPingStatus();
+});
 </script>
 
 <template>
-  <div class="flex flex-col h-full gap-5">
-    
-    <!-- Top Row Header Section: Scan controls -->
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-2xl bg-[var(--np-glass-bg)] border border-[var(--np-glass-border)] backdrop-blur-md">
-      <div class="flex flex-col gap-1">
-        <h2 class="text-base font-bold uppercase tracking-wider text-[var(--np-text)] font-sans">Network Operations &amp; Health</h2>
-        <p class="text-[0.65rem] text-[var(--np-text-dim)]">Real-time status, latency diagnostic streams, and active inventory mapping.</p>
+  <div class="space-y-6">
+    <!-- Page heading -->
+    <header class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p class="text-[0.6rem] font-mono uppercase tracking-[0.35em] text-[var(--np-text-dim)]">
+          Overview
+        </p>
+        <h1 class="mt-1 text-2xl font-bold tracking-tight text-[var(--np-text)]">Network overview</h1>
+        <p class="mt-1 text-xs text-[var(--np-text-muted)]">
+          How many devices are out there, which ones answer, and what needs attention.
+        </p>
       </div>
+      <button
+        class="np-cyber-btn self-start px-4 py-2 text-[0.65rem] uppercase tracking-wider sm:self-auto"
+        :disabled="loading"
+        @click="loadDevices"
+      >
+        {{ loading ? "Refreshing…" : "Refresh" }}
+      </button>
+    </header>
+
+    <div v-if="error" class="np-level-error rounded-xl px-4 py-3 text-xs">
+      {{ error }}
     </div>
 
-    <!-- Active view switch -->
-    <div class="flex-1 min-h-0 relative z-10">
-      
-      <!-- ============================================ -->
-      <!-- VIEW: IDENTITIES & HOSTS                     -->
-      <!-- ============================================ -->
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 animate-fade-in">
-        
-        <!-- Left 2 Columns: Charts & Node Table -->
-        <div class="lg:col-span-2 flex flex-col gap-5">
-          
-          <!-- Top row widget: Live Internet Health & Connection Quality Telemetry -->
-          <PulsePanel />
+    <!-- Stat strip: one row, equal weight, no decorative sparklines -->
+    <section class="grid grid-cols-2 gap-4 xl:grid-cols-4">
+      <article
+        v-for="stat in stats"
+        :key="stat.id"
+        class="glass-card np-metric-tile p-5"
+      >
+        <p class="text-[0.6rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">
+          {{ stat.label }}
+        </p>
+        <p class="mt-2 text-3xl font-bold leading-none tracking-tight text-[var(--np-text)]">
+          {{ stat.value }}
+        </p>
+        <p class="mt-2 text-[0.65rem] text-[var(--np-text-muted)]">{{ stat.hint }}</p>
+      </article>
+    </section>
 
-          <!-- Bottom: Active Identities/Nodes Table Card -->
-          <div class="rounded-2xl bg-[var(--np-glass-bg)] border border-[var(--np-glass-border)] shadow-lg flex flex-col flex-1 min-h-[350px]">
-            <div class="p-4 border-b border-[var(--np-border-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div class="flex items-center gap-3">
-                <span class="text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">{{ assets.length }} Discovered Network Hosts</span>
-                <span class="text-[0.6rem] px-2 py-0.5 rounded-full font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Live</span>
-              </div>
-              
-              <div class="flex items-center gap-2">
-                <input 
-                  type="text" 
-                  v-model="searchQuery"
-                  placeholder="Search hosts or IPs..."
-                  class="np-neon-input text-xs px-3 py-1.5 w-44 font-mono"
-                />
-                <select 
-                  v-model="selectedZoneFilter"
-                  class="np-neon-input text-xs px-2 py-1.5 cursor-pointer"
-                >
-                  <option value="all">All Zones</option>
-                  <option value="dmz">DMZ Public Zone</option>
-                  <option value="internal">Internal LAN</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="flex-1 overflow-auto custom-scrollbar">
-              <table class="w-full text-left border-collapse whitespace-nowrap">
-                <thead>
-                  <tr class="bg-[var(--np-thead-bg)] text-[0.6rem] text-[var(--np-text-dim)] uppercase tracking-widest border-b border-[var(--np-border-subtle)] font-bold">
-                    <th class="py-3 px-4">Hostname &amp; Role</th>
-                    <th class="py-3 px-4">IP Address</th>
-                    <th class="py-3 px-4">Last Active</th>
-                    <th class="py-3 px-4">Platform</th>
-                    <th class="py-3 px-4">Risk Severity</th>
-                    <th class="py-3 px-4 text-center">Status</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-[var(--np-border-subtle)]">
-                  <tr 
-                    v-for="asset in filteredAssets" 
-                    :key="asset.id"
-                    @click="selectAsset(asset)"
-                    class="group cursor-pointer hover:bg-[var(--np-surface-hover)]/30 transition-all"
-                    :class="[selectedAsset?.id === asset.id ? 'bg-[var(--np-accent-bg)] border-l-2 border-[var(--np-accent-primary)]' : '']"
-                  >
-                    <td class="py-3 px-4">
-                      <div class="flex items-center gap-3">
-                        <div 
-                          class="w-7 h-7 rounded-lg flex items-center justify-center text-[0.55rem] font-bold border"
-                          :class="[
-                            asset.riskLevel === 'Critical' ? 'bg-red-500/10 border-red-500/30 text-red-400' :
-                            asset.riskLevel === 'High' ? 'bg-slate-500/10 border-slate-500/30 text-slate-400' :
-                            asset.riskLevel === 'Medium' ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' :
-                            'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                          ]"
-                        >
-                          {{ asset.hostname.slice(0, 2) }}
-                        </div>
-                        <div class="flex flex-col leading-tight">
-                          <span class="text-xs font-semibold text-[var(--np-text)] group-hover:text-[var(--np-accent-primary)] transition-colors">{{ asset.hostname }}</span>
-                          <span class="text-[0.6rem] text-[var(--np-text-muted)] mt-0.5">{{ asset.role }}</span>
-                        </div>
-                      </div>
-                    </td>
-                    <td class="py-3 px-4 font-mono text-xs text-[var(--np-text-muted)]">{{ asset.ip }}</td>
-                    <td class="py-3 px-4 text-[0.65rem] text-[var(--np-text-dim)]">{{ asset.lastSeen }}</td>
-                    <td class="py-3 px-4">
-                      <span class="px-2 py-0.5 rounded text-[0.55rem] font-bold uppercase tracking-wider bg-[var(--np-surface-elevated)] text-[var(--np-text-muted)] border border-[var(--np-border-subtle)]">
-                        {{ asset.platform }}
-                      </span>
-                    </td>
-                    <td class="py-3 px-4">
-                      <div class="flex items-center gap-2.5">
-                        <div class="w-16 h-1.5 rounded-full bg-[var(--np-surface-elevated)] overflow-hidden border border-[var(--np-border-subtle)]">
-                          <div 
-                            class="h-full rounded-full transition-all duration-300"
-                            :class="[
-                              asset.riskLevel === 'Critical' ? 'bg-red-500' :
-                              asset.riskLevel === 'High' ? 'bg-slate-500' :
-                              asset.riskLevel === 'Medium' ? 'bg-cyan-500' :
-                              'bg-emerald-500'
-                            ]"
-                            :style="{ width: `${asset.riskValue}%` }"
-                          />
-                        </div>
-                        <span 
-                          class="text-[0.6rem] font-bold uppercase tracking-wide"
-                          :class="[
-                            asset.riskLevel === 'Critical' ? 'text-red-400' :
-                            asset.riskLevel === 'High' ? 'text-slate-400' :
-                            asset.riskLevel === 'Medium' ? 'text-cyan-400' :
-                            'text-emerald-400'
-                          ]"
-                        >
-                          {{ asset.riskLevel }}
-                        </span>
-                      </div>
-                    </td>
-                    <td class="py-3 px-4 text-center">
-                      <span 
-                        class="inline-block w-2 h-2 rounded-full"
-                        :class="[asset.status === 'online' ? 'bg-emerald-400 shadow-[0_0_8px_rgba(34,197,94,0.7)]' : 'bg-slate-500']"
-                      />
-                    </td>
-                  </tr>
-                  <tr v-if="filteredAssets.length === 0">
-                    <td colspan="6" class="py-8 text-center text-xs font-mono text-[var(--np-text-dim)]">No discovered hosts matching the filters.</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+    <!-- Ping status + reachability, side by side -->
+    <section class="grid grid-cols-1 gap-5 lg:grid-cols-3">
+      <article class="glass-card glass-card--static flex flex-col p-5 lg:col-span-2">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="text-[0.6rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">
+              Ping status
+            </p>
+            <h2 class="mt-1 text-sm font-bold text-[var(--np-text)]">Who is answering right now</h2>
           </div>
+          <button
+            type="button"
+            class="np-cyber-btn px-3 py-1.5 text-[0.6rem]"
+            :disabled="pingChecking"
+            @click="checkPingStatus"
+          >
+            {{ pingChecking ? "Checking…" : "Check now" }}
+          </button>
         </div>
 
-        <!-- Right 1 Column: Node Details Drawer -->
-        <div class="flex flex-col gap-5">
-          <div v-if="selectedAsset" class="rounded-2xl bg-[var(--np-glass-bg)] border border-[var(--np-glass-border)] shadow-lg flex flex-col p-5 h-full min-h-[450px]">
-            <div class="flex items-center justify-between border-b border-[var(--np-border-subtle)] pb-3 mb-4">
-              <span class="text-xs font-bold uppercase tracking-wider text-[var(--np-accent-primary)]">Node details</span>
-              <span class="text-[0.55rem] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">Online</span>
-            </div>
+        <p v-if="pingSummary" class="mt-2 text-[0.7rem] text-[var(--np-text-muted)] tabular-nums">
+          {{ pingSummary.up }} answering
+          <template v-if="pingSummary.slow"> · {{ pingSummary.slow }} slow</template>
+          <template v-if="pingSummary.down"> · {{ pingSummary.down }} silent</template>
+          · checked {{ pingSummary.total }}
+        </p>
 
-            <div class="flex-1 space-y-5 overflow-y-auto custom-scrollbar pr-1">
-              <div class="flex flex-col gap-1">
-                <span class="text-[0.55rem] uppercase tracking-wider text-[var(--np-text-dim)] font-bold">Address</span>
-                <span class="text-lg font-bold font-mono text-[var(--np-text)]">{{ selectedAsset.ip }}</span>
-                <span class="text-[0.65rem] text-[var(--np-accent-primary)]/80 font-semibold font-mono">{{ selectedAsset.hostname }} ({{ selectedAsset.role }})</span>
-                <router-link
-                  :to="{ path: '/topology', query: { select: selectedAsset.id } }"
-                  class="np-cyber-btn mt-2 text-center text-[10px] py-1 border-purple-500/40 text-purple-400 hover:bg-purple-500/10"
-                >
-                  Locate in Topology Map
-                </router-link>
-              </div>
-
-              <!-- Real Details Table -->
-              <dl class="space-y-2 text-xs border-t border-[var(--np-border-subtle)] pt-4">
-                <div class="flex justify-between">
-                  <dt class="text-[var(--np-text-dim)]">MAC Address</dt>
-                  <dd class="font-mono text-[var(--np-text)]">{{ selectedAsset.mac_address || '—' }}</dd>
-                </div>
-                <div class="flex justify-between">
-                  <dt class="text-[var(--np-text-dim)]">Vendor (OUI)</dt>
-                  <dd class="text-[var(--np-text)]">
-                    {{ selectedAsset.mac_address ? (resolveOui(selectedAsset.mac_address) ?? 'Unknown') : '—' }}
-                  </dd>
-                </div>
-                <div class="flex justify-between">
-                  <dt class="text-[var(--np-text-dim)]">Type</dt>
-                  <dd class="text-[var(--np-text)]">{{ selectedAsset.type_guess || selectedAsset.role || '—' }}</dd>
-                </div>
-                <div class="flex justify-between">
-                  <dt class="text-[var(--np-text-dim)]">Zone</dt>
-                  <dd class="text-[var(--np-text)]">{{ selectedAsset.zone || '—' }}</dd>
-                </div>
-                <div class="flex justify-between">
-                  <dt class="text-[var(--np-text-dim)]">Gateway</dt>
-                  <dd :class="[selectedAsset.is_gateway ? 'text-emerald-400 font-bold' : 'text-[var(--np-text-dim)]']">
-                    {{ selectedAsset.is_gateway ? 'Yes' : 'No' }}
-                  </dd>
-                </div>
-                <div class="flex justify-between">
-                  <dt class="text-[var(--np-text-dim)]">Last Seen</dt>
-                  <dd class="text-[var(--np-text)]">{{ selectedAsset.lastSeen }}</dd>
-                </div>
-              </dl>
-
-              <!-- Real Vulnerabilities section -->
-              <div class="space-y-2 pt-2 border-t border-[var(--np-border-subtle)]">
-                <span class="text-[0.55rem] uppercase tracking-widest text-[var(--np-text-dim)] font-bold block">
-                  Vulnerabilities ({{ selectedAsset.vulnerabilities?.length || 0 }})
-                </span>
-                <div class="space-y-1.5">
-                  <div v-for="vuln in selectedAsset.vulnerabilities" :key="vuln.id" class="flex justify-between items-center rounded-lg p-2.5 bg-[var(--np-surface-elevated)] border border-[var(--np-border-subtle)]">
-                    <div class="flex items-center gap-2">
-                      <span :class="[
-                        vuln.severity === 'critical' ? 'text-red-500 font-bold' :
-                        vuln.severity === 'high' ? 'text-orange-500 font-bold' :
-                        vuln.severity === 'medium' ? 'text-yellow-500 font-bold' :
-                        'text-emerald-400'
-                      ]" class="font-mono text-[0.65rem] shrink-0">
-                        [{{ vuln.severity.toUpperCase() }}]
-                      </span>
-                      <span class="text-[0.65rem] text-[var(--np-text)] truncate max-w-[180px]">{{ vuln.title }}</span>
-                    </div>
-                    <span v-if="vuln.port" class="text-[0.65rem] font-mono text-[var(--np-text-dim)]">:{{ vuln.port }}</span>
-                  </div>
-                  <div v-if="!selectedAsset.vulnerabilities?.length" class="text-xs font-mono py-2 text-[var(--np-text-dim)] text-center">No vulnerabilities detected.</div>
-                </div>
-              </div>
-
-              <!-- Real Scripts execution section -->
-              <div class="space-y-2 pt-2 border-t border-[var(--np-border-subtle)]">
-                <span class="text-[0.55rem] uppercase tracking-widest text-[var(--np-text-dim)] font-bold block">
-                  Recent Script Jobs
-                </span>
-                <div class="space-y-1.5">
-                  <div v-for="s in selectedAsset.scripts" :key="s.id" class="flex justify-between items-center rounded-lg p-2 bg-[var(--np-surface-elevated)] border border-[var(--np-border-subtle)] text-[0.65rem]">
-                    <span class="font-mono text-[var(--np-text)] truncate max-w-[180px]">{{ s.script_name }}</span>
-                    <span :class="[
-                      s.status === 'success' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
-                      s.status === 'failed' ? 'text-red-400 bg-red-500/10 border-red-500/20' :
-                      'text-yellow-400 bg-yellow-500/10 border-yellow-500/20'
-                    ]" class="px-1.5 py-0.5 rounded font-mono border text-[0.55rem] uppercase">
-                      {{ s.status }}
-                    </span>
-                  </div>
-                  <div v-if="!selectedAsset.scripts?.length" class="text-xs font-mono py-2 text-[var(--np-text-dim)] text-center">No scripts executed.</div>
-                </div>
-              </div>
-            </div>
-
-            <div class="border-t border-[var(--np-border-subtle)] pt-4 mt-4 flex flex-col gap-2">
-              <button 
-                v-if="isAdmin"
-                class="w-full py-2.5 text-[0.6rem] font-bold uppercase tracking-widest bg-transparent hover:bg-rose-500/10 text-rose-400 border border-rose-500/30 rounded-xl transition-all"
-              >
-                Isolate Node
-              </button>
-              <div v-else class="text-[0.55rem] text-[var(--np-text-dim)] uppercase tracking-wider text-center py-2 flex items-center justify-center gap-1.5">
-                <span>🔒 Privileged Actions Restricted</span>
-              </div>
-            </div>
-          </div>
-          
-          <div v-else class="rounded-2xl bg-[var(--np-glass-bg)] border border-[var(--np-glass-border)] p-8 text-center text-xs text-[var(--np-text-dim)] flex items-center justify-center min-h-[450px]">
-            Select a host in the inventory table to load analytics.
-          </div>
+        <div v-if="pingError" class="mt-3 rounded-xl border border-[var(--np-danger)]/30 bg-[var(--np-danger)]/10 px-3 py-2 text-xs text-[var(--np-danger)]">
+          {{ pingError }}
         </div>
 
-      </div>
+        <div v-else-if="pingChecking && answering.length === 0" class="flex flex-1 flex-col justify-center gap-2 py-10">
+          <div class="np-skeleton h-3 w-2/3 rounded" />
+          <div class="np-skeleton h-3 w-1/2 rounded" />
+          <div class="np-skeleton h-3 w-3/5 rounded" />
+        </div>
 
+        <div v-else-if="answering.length === 0" class="flex flex-1 flex-col items-center justify-center gap-1 py-12 text-center">
+          <p class="text-sm font-semibold text-[var(--np-text)]">No device answered</p>
+          <p class="max-w-xs text-xs text-[var(--np-text-muted)]">
+            The inventory is empty, or none of the checked hosts replied. Run a discovery sweep first.
+          </p>
+        </div>
 
-    </div>
+        <v-chart v-else class="mt-2 h-[220px] w-full" :option="pingChartOption" autoresize />
+      </article>
 
+      <article class="glass-card glass-card--static flex flex-col p-5">
+        <div>
+          <p class="text-[0.6rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">
+            Reachability
+          </p>
+          <h2 class="mt-1 text-sm font-bold text-[var(--np-text)]">Seen in the last 10 minutes</h2>
+        </div>
+        <v-chart class="mt-1 h-[190px] w-full" :option="gaugeOption" autoresize />
+        <div class="mt-auto flex items-center justify-between border-t border-[var(--np-border-subtle)] pt-3 text-[0.65rem]">
+          <span class="font-mono uppercase tracking-wider text-[var(--np-text-dim)]">Online / total</span>
+          <span class="font-mono font-bold text-[var(--np-text)] tabular-nums">{{ onlineDevices }} / {{ totalDevices }}</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- Actions + status: the only place the page repeats what other pages do,
+         and it does so as a link, not a copy of their UI. -->
+    <section class="grid grid-cols-1 gap-5 lg:grid-cols-3">
+      <article
+        class="relative overflow-hidden rounded-2xl border p-5 lg:col-span-2"
+        :style="{
+          borderColor: `color-mix(in srgb, var(--np-accent) 28%, transparent)`,
+          background: `color-mix(in srgb, var(--np-accent) 7%, transparent)`,
+        }"
+      >
+        <p class="text-[0.6rem] font-mono uppercase tracking-[0.3em] text-[var(--np-accent)]">Status</p>
+        <h2 class="mt-1 text-base font-bold text-[var(--np-text)]">
+          {{ totalDevices === 0
+            ? "Inventory is empty"
+            : `${onlineDevices} of ${totalDevices} devices responding · ${zoneCount} zone${zoneCount === 1 ? "" : "s"}` }}
+        </h2>
+        <p class="mt-1 max-w-xl text-xs text-[var(--np-text-muted)]">
+          {{ totalDevices === 0
+            ? "Run a sweep to see what is on this network."
+            : "Availability is based on device sightings collected in the last ten minutes." }}
+        </p>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <button
+            class="np-cyber-btn px-4 py-2 text-[0.65rem] uppercase tracking-wider"
+            :disabled="discovering"
+            @click="runDiscovery"
+          >
+            {{ discovering ? "Sweeping…" : "Run discovery sweep" }}
+          </button>
+          <button
+            class="np-cyber-btn px-4 py-2 text-[0.65rem] uppercase tracking-wider"
+            @click="router.push('/topology')"
+          >
+            Topology
+          </button>
+          <button
+            class="np-cyber-btn px-4 py-2 text-[0.65rem] uppercase tracking-wider"
+            @click="router.push('/devices')"
+          >
+            Inventory
+          </button>
+        </div>
+        <p v-if="sweepNote" class="mt-3 text-[0.65rem] text-[var(--np-text-muted)]">{{ sweepNote }}</p>
+      </article>
+
+      <article class="glass-card glass-card--static p-5">
+        <p class="text-[0.6rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Attention</p>
+        <h2 class="mt-1 text-sm font-bold text-[var(--np-text)]">Not responding</h2>
+        <ul class="mt-3 space-y-2">
+          <li
+            v-for="row in notResponding"
+            :key="row.id"
+            class="flex items-center justify-between gap-3 text-xs"
+          >
+            <span class="flex min-w-0 items-center gap-2 text-[var(--np-text-muted)]">
+              <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--np-danger)]" />
+              <span class="truncate">{{ labelFor(row) }}</span>
+            </span>
+            <span class="shrink-0 font-mono text-[0.65rem] text-[var(--np-text-dim)] tabular-nums">{{ row.ip_address }}</span>
+          </li>
+          <li v-if="notResponding.length === 0 && pingSummary" class="text-xs text-[var(--np-text-dim)]">
+            Every checked device answered.
+          </li>
+          <li v-else-if="!pingSummary && !pingChecking" class="text-xs text-[var(--np-text-dim)]">
+            Run a ping check to see which devices are silent.
+          </li>
+        </ul>
+      </article>
+    </section>
   </div>
 </template>
 
 <style scoped>
-.animate-fade-in {
-  animation: fadeIn 0.4s cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
+.np-metric-tile {
+  transition: border-color 0.15s ease, transform 0.15s ease;
 }
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+.np-metric-tile:hover {
+  transform: translateY(-1px);
 }
 </style>

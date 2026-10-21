@@ -15,10 +15,9 @@ const emit = defineEmits<{ (e: "toast", type: "success" | "error" | "warning" | 
 
 const isNightshade = computed(() => props.theme === "nightshade");
 
-import PacketBrowser from "./PacketBrowser.vue";
 
 // --- Tab Management ---
-type ActiveTab = "scanning" | "diagnostics" | "automation" | "packets";
+type ActiveTab = "scanning" | "diagnostics" | "automation";
 const activeTab = ref<ActiveTab>("scanning");
 
 // --- General State ---
@@ -287,7 +286,7 @@ async function triggerScript(): Promise<void> {
     });
     runningScriptJobId.value = data.job_id;
     scriptJobStatus.value = "running";
-    scriptLogs.value = "Initializing job...\n";
+    scriptLogs.value = "Initializing job…\n";
     startScriptPolling();
     emit("toast", "success", `Automation script triggered: Job #${data.job_id}`);
   } catch (e: any) {
@@ -363,34 +362,34 @@ watch(
     <!-- Header Section -->
     <header class="flex items-end justify-between px-1 shrink-0">
       <div>
-        <p class="text-[0.65rem] uppercase tracking-[0.45em] text-[var(--np-text-dim)] font-extrabold">Network Control Posture</p>
-        <h1 class="mt-2 text-2xl font-extrabold tracking-tight text-[var(--np-text)]">Operator Toolbox</h1>
+        <h1 class="text-2xl font-extrabold tracking-tight text-[var(--np-text)]">Toolbox</h1>
+        <p class="mt-1 text-xs text-[var(--np-text-muted)]">Scans, probes and automation jobs against the devices in your inventory.</p>
       </div>
       <div class="flex items-center gap-2">
         <button
           @click="isTerminalOpen = !isTerminalOpen"
           class="np-cyber-btn flex items-center gap-1.5"
-          :class="isTerminalOpen ? 'border-emerald-500/50 text-emerald-400' : ''"
+          :class="isTerminalOpen ? 'np-brand-border np-brand-text' : ''"
         >
-          <span class="w-1.5 h-1.5 rounded-full" :class="currentScanId ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400/25'"></span>
-          Console {{ currentScanId ? '(Running)' : '' }}
+          <span class="w-1.5 h-1.5 rounded-full" :class="currentScanId ? 'np-brand-bg animate-pulse' : 'bg-[var(--np-text-dim)]/30'"></span>
+          Console {{ currentScanId ? '(running)' : '' }}
         </button>
       </div>
     </header>
 
     <!-- Main Content Panel with Tabs -->
-    <div class="flex-1 min-h-0 bg-[var(--np-glass-bg)] border border-slate-600/10 rounded-2xl flex flex-col overflow-hidden backdrop-blur-md">
+    <div class="flex-1 min-h-0 bg-[var(--np-glass-bg)] border border-[var(--np-border-subtle)] rounded-2xl flex flex-col overflow-hidden backdrop-blur-md">
       
       <!-- Toolbox Tab Switcher -->
-      <div class="flex items-center border-b border-slate-600/10 px-4 py-2 gap-1 bg-black/20">
+      <div class="flex items-center border-b border-[var(--np-border-subtle)] px-4 py-2 gap-1 bg-[var(--np-thead-bg)]">
         <button
-          v-for="t in ['scanning', 'diagnostics', 'automation', 'packets']"
+          v-for="t in ['scanning', 'diagnostics', 'automation']"
           :key="t"
           @click="activeTab = (t as ActiveTab)"
           class="px-4 py-2 text-xs uppercase tracking-wider transition-colors np-subtab-btn"
           :class="{ 'active': activeTab === t }"
         >
-          {{ t === 'scanning' ? 'Port Scanner' : t === 'diagnostics' ? 'Diagnostic Probes' : t === 'automation' ? 'Automation Scripts' : 'Packet Browser' }}
+          {{ t === 'scanning' ? 'Port scanner' : t === 'diagnostics' ? 'Diagnostics' : 'Automation' }}
         </button>
       </div>
 
@@ -403,7 +402,7 @@ watch(
         <div v-if="activeTab === 'scanning'" class="space-y-5">
           <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
             <div class="md:col-span-2">
-              <label class="block text-[0.7rem] uppercase tracking-widest text-slate-400/50 mb-1.5">Target Address</label>
+              <label class="block text-[0.7rem] uppercase tracking-widest text-[var(--np-text-dim)]/50 mb-1.5">Target Address</label>
               <input
                 v-model="target"
                 type="text"
@@ -412,10 +411,10 @@ watch(
               />
             </div>
             <div>
-              <label class="block text-[0.7rem] uppercase tracking-widest text-slate-400/50 mb-1.5">Settings</label>
+              <label class="block text-[0.7rem] uppercase tracking-widest text-[var(--np-text-dim)]/50 mb-1.5">Settings</label>
               <div class="flex items-center gap-2 mt-2">
-                <input id="save" v-model="saveResults" type="checkbox" class="rounded border-slate-500/20 bg-[#0f0c1e] accent-emerald-500" />
-                <label for="save" class="text-xs text-slate-400/60">Log results to database</label>
+                <input id="save" v-model="saveResults" type="checkbox" class="rounded accent-[var(--np-accent)]" style="border-color: var(--np-border); background: var(--np-surface)" />
+                <label for="save" class="text-xs text-[var(--np-text-dim)]/60">Log results to database</label>
               </div>
             </div>
           </div>
@@ -423,10 +422,10 @@ watch(
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 pt-3">
             
             <!-- Targeted Presets -->
-            <div class="p-4 rounded-xl bg-black/20 border border-slate-600/5 space-y-4">
-              <h3 class="text-xs font-bold uppercase tracking-wider text-slate-200">Custom Targeted Scans</h3>
+            <div class="p-4 rounded-xl bg-[var(--np-thead-bg)] border border-[var(--np-border-subtle)] space-y-4">
+              <h3 class="text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">Targeted scans</h3>
               <div>
-                <label class="block text-[0.65rem] uppercase tracking-wider text-slate-400/50 mb-1.5">Scan Presets</label>
+                <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)]/50 mb-1.5">Preset</label>
                 <select v-model="preset" class="np-neon-input w-full px-3 py-2 text-sm bg-transparent outline-none">
                   <option value="ping">Ping Sweep (-sn)</option>
                   <option value="quick">Quick Ports (-F)</option>
@@ -438,7 +437,7 @@ watch(
               </div>
 
               <div v-if="preset === 'custom'">
-                <label class="block text-[0.65rem] uppercase tracking-wider text-slate-400/50 mb-1.5">Custom Nmap Flags</label>
+                <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)]/50 mb-1.5">Custom Nmap Flags</label>
                 <input v-model="customCommand" type="text" class="np-neon-input w-full px-3 py-2 text-sm font-mono" />
               </div>
 
@@ -446,18 +445,18 @@ watch(
                 <button
                   @click="runTargeted"
                   :disabled="!isAdmin || !target"
-                  class="np-cyber-btn border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-35"
+                  class="np-cyber-btn np-cyber-btn--solid disabled:opacity-50"
                 >
-                  Run Targeted Scan
+                  Run targeted scan
                 </button>
               </div>
             </div>
 
             <!-- Playbooks -->
-            <div class="p-4 rounded-xl bg-black/20 border border-slate-600/5 space-y-4">
-              <h3 class="text-xs font-bold uppercase tracking-wider text-slate-200">Predefined Security Playbooks</h3>
+            <div class="p-4 rounded-xl bg-[var(--np-thead-bg)] border border-[var(--np-border-subtle)] space-y-4">
+              <h3 class="text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">Playbooks</h3>
               <div>
-                <label class="block text-[0.65rem] uppercase tracking-wider text-slate-400/50 mb-1.5">Select Playbook</label>
+                <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)]/50 mb-1.5">Playbook</label>
                 <select v-model="selectedPlaybookId" class="np-neon-input w-full px-3 py-2 text-sm bg-transparent outline-none" :disabled="playbooksLoading">
                   <option v-for="pb in playbooks" :key="pb.id" :value="pb.id">
                     {{ pb.category }} — {{ pb.name }}
@@ -465,22 +464,22 @@ watch(
                 </select>
               </div>
 
-              <div v-if="selectedPlaybook" class="p-3 rounded bg-white/[0.02] border border-slate-600/10 text-xs">
+              <div v-if="selectedPlaybook" class="p-3 rounded bg-[var(--np-surface-elevated)] border border-[var(--np-border-subtle)] text-xs">
                 <div class="flex items-center justify-between">
-                  <span class="font-bold text-slate-200">{{ selectedPlaybook.name }}</span>
-                  <span class="font-mono text-emerald-400 uppercase">{{ selectedPlaybook.risk_level }} RISK</span>
+                  <span class="font-bold text-[var(--np-text)]">{{ selectedPlaybook.name }}</span>
+                  <span class="font-mono np-brand-text uppercase">{{ selectedPlaybook.risk_level }} RISK</span>
                 </div>
-                <p class="text-slate-400/50 mt-1">{{ selectedPlaybook.description }}</p>
-                <p class="font-mono mt-2 text-[10px] text-slate-300/60">Args: {{ selectedPlaybook.nmap_args }}</p>
+                <p class="text-[var(--np-text-dim)]/50 mt-1">{{ selectedPlaybook.description }}</p>
+                <p class="font-mono mt-2 text-[10px] text-[var(--np-text-muted)]/60">Args: {{ selectedPlaybook.nmap_args }}</p>
               </div>
 
               <div class="flex justify-end pt-2">
                 <button
                   @click="runPlaybook"
                   :disabled="!isAdmin || !target || !selectedPlaybook"
-                  class="np-cyber-btn border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-35"
+                  class="np-cyber-btn np-cyber-btn--solid disabled:opacity-50"
                 >
-                  Run Playbook
+                  Run playbook
                 </button>
               </div>
             </div>
@@ -495,73 +494,79 @@ watch(
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             
             <!-- TCP Probe -->
-            <div class="p-4 rounded-xl bg-black/20 border border-slate-600/5 space-y-4">
+            <div class="p-4 rounded-xl bg-[var(--np-thead-bg)] border border-[var(--np-border-subtle)] space-y-4">
               <div>
-                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-200">TCP Handshake Probe</h3>
-                <p class="text-[0.65rem] text-slate-400/50 mt-1">Measures exact TCP connection response times to verify port accessibility.</p>
+                <h3 class="text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">TCP Handshake Probe</h3>
+                <p class="text-[0.65rem] text-[var(--np-text-dim)]/50 mt-1">Measures exact TCP connection response times to verify port accessibility.</p>
               </div>
 
               <div class="grid grid-cols-3 gap-3">
                 <div class="col-span-2">
-                  <label class="block text-[0.65rem] uppercase tracking-wider text-slate-400/50 mb-1">Host / IP</label>
+                  <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)]/50 mb-1">Host / IP</label>
                   <input v-model="tcpHost" type="text" placeholder="10.0.0.1" class="np-neon-input w-full px-3 py-2 text-xs" />
                 </div>
                 <div>
-                  <label class="block text-[0.65rem] uppercase tracking-wider text-slate-400/50 mb-1">Port</label>
+                  <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)]/50 mb-1">Port</label>
                   <input v-model.number="tcpPort" type="number" min="1" max="65535" class="np-neon-input w-full px-3 py-2 text-xs" />
                 </div>
               </div>
 
               <div class="flex justify-end">
-                <button @click="runTcpTest" :disabled="tcpTesting || !tcpHost" class="np-cyber-btn border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10">
-                  {{ tcpTesting ? 'Probing...' : 'Run Probe' }}
+                <button @click="runTcpTest" :disabled="tcpTesting || !tcpHost" class="np-cyber-btn np-cyber-btn--solid">
+                  {{ tcpTesting ? 'Probing…' : 'Run probe' }}
                 </button>
               </div>
 
-              <div v-if="tcpResult" class="p-3 rounded border text-xs" :class="tcpResult.error ? 'border-red-500/20 bg-red-500/5 text-red-300' : 'border-emerald-500/20 bg-emerald-500/5 text-emerald-300'">
-                <p v-if="tcpResult.error">✗ Probe failed: {{ tcpResult.error }}</p>
-                <p v-else>✓ TCP Handshake completed in <span class="font-bold font-mono">{{ tcpResult.latency_ms }} ms</span></p>
+              <div v-if="tcpResult" class="p-3 rounded text-xs" :class="tcpResult.error ? 'np-level-error' : 'np-level-info'">
+                <p v-if="tcpResult.error" class="flex items-center gap-1.5">
+                  <CircleX class="h-3.5 w-3.5 shrink-0" :stroke-width="1.7" />
+                  Probe failed: {{ tcpResult.error }}
+                </p>
+                <p v-else class="flex items-center gap-1.5">
+                  <CircleCheck class="h-3.5 w-3.5 shrink-0" :stroke-width="1.7" />
+                  TCP handshake completed in <span class="font-bold font-mono">{{ tcpResult.latency_ms }} ms</span>
+                </p>
               </div>
             </div>
 
             <!-- MTR Traceroute -->
-            <div class="p-4 rounded-xl bg-black/20 border border-slate-600/5 space-y-4">
+            <div class="p-4 rounded-xl bg-[var(--np-thead-bg)] border border-[var(--np-border-subtle)] space-y-4">
               <div class="flex items-center justify-between">
                 <div>
-                  <h3 class="text-xs font-bold uppercase tracking-wider text-slate-200">Live MTR Traceroute</h3>
-                  <p class="text-[0.65rem] text-slate-400/50 mt-1">Real-time hop latency analysis.</p>
+                  <h3 class="text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">Live MTR Traceroute</h3>
+                  <p class="text-[0.65rem] text-[var(--np-text-dim)]/50 mt-1">Real-time hop latency analysis.</p>
                 </div>
                 <div class="flex gap-2">
                   <input v-model="mtrTarget" type="text" placeholder="8.8.8.8" class="np-neon-input px-3 py-1.5 text-xs w-36 font-mono" :disabled="mtrActive" />
-                  <button v-if="!mtrActive" @click="startMtr" class="np-cyber-btn px-2.5 py-1 text-[10px] border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10">Start</button>
+                  <button v-if="!mtrActive" @click="startMtr" class="np-cyber-btn px-2.5 py-1 text-[10px] np-brand-border np-brand-text hover:np-brand-soft">Start</button>
                   <button v-else @click="stopMtr" class="np-cyber-btn px-2.5 py-1 text-[10px] border-red-500/40 text-red-400 hover:bg-red-500/10">Stop</button>
                 </div>
               </div>
 
               <div v-if="mtrError" class="text-xs text-red-400">{{ mtrError }}</div>
 
-              <div class="max-h-56 overflow-y-auto custom-scrollbar border border-slate-600/10 rounded">
+              <div class="max-h-56 overflow-y-auto custom-scrollbar border border-[var(--np-border-subtle)] rounded">
                 <table class="w-full text-[10px] font-mono text-left">
                   <thead>
-                    <tr class="bg-black/45 text-slate-400/60 border-b border-slate-600/10">
+                    <tr class="bg-[var(--np-thead-bg)] text-[var(--np-text-dim)] border-b border-[var(--np-border-subtle)]">
                       <th class="px-2 py-1.5">Hop</th>
                       <th class="px-2 py-1.5">Host</th>
                       <th class="px-2 py-1.5 text-right">Loss%</th>
                       <th class="px-2 py-1.5 text-right">Avg ms</th>
                     </tr>
                   </thead>
-                  <tbody class="divide-y divide-slate-600/5">
-                    <tr v-for="hop in mtrHops" :key="hop.hop" class="hover:bg-white/[0.02]">
-                      <td class="px-2 py-1.5 text-slate-400">{{ hop.hop }}</td>
-                      <td class="px-2 py-1.5 text-slate-100 truncate max-w-[120px]" :title="hop.host">{{ hop.host }}</td>
-                      <td class="px-2 py-1.5 text-right" :class="hop.loss_pct > 0 ? 'text-red-400' : 'text-slate-300/60'">{{ hop.loss_pct }}%</td>
-                      <td class="px-2 py-1.5 text-right text-emerald-400 font-bold">{{ hop.avg_ms }}</td>
+                  <tbody class="divide-y divide-[var(--np-border-subtle)]">
+                    <tr v-for="hop in mtrHops" :key="hop.hop" class="hover:bg-[var(--np-surface-elevated)]">
+                      <td class="px-2 py-1.5 text-[var(--np-text-dim)]">{{ hop.hop }}</td>
+                      <td class="px-2 py-1.5 text-[var(--np-text)] truncate max-w-[120px]" :title="hop.host">{{ hop.host }}</td>
+                      <td class="px-2 py-1.5 text-right" :class="hop.loss_pct > 0 ? 'text-red-400' : 'text-[var(--np-text-muted)]/60'">{{ hop.loss_pct }}%</td>
+                      <td class="px-2 py-1.5 text-right np-brand-text font-bold">{{ hop.avg_ms }}</td>
                     </tr>
                     <tr v-if="mtrHops.length === 0 && !mtrActive">
-                      <td colspan="4" class="text-center py-4 text-slate-400/30">Traceroute idle. Press Start.</td>
+                      <td colspan="4" class="text-center py-4 text-[var(--np-text-dim)]/30">Traceroute idle. Press Start.</td>
                     </tr>
                     <tr v-else-if="mtrHops.length === 0 && mtrActive">
-                      <td colspan="4" class="text-center py-4 text-emerald-400/50 animate-pulse">Running traceroute sweep...</td>
+                      <td colspan="4" class="text-center py-4 np-brand-text/50 animate-pulse">Running traceroute sweep…</td>
                     </tr>
                   </tbody>
                 </table>
@@ -578,11 +583,11 @@ watch(
           <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
             
             <!-- Left Side: Controls -->
-            <div class="lg:col-span-1 p-4 rounded-xl bg-black/20 border border-slate-600/5 space-y-4">
-              <h3 class="text-xs font-bold uppercase tracking-wider text-slate-200">Run Python Automation</h3>
+            <div class="lg:col-span-1 p-4 rounded-xl bg-[var(--np-thead-bg)] border border-[var(--np-border-subtle)] space-y-4">
+              <h3 class="text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">Automation scripts</h3>
               
               <div>
-                <label class="block text-[0.65rem] uppercase tracking-wider text-slate-400/50 mb-1.5">Select Script</label>
+                <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)]/50 mb-1.5">Script</label>
                 <select v-model="selectedScript" class="np-neon-input w-full px-3 py-2 text-sm bg-transparent outline-none">
                   <option v-for="s in availableScripts" :key="s.name" :value="s.name">{{ s.name }}</option>
                   <option v-if="availableScripts.length === 0" disabled>No scripts allowed</option>
@@ -590,46 +595,48 @@ watch(
               </div>
 
               <div>
-                <label class="block text-[0.65rem] uppercase tracking-wider text-slate-400/50 mb-1.5">JSON Parameters</label>
-                <textarea v-model="scriptParams" rows="4" class="np-neon-input w-full p-3 text-xs font-mono"></textarea>
+                <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)]/50 mb-1.5">Parameters (JSON)</label>
+                <textarea
+                  v-model="scriptParams"
+                  rows="4"
+                  class="np-neon-input w-full p-3 text-xs font-mono"
+                  placeholder='{ "target": "192.168.1.10" }'
+                  spellcheck="false"
+                ></textarea>
+                <p class="mt-1 text-[0.6rem] text-[var(--np-text-dim)]/70">
+                  Sent to the script as ctx.params. Each script documents the keys it accepts, e.g. "target" or "targets".
+                </p>
               </div>
 
               <div class="flex justify-end">
                 <button
                   @click="triggerScript"
                   :disabled="!isAdmin || !selectedScript"
-                  class="np-cyber-btn border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-35"
+                  class="np-cyber-btn np-cyber-btn--solid disabled:opacity-50"
                 >
-                  Run Script Job
+                  Run script job
                 </button>
               </div>
             </div>
 
             <!-- Right Side: Script Log console -->
-            <div class="lg:col-span-2 p-4 rounded-xl bg-black/25 border border-slate-600/10 flex flex-col justify-between min-h-[300px]">
+            <div class="lg:col-span-2 p-4 rounded-xl bg-[var(--np-surface-elevated)] border border-[var(--np-border-subtle)] flex flex-col justify-between min-h-[300px]">
               <div>
-                <div class="flex items-center justify-between pb-2 border-b border-slate-600/10 mb-3">
-                  <h3 class="text-xs font-bold uppercase tracking-wider text-slate-200">Job Output Console</h3>
+                <div class="flex items-center justify-between pb-2 border-b border-[var(--np-border-subtle)] mb-3">
+                  <h3 class="text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">Job Output Console</h3>
                   <span v-if="scriptJobStatus" class="px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase"
-                    :class="scriptJobStatus === 'running' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-                             scriptJobStatus === 'completed' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                    :class="scriptJobStatus === 'running' ? 'np-brand-soft np-brand-text border np-brand-border' :
+                             scriptJobStatus === 'completed' ? 'np-brand-soft np-brand-text border np-brand-border' :
                              'bg-red-500/20 text-red-400 border border-red-500/30'"
                   >
                     {{ scriptJobStatus }}
                   </span>
                 </div>
-                <pre class="text-[10px] font-mono leading-relaxed text-slate-300/80 max-h-60 overflow-y-auto custom-scrollbar whitespace-pre-wrap p-2 rounded bg-black/40 border border-slate-600/5">{{ scriptLogs || 'Select a script and start the job to view log telemetry.' }}</pre>
+                <pre class="text-[10px] font-mono leading-relaxed text-[var(--np-text-muted)] max-h-60 overflow-y-auto custom-scrollbar whitespace-pre-wrap p-2 rounded bg-[var(--np-surface-elevated)] border border-[var(--np-border-subtle)]">{{ scriptLogs || 'Select a script and start the job to view log telemetry.' }}</pre>
               </div>
             </div>
 
           </div>
-        </div>
-
-        <!-- ======================================= -->
-        <!-- TAB 4: PACKET BROWSER                   -->
-        <!-- ======================================= -->
-        <div v-if="activeTab === 'packets'">
-          <PacketBrowser :theme="props.theme" />
         </div>
 
       </div>
@@ -637,19 +644,19 @@ watch(
 
     <!-- Collapsible Live Terminal Drawer at Bottom -->
     <div 
-      class="fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 bg-[var(--np-glass-bg)] border-t border-slate-600/20 backdrop-blur-lg shadow-2xl flex flex-col"
+      class="fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 bg-[var(--np-glass-bg)] border-t border-[var(--np-border)] backdrop-blur-lg shadow-2xl flex flex-col"
       :style="{ transform: isTerminalOpen ? 'translateY(0)' : 'translateY(calc(100% - 40px))', height: '280px' }"
     >
       <!-- Drag/Toggle strip -->
       <div 
         @click="isTerminalOpen = !isTerminalOpen" 
-        class="h-10 px-6 flex items-center justify-between cursor-pointer border-b border-slate-600/10 select-none bg-black/40"
+        class="h-10 px-6 flex items-center justify-between cursor-pointer border-b border-[var(--np-border-subtle)] select-none bg-[var(--np-surface-elevated)]"
       >
-        <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-200">
-          <span class="w-1.5 h-1.5 rounded-full" :class="currentScanId ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400/30'"></span>
+        <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">
+          <span class="w-1.5 h-1.5 rounded-full" :class="currentScanId ? 'np-brand-bg animate-pulse' : 'bg-[var(--np-text-dim)]/30'"></span>
           <span>Live Nmap &amp; Diagnostic Console</span>
         </div>
-        <button class="text-[10px] font-mono text-slate-400 hover:text-emerald-400">
+        <button class="text-[10px] font-mono text-[var(--np-text-dim)] hover:np-brand-text">
           {{ isTerminalOpen ? '[ Minimize Console ]' : '[ Expand Console ]' }}
         </button>
       </div>

@@ -9,6 +9,8 @@ Provides:
 """
 
 import asyncio
+import json
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Set
@@ -18,6 +20,7 @@ from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import resolve_user_from_subject
 from app.core.config import settings
 from app.db.session import async_session_factory
 from app.models.metric import Metric
@@ -28,6 +31,53 @@ from app.models.user import User, UserRole
 router = APIRouter()
 
 metrics_clients: Set[WebSocket] = set()
+
+# --- SSH console state -------------------------------------------------------
+# Host keys pinned on first use, keyed by "ip:port": the key material plus the
+# fingerprint shown to the operator when it was trusted. Written to disk so a
+# restart does not silently re-trust whatever answers on that address next
+# time — an in-memory map would make every reboot a fresh first use.
+_pinned_host_keys: dict[str, dict[str, str]] = {}
+_pinned_hosts_path = Path(settings.ssh_known_hosts_file)
+
+# Open sessions per user id. Bumped before connect, released in `finally`.
+_session_slots: dict[int, int] = {}
+
+
+def _load_pinned_hosts() -> None:
+    """Read previously pinned keys; a missing or corrupt file is not fatal."""
+    try:
+        data = json.loads(_pinned_hosts_path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            _pinned_host_keys.update(
+                {
+                    str(k): {str(kk): str(vv) for kk, vv in v.items()}
+                    for k, v in data.items()
+                    if isinstance(v, dict)
+                }
+            )
+    except FileNotFoundError:
+        pass
+    except Exception as exc:  # noqa: BLE001 - bad file must not block logins
+        logging.getLogger("app.ws.ssh").warning(
+            "Could not read %s: %s", _pinned_hosts_path, exc
+        )
+
+
+def _save_pinned_hosts() -> None:
+    """Persist pins atomically so a crash mid-write cannot empty the file."""
+    try:
+        _pinned_hosts_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _pinned_hosts_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(_pinned_host_keys, indent=2), encoding="utf-8")
+        tmp.replace(_pinned_hosts_path)
+    except Exception as exc:  # noqa: BLE001 - never break the session for this
+        logging.getLogger("app.ws.ssh").warning(
+            "Could not persist SSH host keys: %s", exc
+        )
+
+
+_load_pinned_hosts()
 
 
 async def _get_user_from_token(token: str, db: AsyncSession) -> User | None:
@@ -41,12 +91,13 @@ async def _get_user_from_token(token: str, db: AsyncSession) -> User | None:
     except JWTError:
         return None
 
-    email = payload.get("sub")
-    if not email:
+    subject = payload.get("sub") or ""
+    if not subject:
         return None
 
-    result = await db.execute(select(User).where(User.email == email))
-    return result.scalar_one_or_none()
+    # Same resolution as the REST dependency: id-based subjects first, with
+    # the legacy email form as a fallback.
+    return await resolve_user_from_subject(db, subject)
 
 
 @router.websocket("/scripts/{job_id}")
@@ -329,23 +380,60 @@ async def websocket_metrics(websocket: WebSocket) -> None:
 
 @router.websocket("/ssh")
 async def websocket_ssh(websocket: WebSocket) -> None:
-    """Provide an interactive SSH terminal over WebSocket."""
+    """Interactive SSH terminal over WebSocket.
+
+    The credential never appears in the URL. The client opens
+    ``/api/ws/ssh?ip=…`` and immediately sends one JSON frame::
+
+        {"type": "auth", "token": "…", "username": "…",
+         "password": "…", "port": 22}
+
+    so neither the password nor the bearer token lands in an access log,
+    a proxy log or browser history.
+    """
     await websocket.accept()
 
-    token = websocket.query_params.get("token")
     ip = websocket.query_params.get("ip")
-    username = websocket.query_params.get("username", "admin")
-    password = websocket.query_params.get("password", "")
-    port_str = websocket.query_params.get("port", "22")
+    if not ip:
+        await websocket.send_text("\r\n[error] Missing target IP address.\r\n")
+        await websocket.close(code=4400)
+        return
 
-    if not token or not ip:
-        await websocket.send_text("\r\n[error] Missing token or target IP address.\r\n")
+    # First frame must be the handshake; anything else is a client that has
+    # not been updated, so close rather than guess.
+    try:
+        handshake = json.loads(await asyncio.wait_for(websocket.receive_text(), timeout=15))
+    except Exception as exc:  # noqa: BLE001 - reported to the operator below
+        logging.getLogger("app.ws.ssh").warning(
+            "SSH handshake failed from %s: %s: %s",
+            websocket.client.host if websocket.client else "?",
+            type(exc).__name__,
+            exc,
+        )
+        await websocket.send_text(
+            "\r\n[error] No credentials received. This console expects an auth "
+            "frame as its first message.\r\n"
+        )
+        await websocket.close(code=4400)
+        return
+
+    if not isinstance(handshake, dict) or handshake.get("type") != "auth":
+        await websocket.send_text("\r\n[error] First frame must be an auth message.\r\n")
+        await websocket.close(code=4400)
+        return
+
+    token = handshake.get("token") or ""
+    username = str(handshake.get("username") or "")
+    password = str(handshake.get("password") or "")
+
+    if not token or not ip or not username:
+        await websocket.send_text("\r\n[error] Missing token, username or target IP address.\r\n")
         await websocket.close(code=4400)
         return
 
     try:
-        port = int(port_str)
-    except ValueError:
+        port = int(handshake.get("port", 22))
+    except (TypeError, ValueError):
         await websocket.send_text("\r\n[error] Invalid port number.\r\n")
         await websocket.close(code=4400)
         return
@@ -357,13 +445,89 @@ async def websocket_ssh(websocket: WebSocket) -> None:
             await websocket.close(code=4401)
             return
 
+        # An interactive shell on network gear is a write-capable action; a
+        # read-only viewer must not get one. Mirrors the scripts socket.
+        if user.role != UserRole.ADMIN:
+            await websocket.send_text("\r\n[error] Your role cannot open console sessions.\r\n")
+            await websocket.close(code=4403)
+            return
+        user_id = user.id
+
+    # Imported here so the rest of the module does not pay for paramiko.
+    # Everything used above (json, logging) is imported at module scope:
+    # a function-local `import logging` shadows the module name for the whole
+    # function and turns an earlier `logging.getLogger(...)` into an
+    # UnboundLocalError, which is exactly what masked the real bug here.
     import paramiko
-    import json
-    import logging
+    import base64
+    import hashlib
+
     logger = logging.getLogger("app.ws.ssh")
 
+    # --- Concurrent session cap ------------------------------------------------
+    # Each session holds a worker thread plus a socket; without a ceiling one
+    # account can pin every thread the process has.
+    _session_slots.setdefault(user_id, 0)
+    if _session_slots[user_id] >= settings.max_ssh_sessions_per_user:
+        await websocket.send_text(
+            f"\r\n[error] Session limit reached "
+            f"({settings.max_ssh_sessions_per_user} per account). Close one and retry.\r\n"
+        )
+        await websocket.close(code=4429)
+        return
+    _session_slots[user_id] += 1
+
+    # --- Host key pinning -------------------------------------------------------
+    cache_key = f"{ip}:{port}"
+
+    class _PinnedKeyPolicy(paramiko.MissingHostKeyPolicy):
+        """Trust on first use, then refuse any change.
+
+        paramiko calls this for every key it has not been told about. The first
+        one is recorded together with its fingerprint; a later key that differs
+        means the box was replaced or someone is between us and it, so the
+        connection is refused instead of silently accepted.
+        """
+
+        fingerprint: str | None = None
+
+        def missing_host_key(self, client, hostname, key):  # noqa: ANN001
+            blob = key.get_base64()
+            digest = base64.b64encode(
+                hashlib.sha256(key.asbytes()).digest()
+            ).decode().rstrip("=")
+            fingerprint = f"SHA256:{digest}"
+
+            pinned = _pinned_host_keys.get(cache_key)
+            if pinned is not None:
+                if pinned.get("key") != blob:
+                    raise paramiko.SSHException(
+                        f"Host key for {cache_key} does not match the pinned key "
+                        f"({pinned.get('fingerprint', 'recorded')}). Refusing to connect."
+                    )
+                self.fingerprint = pinned.get("fingerprint")
+                return
+
+            if not settings.ssh_trust_on_first_use:
+                raise paramiko.SSHException(
+                    f"Unknown host key for {cache_key} and trust-on-first-use is "
+                    "disabled. Pin the key before connecting."
+                )
+
+            _pinned_host_keys[cache_key] = {"key": blob, "fingerprint": fingerprint}
+            _save_pinned_hosts()
+            self.fingerprint = fingerprint
+            logger.warning(
+                "SSH host key pinned for %s: %s (%s)",
+                cache_key,
+                fingerprint,
+                key.get_name(),
+            )
+
+    policy = _PinnedKeyPolicy()
+
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client.set_missing_host_key_policy(policy)
 
     await websocket.send_text(f"\r\nConnecting to {username}@{ip}:{port}...\r\n")
 
@@ -373,7 +537,9 @@ async def websocket_ssh(websocket: WebSocket) -> None:
             port=port,
             username=username,
             password=password,
-            timeout=10,
+            timeout=settings.ssh_connect_timeout,
+            banner_timeout=settings.ssh_connect_timeout,
+            auth_timeout=settings.ssh_connect_timeout,
             allow_agent=False,
             look_for_keys=False
         )
@@ -385,28 +551,29 @@ async def websocket_ssh(websocket: WebSocket) -> None:
         await websocket.send_text(f"\r\n[error] Connection failed: {e}\r\n")
         await websocket.close(code=1011)
         client.close()
+        _session_slots[user_id] = max(_session_slots.get(user_id, 1) - 1, 0)
         return
+
+    # Show the key we pinned (or matched) so it can be compared with what the
+    # device itself displays before anything sensitive is typed.
+    if policy.fingerprint:
+        await websocket.send_text(f"\r\nHost key ({cache_key}): {policy.fingerprint}\r\n")
 
     await websocket.send_text("Connected!\r\n\r\n")
 
-    chan.setblocking(0)
-
     async def shell_reader():
+        """Push channel output to the socket by blocking, not by polling."""
         try:
             while True:
-                def _read():
-                    if chan.recv_ready():
-                        return chan.recv(4096)
-                    return None
-
-                data = await asyncio.to_thread(_read)
-                if data:
-                    await websocket.send_text(data.decode("utf-8", errors="replace"))
-                elif chan.exit_status_ready():
+                # recv() blocks until the remote sends something or the session
+                # ends, so an idle console costs no CPU. The previous build
+                # woke a worker thread fifty times a second for every open
+                # session, which is measurable on a small box.
+                data = await asyncio.to_thread(chan.recv, 4096)
+                if not data:
                     await websocket.send_text("\r\n[session closed by remote host]\r\n")
                     break
-                else:
-                    await asyncio.sleep(0.02)
+                await websocket.send_text(data.decode("utf-8", errors="replace"))
         except Exception as exc:
             logger.error(f"SSH reader error: {exc}")
         finally:
@@ -442,4 +609,8 @@ async def websocket_ssh(websocket: WebSocket) -> None:
                 pass
             client.close()
 
-    await asyncio.gather(shell_reader(), ws_reader())
+    try:
+        await asyncio.gather(shell_reader(), ws_reader())
+    finally:
+        # Always hand the slot back, even when the socket or channel dies.
+        _session_slots[user_id] = max(_session_slots.get(user_id, 1) - 1, 0)

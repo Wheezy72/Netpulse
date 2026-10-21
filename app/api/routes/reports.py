@@ -50,6 +50,27 @@ def _generate_short_name(report_type: str, date_range_days: int = 7) -> str:
     return f"NetReport_{date_range}_{year}"
 
 
+def _device_is_online(device: Any, window_minutes: int = 10) -> bool:
+    """A device counts as online when it was seen in the last few minutes.
+
+    ``Device`` has no ``is_online`` column; deriving it from ``last_seen`` is
+    the same rule the Devices view uses, and keeps the report honest instead
+    of raising AttributeError.
+    """
+    last_seen = getattr(device, "last_seen", None)
+    if last_seen is None:
+        return False
+    if last_seen.tzinfo is not None:
+        now = datetime.now(last_seen.tzinfo)
+    else:
+        now = datetime.utcnow()
+    try:
+        return (now - last_seen).total_seconds() <= window_minutes * 60
+    except TypeError:
+        # Mixed naive/aware datetimes — compare as naive UTC.
+        return (datetime.utcnow().replace(tzinfo=None) - last_seen.replace(tzinfo=None)).total_seconds() <= window_minutes * 60
+
+
 def _generate_pdf_content(
     report_type: str,
     title: str,
@@ -176,14 +197,14 @@ def _generate_pdf_content(
             elements.append(Paragraph("Device Inventory", heading_style))
             elements.append(HRFlowable(width="30%", thickness=1, color=np_indigo, spaceAfter=10))
 
-            online_count = sum(1 for d in devices if d.is_online)
+            online_count = sum(1 for d in devices if _device_is_online(d))
             offline_count = len(devices) - online_count
             elements.append(Paragraph(f"<b>Online:</b> {online_count} | <b>Offline:</b> {offline_count}", subheading_style))
             elements.append(Spacer(1, 8))
 
             table_data = [['Hostname', 'IP Address', 'Status', 'Type']]
             for device in devices[:20]:
-                status = 'Online' if device.is_online else 'Offline'
+                status = 'Online' if _device_is_online(device) else 'Offline'
                 table_data.append([
                     device.hostname or 'Unknown',
                     device.ip_address or '-',

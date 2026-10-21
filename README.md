@@ -18,6 +18,18 @@ A self-hosted network monitoring console for home labs and enterprise NOC/SOC te
 
 ---
 
+## Requirements
+
+| Component | Why |
+|---|---|
+| **nmap** | Required. Scanning, discovery and service detection all run through it; the API reports degraded health and refuses scan jobs without it. |
+| **PostgreSQL 13+** | Inventory, scans, users, metrics. |
+| **Redis or Memurai** | Login rate limiting and the session cache. Memurai is the Windows build. |
+
+The Docker image installs nmap, and both setup scripts install or verify it.
+
+---
+
 ## Quick Start (Docker)
 
 > **Recommended** - One command, everything works.
@@ -38,9 +50,8 @@ bash scripts/docker_reset.sh
 ```
 
 **What you get:**
-- PostgreSQL + pgbouncer + Redis (auto-configured)
+- PostgreSQL + Redis (auto-configured)
 - Backend API with nmap / Scapy / Zeek / packet capture
-- Rust data-plane probe — passive packet capture → RabbitMQ → InfluxDB
 - Frontend ready to go
 
 **Verify Zeek is available:**
@@ -56,22 +67,31 @@ Edit `.env` (copied from `.env.example`) to override defaults:
 
 ```env
 SECRET_KEY=your-secure-secret-key
-PROBE_IFACE=eth0                    # interface for the Rust probe
-RABBITMQ_PASSWORD=netpulse
-INFLUXDB_TOKEN=netpulse-influx-token
 
-# Optional alerts
+# Database (used when DATABASE_URL is not set)
+POSTGRES_USER=netpulse
+POSTGRES_PASSWORD=change-me
+POSTGRES_DB=netpulse
+
+# Redis or Memurai: rate limiting and session cache
+REDIS_URL=redis://localhost:6379/0
+
+# Optional email alerts
 ENABLE_EMAIL_ALERTS=false
-ENABLE_WHATSAPP_ALERTS=false
 
 # Optional AI assistant
-# OPENAI_API_KEY=sk-...
-# ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=your-key-here
+# ANTHROPIC_API_KEY=your-key-here
 ```
 
 </details>
 
-**Upgrades:** Non-destructive database upgrades are SQL files in `migrations/` — apply them to an existing DB volume when updating.
+**Upgrades:** Non-destructive database upgrades are SQL files in `migrations/`. Apply them to an existing database when updating, for example:
+
+```bash
+python scripts/apply_email_nullable.py   # users.email becomes nullable
+psql "$DATABASE_URL" -f migrations/20261020_users_role_admin_viewer.sql
+```
 
 ---
 
@@ -99,6 +119,22 @@ scripts\windows_run_stack.bat
 
 ---
 
+## Run Without Docker (manual)
+
+Two terminals from the repository root work just as well as the launcher script. Postgres and Redis (or Memurai) must already be running.
+
+```bash
+# terminal 1: API
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# terminal 2: UI (Vite proxies /api to port 8000)
+cd frontend && npm run dev
+```
+
+Vite binds the first free port from 6969, 6970, 8888 and 9999 and prints it. Celery is only needed for scheduled scans, report generation and the audit log; the API runs without it.
+
+---
+
 ## Development
 
 ### Python backend
@@ -115,35 +151,22 @@ vulture app/ vulture_whitelist.py --min-confidence 80
 pytest tests/ -v
 ```
 
-### Rust data-plane probe (`probes/`)
-
-```bash
-cd probes
-
-cargo test           # run all unit tests
-cargo fmt            # format code
-cargo clippy         # lint (zero-warning policy)
-```
-
-> **Note:** `libpcap-dev` must be installed for the probe to compile (`sudo apt install libpcap-dev` on Debian/Ubuntu).
-
 ### CI (GitHub Actions)
 
 | Job | What it checks |
 |---|---|
 | `lint-python` | ruff + vulture |
 | `test-python` | pytest unit tests |
-| `lint-test-rust` | cargo fmt + clippy + test |
 | `docker-build` | all images build cleanly |
 
 ---
 
 ## Pick Your Vibe
 
-| <img width="20" src="https://img.shields.io/badge/-00f3ff?style=flat-square"/> **Cyberdeck** | <img width="20" src="https://img.shields.io/badge/-6366f1?style=flat-square"/> **Sysadmin Pro** |
+| <img width="20" src="https://img.shields.io/badge/-00f3ff?style=flat-square"/> **Nightshade** | <img width="20" src="https://img.shields.io/badge/-6366f1?style=flat-square"/> **SysAdmin** |
 |:---:|:---:|
-| Neon cyan/purple | Clean indigo/slate |
-| Subtle animations | Static, professional |
+| Near-black surfaces, emerald accent | White surfaces, indigo accent |
+| Dark by default | Light by default |
 
 ---
 
@@ -154,15 +177,16 @@ cargo clippy         # lint (zero-warning policy)
 <td width="50%">
 
 **Scanning**
-- Nmap with 12+ presets
-- AI command generator
-- Multi-select playbooks
+- nmap profiles with flags chosen for the local install
+- Vulnerability scripts matched to what is actually installed
+- Playbooks for repeatable checks
 
 </td>
 <td width="50%">
 
 **Monitoring**
 - Live device discovery
+- ICMP ping status with latency per device
 - Real-time WebSocket metrics
 - Network topology maps
 
@@ -173,7 +197,8 @@ cargo clippy         # lint (zero-warning policy)
 
 **Security**
 - Vulnerability scanning
-- Threat intel (AbuseIPDB)
+- Two roles: admin and viewer
+- Self-service password change and email attachment
 - Rate limiting (Redis-backed)
 
 </td>
@@ -194,20 +219,28 @@ cargo clippy         # lint (zero-warning policy)
 *   **Smart Gateway Detection**: Dynamic, container-aware gateway detection. On container startup, Netpulse performs a low-TTL traceroute probe to escape Docker bridge networks and identify the host's physical default gateway.
 *   **Automated Defensive SOAR Playbooks**: Integrated mitigation actions including automated Access Port Isolation (CAM-based port shutdown), Rogue DHCP Server mitigation (ACL block + DHCP Snooping trust), and BGP Peer Isolation.
 *   **Uplink/Trunk Safety Guards**: Destructive playbook operations (like port isolation) contain active verification checks to ensure we never disable a critical link/uplink/trunk interface, keeping networks safe from accidental wide-scale outages in vital infrastructure like hospitals or banks.
-*   **Offline "Backup Friend" Assistant**: Sandbox-compliant disaster recovery page featuring local IndexedDB database sync, client-side fuzzy searching, regex-driven router/switch config hardening auditing, active CLI validator console, and offline SVG-rendered topology map.
 *   **Modern Cryptography**: Direct use of `argon2-cffi` for password hashing and HMAC-SHA256 signature verification for peer-to-peer instance traffic.
 *   **Optimized Docker Images**: Small container footprint using multi-stage builds and automated cleanup.
+
+---
+
+## What changed recently
+
+- Removed the Threat Intelligence (AbuseIPDB) and WhatsApp integrations, along with their settings.
+- nmap is now a hard requirement; scan profiles are planned from the capabilities of the installed nmap, including which vulnerability scripts exist.
+- The dashboard reports live ping status instead of a device-role breakdown.
+- Accounts can be created with a username only, and an email can be attached later in Settings, which is what enables password recovery. Passwords can be changed from the same place.
+- Removed the non-functional view-density setting and the Wireshark button; Settings is now in the top bar.
+- RBAC is now two roles, admin and viewer.
 
 ---
 
 ## Stack
 
 ```
-Backend      → FastAPI + PostgreSQL + Scapy + Nmap + Zeek
+Backend      → FastAPI + PostgreSQL + Scapy + nmap (required) + Zeek
 Frontend     → Vue 3 + TypeScript + Tailwind
-Data-plane   → Rust probe (pcap + pnet + lapin → RabbitMQ)
-Time-series  → InfluxDB
-AI           → OpenAI / Anthropic / Google
+AI           → OpenAI / Anthropic (optional)
 Deploy       → Docker Compose (recommended)
 ```
 

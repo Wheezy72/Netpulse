@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-import inspect
 import ipaddress
 import json
 import re
@@ -287,23 +286,23 @@ class SubprocessContext:
         self.params = params
         self.network = NetworkTools()
         self.db = None
-    
+
     def logger(self, message):
         print(f"[LOG] {{message}}", flush=True)
 
 async def main():
     script_path = Path({repr(str(script_path.resolve().as_posix()))})
     params = json.loads({repr(json.dumps(job.params or {}))})
-    
+
     spec = importlib.util.spec_from_file_location("run_module", str(script_path))
     if spec is None or spec.loader is None:
         print("[ERROR] Could not load script spec", file=sys.stderr, flush=True)
         sys.exit(1)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    
+
     ctx = SubprocessContext({job.id}, params)
-    
+
     try:
         import inspect
         if inspect.iscoroutinefunction(module.run):

@@ -10,11 +10,9 @@ This guide covers setup, development, and deployment of NetPulse Enterprise — 
 |-------|-----------|---------|
 | **Backend** | FastAPI (Python 3.11+) | Async REST API, SQLAlchemy ORM |
 | **Frontend** | Vue 3 + TypeScript + Vite | Tailwind CSS, ECharts, Cytoscape.js |
-| **Database** | PostgreSQL 16 + pgbouncer | Connection pooling via pgbouncer |
+| **Database** | PostgreSQL 16 (TimescaleDB image) | Primary data store |
 | **Auth** | JWT + Argon2id | RBAC (admin/viewer), Redis session cache |
-| **Background** | Celery Beat + Workers | Latency monitoring, uptime checks (Redis broker) |
-| **Data-plane probe** | Rust (pcap + pnet + lapin) | Passive packet capture → RabbitMQ → InfluxDB |
-| **Time-series** | InfluxDB 2.7 | Probe telemetry and network metrics |
+| **Background** | Celery Worker (embedded beat) | Latency monitoring, uptime checks (Redis broker) |
 | **AI (optional)** | OpenAI / Anthropic / Google | Chatbot, device analysis, smart command builder |
 
 ---
@@ -181,9 +179,28 @@ Themes use CSS custom properties (`--np-accent-primary`, `--np-border`, `--np-su
 - ERROR/CRITICAL logs hidden — toggle to reveal, click to expand
 - Search and level filtering
 
+### Syslog receiver
+An on-demand UDP collector for device logs, not a full syslog daemon.
+
+1. An admin starts it with `POST /api/syslog/start` (or the Logs page control). A UDP
+   listener binds `0.0.0.0:1514`, so port 1514 rather than 514: no root needed and no
+   collision with the host's own syslog daemon.
+2. Point network devices at `udp/<netpulse-host>:1514` (switches, routers, Linux rsyslog).
+3. Each datagram's `<PRI>` header is decoded into facility and severity; the timestamp,
+   hostname and message body are extracted when present (RFC 3164 style).
+4. Parsed events are stored in `syslog_events` (`timestamp`, `source_ip`, `facility`,
+   `severity`, `hostname`, `message`).
+5. `GET /api/syslog/messages` returns them paginated with severity, source and text
+   filters; `GET /status` reports running state and count; `DELETE /messages` clears.
+
+Limits: UDP only (no TCP/TLS, so no delivery guarantee and no encryption), no RFC 5424
+structured data, no per-source rate limiting, and the listener state is process-local, so
+a backend restart means it must be started again.
+
 ### Settings
-- Tabbed interface: General, AI, Alerts, Network, Scheduler, Threat Intel
-- AbuseIPDB integration for IP reputation
+- Tabbed interface: General, Account, Alerts, Network, Scheduler, Backup
+- Account: attach or change your own email (password recovery needs one) and change your password
+- Email is the only alert channel; WhatsApp and AbuseIPDB were removed
 
 ### AI Chatbot
 - Floating chat drawer with built-in knowledge base
@@ -251,7 +268,6 @@ If you run the web server without `celery_worker` + `celery_beat`, dashboards wi
 | `CORS_ALLOW_ORIGINS` | Allowed CORS origins | `["http://localhost:5000"]` |
 | `OPENAI_API_KEY` | OpenAI API key for AI assistant features | (optional) |
 | `ANTHROPIC_API_KEY` | Anthropic API key for AI assistant features | (optional) |
-| `ABUSEIPDB_API_KEY` | AbuseIPDB API key | (optional) |
 
 ---
 
@@ -272,15 +288,10 @@ docker-compose up -d --build
 
 | Service | Image | Port | Description |
 |---------|-------|------|-------------|
-| `db` | postgres:16-alpine | 5432 (internal) | PostgreSQL with health check |
-| `pgbouncer` | bitnami/pgbouncer | 5432 | Connection pooler |
-| `redis` | redis:7-alpine | 6379 (internal) | Celery broker/backend |
-| `rabbitmq` | rabbitmq:3.13-management | 5672 / 15672 | Message broker for probe telemetry |
-| `influxdb` | influxdb:2.7-alpine | 8086 | Time-series metrics store |
+| `db` | timescale/timescaledb:latest-pg16 | 127.0.0.1:5432 | PostgreSQL with health check |
+| `redis` | redis:7-alpine | 127.0.0.1:6379 | Celery broker/backend |
 | `app` | Custom (multi-stage) | 8000 | Backend + built frontend |
-| `celery_worker` | Custom (multi-stage) | (none) | Executes background jobs |
-| `celery_beat` | Custom (multi-stage) | (none) | Schedules periodic jobs |
-| `probe` | Custom Rust (multi-stage) | (none) | Passive packet capture → RabbitMQ |
+| `celery_worker` | Custom (multi-stage) | (none) | Executes background jobs + schedules periodic jobs (`--beat`) |
 
 ### Environment Configuration
 

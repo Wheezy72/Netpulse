@@ -2,6 +2,9 @@
 import axios from "axios";
 import { computed, onMounted, onUnmounted, ref, nextTick } from "vue";
 
+import { describeRequestError } from "../utils/requestError";
+import { Eye, EyeOff, LoaderCircle } from "lucide-vue-next";
+
 type Theme = "nightshade" | "sysadmin";
 
 interface Props {
@@ -79,9 +82,15 @@ function animateCanvas() {
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // Matches the accent each theme actually paints with: emerald in the
+    // dark theme, indigo in the light one. It previously used the retired
+    // teal/amber pair, so this page glowed a colour nothing else used.
     const accentColor = isNightshade.value
-      ? { r: 20, g: 184, b: 166 }
-      : { r: 245, g: 158, b: 11 };
+      ? { r: 16, g: 185, b: 129 }
+      : { r: 79, g: 70, b: 229 };
+    // On a light surface the same alpha reads as a smudge, so the field is
+    // painted stronger there to keep the page feeling alive.
+    const strength = isNightshade.value ? 1 : 2.1;
 
     for (let i = 0; i < particles.length; i++) {
       const p = particles[i];
@@ -93,7 +102,7 @@ function animateCanvas() {
 
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(${accentColor.r}, ${accentColor.g}, ${accentColor.b}, ${p.opacity})`;
+      ctx.fillStyle = `rgba(${accentColor.r}, ${accentColor.g}, ${accentColor.b}, ${Math.min(p.opacity * strength, 0.65)})`;
       ctx.fill();
 
       for (let j = i + 1; j < particles.length; j++) {
@@ -102,7 +111,7 @@ function animateCanvas() {
         const dy = p.y - p2.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist < connectionDist) {
-          const alpha = (1 - dist / connectionDist) * 0.15;
+          const alpha = (1 - dist / connectionDist) * (isNightshade.value ? 0.15 : 0.26);
           ctx.beginPath();
           ctx.moveTo(p.x, p.y);
           ctx.lineTo(p2.x, p2.y);
@@ -190,8 +199,11 @@ async function handleEmailSubmit(): Promise<void> {
     });
     successMessage.value = data.message + " Check the server console for the reset token.";
     step.value = "token";
-  } catch {
-    errorMessage.value = "Could not send a reset token. Check your email and try again.";
+  } catch (error) {
+    errorMessage.value = describeRequestError(
+      error,
+      "Could not send a reset token. Check your email and try again."
+    );
   } finally {
     isSubmitting.value = false;
   }
@@ -224,8 +236,8 @@ async function handleResetSubmit(): Promise<void> {
     setTimeout(() => {
       emit("switch-to-login");
     }, 2000);
-  } catch (e: any) {
-    errorMessage.value = e.response?.data?.detail || "Reset failed. Check your token and try again.";
+  } catch (error) {
+    errorMessage.value = describeRequestError(error, "Reset failed. Check your token and try again.");
   } finally {
     isSubmitting.value = false;
   }
@@ -259,25 +271,25 @@ async function handleResetSubmit(): Promise<void> {
           <h1 class="np-login-title text-2xl tracking-wide mb-1">
             <span>{{ typedTitle }}</span><span
               class="inline-block w-[2px] h-[1.1em] ml-[2px] align-middle"
-              :class="isNightshade ? 'bg-teal-400' : 'bg-amber-400'"
+              :class="'bg-[var(--np-accent)]'"
               :style="{ opacity: showCursor ? 1 : 0 }"
             />
           </h1>
-          <p class="text-xs font-mono" :class="isNightshade ? 'text-teal-300/50' : 'text-slate-400'">
+          <p class="text-xs text-[var(--np-text-dim)]">
             {{ step === "email" ? "Password Recovery" : "Set New Password" }}
           </p>
         </div>
 
         <!-- Step 1: Email -->
         <form v-if="step === 'email'" class="space-y-5" @submit.prevent="handleEmailSubmit">
-          <p class="text-xs" :class="isNightshade ? 'text-gray-400' : 'text-slate-400'">
+          <p class="text-xs" :class="isNightshade ? 'text-gray-400' : 'text-[var(--np-text-dim)]'">
             Enter your account email. A one-time reset token will be printed to the server console.
           </p>
 
           <div>
             <label
               class="block text-xs uppercase tracking-wider mb-2 font-mono"
-              :class="isNightshade ? 'text-gray-400' : 'text-slate-400'"
+              :class="isNightshade ? 'text-gray-400' : 'text-[var(--np-text-dim)]'"
             >
               Email
             </label>
@@ -285,8 +297,8 @@ async function handleResetSubmit(): Promise<void> {
               v-model="forgotEmail"
               type="email"
               autocomplete="email"
-              class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 text-sm font-mono"
-              placeholder="operator@netpulse.local"
+              class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 text-sm"
+              placeholder="you@netpulse.local"
             />
           </div>
 
@@ -295,10 +307,7 @@ async function handleResetSubmit(): Promise<void> {
             class="np-cyber-btn np-btn-shimmer w-full rounded-lg px-4 py-3 text-sm font-medium flex items-center justify-center gap-2"
             :disabled="isSubmitting"
           >
-            <svg v-if="isSubmitting" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-            </svg>
+              <LoaderCircle v-if="isSubmitting" class="w-4 h-4 animate-spin" :stroke-width="1.7" />
             <span>{{ isSubmitting ? "Sending…" : "Send Reset Token" }}</span>
           </button>
 
@@ -307,17 +316,17 @@ async function handleResetSubmit(): Promise<void> {
 
         <!-- Step 2: Token + new password -->
         <form v-else class="space-y-4" @submit.prevent="handleResetSubmit">
-          <p v-if="successMessage" class="text-xs text-center" :class="isNightshade ? 'text-teal-300' : 'text-amber-300'">
+          <p v-if="successMessage" class="text-xs text-center text-[var(--np-accent)]">
             {{ successMessage }}
           </p>
-          <p class="text-xs" :class="isNightshade ? 'text-gray-400' : 'text-slate-400'">
+          <p class="text-xs" :class="isNightshade ? 'text-gray-400' : 'text-[var(--np-text-dim)]'">
             Paste the token from the server console below and choose a new password.
           </p>
 
           <div>
             <label
               class="block text-xs uppercase tracking-wider mb-2 font-mono"
-              :class="isNightshade ? 'text-gray-400' : 'text-slate-400'"
+              :class="isNightshade ? 'text-gray-400' : 'text-[var(--np-text-dim)]'"
             >
               Reset Token
             </label>
@@ -325,7 +334,7 @@ async function handleResetSubmit(): Promise<void> {
               v-model="resetToken"
               type="text"
               autocomplete="off"
-              class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 text-sm font-mono"
+              class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 text-sm"
               placeholder="Paste token here"
             />
           </div>
@@ -333,7 +342,7 @@ async function handleResetSubmit(): Promise<void> {
           <div>
             <label
               class="block text-xs uppercase tracking-wider mb-2 font-mono"
-              :class="isNightshade ? 'text-gray-400' : 'text-slate-400'"
+              :class="isNightshade ? 'text-gray-400' : 'text-[var(--np-text-dim)]'"
             >
               New Password
             </label>
@@ -342,24 +351,18 @@ async function handleResetSubmit(): Promise<void> {
                 v-model="newPassword"
                 :type="showNewPassword ? 'text' : 'password'"
                 autocomplete="new-password"
-                class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 pr-11 text-sm font-mono"
+                class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 pr-11 text-sm"
                 placeholder="••••••••••••"
               />
               <button
                 type="button"
                 @click="showNewPassword = !showNewPassword"
-                class="absolute inset-y-0 right-0 flex items-center px-3"
-                :class="isNightshade ? 'text-teal-400/60 hover:text-teal-400' : 'text-amber-400/60 hover:text-amber-400'"
+                class="absolute inset-y-0 right-0 flex items-center px-3 text-[var(--np-text-dim)] hover:text-[var(--np-accent)]"
                 tabindex="-1"
                 :title="showNewPassword ? 'Hide password' : 'Show password'"
               >
-                <svg v-if="!showNewPassword" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
-                <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                </svg>
+                <Eye v-if="!showNewPassword" class="w-4 h-4" :stroke-width="1.7" />
+                <EyeOff v-else class="w-4 h-4" :stroke-width="1.7" />
               </button>
             </div>
           </div>
@@ -367,7 +370,7 @@ async function handleResetSubmit(): Promise<void> {
           <div>
             <label
               class="block text-xs uppercase tracking-wider mb-2 font-mono"
-              :class="isNightshade ? 'text-gray-400' : 'text-slate-400'"
+              :class="isNightshade ? 'text-gray-400' : 'text-[var(--np-text-dim)]'"
             >
               Confirm Password
             </label>
@@ -376,24 +379,18 @@ async function handleResetSubmit(): Promise<void> {
                 v-model="confirmPassword"
                 :type="showConfirmPassword ? 'text' : 'password'"
                 autocomplete="new-password"
-                class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 pr-11 text-sm font-mono"
+                class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 pr-11 text-sm"
                 placeholder="••••••••••••"
               />
               <button
                 type="button"
                 @click="showConfirmPassword = !showConfirmPassword"
-                class="absolute inset-y-0 right-0 flex items-center px-3"
-                :class="isNightshade ? 'text-teal-400/60 hover:text-teal-400' : 'text-amber-400/60 hover:text-amber-400'"
+                class="absolute inset-y-0 right-0 flex items-center px-3 text-[var(--np-text-dim)] hover:text-[var(--np-accent)]"
                 tabindex="-1"
                 :title="showConfirmPassword ? 'Hide password' : 'Show password'"
               >
-                <svg v-if="!showConfirmPassword" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
-                <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                </svg>
+                <Eye v-if="!showConfirmPassword" class="w-4 h-4" :stroke-width="1.7" />
+                <EyeOff v-else class="w-4 h-4" :stroke-width="1.7" />
               </button>
             </div>
           </div>
@@ -403,28 +400,24 @@ async function handleResetSubmit(): Promise<void> {
             class="np-cyber-btn np-btn-shimmer w-full rounded-lg px-4 py-3 text-sm font-medium flex items-center justify-center gap-2"
             :disabled="isSubmitting"
           >
-            <svg v-if="isSubmitting" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-            </svg>
+              <LoaderCircle v-if="isSubmitting" class="w-4 h-4 animate-spin" :stroke-width="1.7" />
             <span>{{ isSubmitting ? "Resetting…" : "Reset Password" }}</span>
           </button>
 
           <p v-if="errorMessage" class="text-center text-sm text-red-400">{{ errorMessage }}</p>
-          <p v-if="successMessage && step === 'token'" class="text-center text-sm" :class="isNightshade ? 'text-teal-300' : 'text-amber-300'">
+          <p v-if="successMessage && step === 'token'" class="text-center text-sm text-[var(--np-accent)]">
             {{ successMessage }}
           </p>
         </form>
 
         <!-- Back to login -->
-        <div class="mt-6 pt-5 border-t text-center" :class="isNightshade ? 'border-teal-500/20' : 'border-amber-500/20'">
+        <div class="mt-6 pt-5 border-t border-[var(--np-accent-border)] text-center">
           <button
             type="button"
             @click="emit('switch-to-login')"
-            class="text-sm transition-colors"
-            :class="isNightshade ? 'text-teal-400 hover:text-teal-300' : 'text-amber-400 hover:text-amber-300'"
+            class="text-[0.8rem] font-semibold text-[var(--np-accent)] transition-opacity hover:opacity-80"
           >
-            ← Back to Sign In
+            Back to sign in
           </button>
         </div>
       </div>
@@ -438,12 +431,7 @@ async function handleResetSubmit(): Promise<void> {
           class="np-status-dot"
           :class="isNightshade ? 'np-status-dot--nightshade' : 'np-status-dot--sysadmin'"
         />
-        <span
-          class="text-xs font-mono tracking-wider"
-          :class="isNightshade ? 'text-teal-400/60' : 'text-amber-400/60'"
-        >
-          Secure Connection &bull; System Online
-        </span>
+        <span class="text-[0.7rem] text-[var(--np-text-dim)]">NetPulse · self-hosted</span>
       </div>
     </div>
   </div>

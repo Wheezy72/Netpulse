@@ -18,6 +18,7 @@ frontend/dist/
 *.log
 logs/
 data/scans/
+root/
 docker/
 docker-compose.yml
 Dockerfile

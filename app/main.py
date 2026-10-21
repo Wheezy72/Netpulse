@@ -18,6 +18,7 @@ idempotent and safe to run on every boot.
 
 import asyncio
 import os
+import time
 from contextlib import asynccontextmanager, suppress
 from typing import AsyncGenerator
 
@@ -36,7 +37,7 @@ from app.api.routes import api_router
 from app.core.config import settings
 from app.core.redis import close_pool, init_pool
 from app.db.base import Base
-from app.db.session import engine, async_session_factory, get_db
+from app.db.session import engine, async_session_factory
 from app.services.passive_monitor import run_passive_monitor
 from app.services.logging_service import setup_logging
 from app.api.deps import get_password_hash
@@ -109,7 +110,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             # 1. Create all base tables
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
-            
+
             # 2. Try to setup TimescaleDB hypertable in a separate transaction
             try:
                 async with engine.begin() as conn:
@@ -146,17 +147,104 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     passive_monitor_task: asyncio.Task[None] | None = None
     peer_discovery_task: asyncio.Task[None] | None = None
     flow_collector_task: asyncio.Task[None] | None = None
+    latency_monitor_task: asyncio.Task[None] | None = None
+    scheduled_task: asyncio.Task[None] | None = None
+
+    async def _latency_loop() -> None:
+        """Sample Pulse latency/jitter/loss in-process.
+
+        Celery beat only runs in the full stack. Local/dev installs (and any
+        deployment without a worker) previously showed an empty Pulse path
+        because nothing ever wrote a metric, so the monitor also runs here.
+        """
+        from app.services.latency_monitor import monitor_latency
+
+        while True:
+            try:
+                async with async_session_factory() as session:  # type: ignore[union-attr]
+                    await monitor_latency(session)
+                    await session.commit()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # keep the loop alive
+                logging.getLogger("app.main").warning("Latency monitor tick failed: %s", exc)
+            await asyncio.sleep(10)
+
+    # Vulnerability alerts every5 minutes; the scan reminder once a day.
+    _VULN_ALERT_INTERVAL = 300
+    _SCAN_REMINDER_INTERVAL = 86400
+
+    async def _scheduled_task_loop() -> None:
+        """Run the jobs Celery beat would have scheduled.
+
+        Same reasoning as the latency loop: without a worker, nothing ever
+        evaluated the vulnerability feed or nudged anyone about scheduled
+        scans, so a no-Docker install behaved differently from the full stack.
+        """
+        from app.services.alerts import process_vulnerability_alerts, send_system_alert
+
+        log = logging.getLogger("app.main")
+        last_reminder = 0.0
+        log.info(
+            "In-process scheduler running: vulnerability alerts every %ss, "
+            "scan reminder every %ss (Celery beat not required).",
+            _VULN_ALERT_INTERVAL,
+            _SCAN_REMINDER_INTERVAL,
+        )
+
+        while True:
+            try:
+                async with async_session_factory() as session:  # type: ignore[union-attr]
+                    await process_vulnerability_alerts(session)
+                    await session.commit()
+                log.debug("Vulnerability alert sweep complete.")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # keep the loop alive
+                log.warning("Vulnerability alert tick failed: %s", exc)
+
+                # Wall clock, not the loop's monotonic clock: monotonic time starts
+            # at zero when the process starts, so a daily reminder would not
+            # fire for a full day of uptime and never at all across restarts.
+            now = time.time()
+            if now - last_reminder >= _SCAN_REMINDER_INTERVAL:
+                last_reminder = now
+                try:
+                    await send_system_alert(
+                        "[NetPulse] Scheduled scan reminder",
+                        "Time to review and run your scan playbooks.\n"
+                        "Typical actions:\n"
+                        "  - Verify recon targets are up to date.\n"
+                        "  - Run nmap profiles against critical segments.\n"
+                        "  - Check the dashboard for new vulnerabilities.",
+                        event_type="scan",
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    log.warning("Scan reminder failed: %s", exc)
+                else:
+                    log.info("Daily scan-reminder alert sent.")
+
+            await asyncio.sleep(_VULN_ALERT_INTERVAL)
+
     try:
         # Start peer discovery on the local network segment
         from app.services.peer_discovery import start_peer_discovery
         peer_discovery_task = asyncio.create_task(start_peer_discovery())
-        
+
         # Start NetFlow flow collector daemon
         from app.services.flow_collector import start_flow_collector
         flow_collector_task = asyncio.create_task(start_flow_collector())
 
         if settings.enable_passive_monitor:
             passive_monitor_task = asyncio.create_task(run_passive_monitor())
+
+        if settings.enable_latency_monitor:
+            latency_monitor_task = asyncio.create_task(_latency_loop())
+
+        if settings.enable_scheduled_tasks:
+            scheduled_task = asyncio.create_task(_scheduled_task_loop())
         yield
     finally:
         if peer_discovery_task is not None:
@@ -171,6 +259,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             passive_monitor_task.cancel()
             with suppress(asyncio.CancelledError):
                 await passive_monitor_task
+        if latency_monitor_task is not None:
+            latency_monitor_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await latency_monitor_task
+        if scheduled_task is not None:
+            scheduled_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await scheduled_task
         await engine.dispose()
         await close_pool()
 

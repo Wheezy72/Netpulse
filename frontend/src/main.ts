@@ -9,10 +9,18 @@ import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 import ECharts from "vue-echarts";
 import { use } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
-import { LineChart } from "echarts/charts";
+import { BarChart, GaugeChart, LineChart } from "echarts/charts";
 import { GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
 
-use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent]);
+use([
+  CanvasRenderer,
+  BarChart,
+  GaugeChart,
+  LineChart,
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+]);
 
 const app = createApp(App);
 

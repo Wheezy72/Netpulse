@@ -76,6 +76,26 @@ celerybeat.pid
 .config/
 attached_assets/
 
+# Agent scratch space (attachments, background logs, probe files)
+.zwork/
+.freebuff/
+.tmp/
+*.tmp
+
+# ==========================================
+# LOCAL RUNTIME ARTIFACTS
+# ==========================================
+# SQLite file created by smoke tests / local runs
+/smoke.db
+*.sqlite3
+
+# Service logs (netpulse.log is also caught by *.log above)
+logs/
+
+# Backup copies made while rewriting files
+*.bak
+*.orig
+
 # Archives
 *.zip
 *.rar
@@ -84,3 +104,7 @@ attached_assets/
 # Temp files
 /main.py
 screenshots/
+
+# ...except the UI evidence referenced by docs/ui-audit-*.md
+!docs/screenshots/
+!docs/screenshots/*.png

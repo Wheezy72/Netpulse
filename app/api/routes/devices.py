@@ -1,18 +1,29 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
-from typing import List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
-from sqlalchemy import select
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, require_compliance_role
+from app.api.deps import db_session, get_current_user, require_compliance_role, require_scan_role
 from app.models.device import Device
+from app.models.user import User
+from app.services.icmp import ping as icmp_ping
+from app.models.device_port import DevicePort
 from app.models.metric import Metric
+from app.models.scan_job import ScanJob
 from app.models.script_job import ScriptJob
 from app.models.vulnerability import Vulnerability, VulnerabilitySeverity
+from app.services.device_discovery import run_device_discovery
+from app.services.device_enrichment import scan_device_ports, upsert_device_ports
+from app.services.oui import is_locally_administered
+from app.services.os_fingerprint import resolve_device_os
 
 # Device and topology endpoints. In this personal deployment, they are
 # available to any authenticated user.
@@ -25,12 +36,91 @@ class DeviceOut(BaseModel):
     ip_address: str
     mac_address: Optional[str]
     device_type: Optional[str]
+    os: Optional[str] = None
+    vendor: Optional[str] = None
     is_gateway: bool
     zone: Optional[str]
     last_seen: Optional[datetime]
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+
+
+class ScannedPortOut(BaseModel):
+    """A listening port recorded by a per-device deep scan."""
+
+    port: int
+    protocol: str
+    state: Optional[str] = None
+    service: Optional[str] = None
+    product: Optional[str] = None
+    version: Optional[str] = None
+    extra_info: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ScanSummary(BaseModel):
+    """A scan job that targeted this device's address."""
+
+    id: str
+    profile: str
+    target: str
+    status: str
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+
+
+class DiscoverRequest(BaseModel):
+    """Target for a discovery-only sweep."""
+
+    target: Optional[str] = Field(
+        default=None,
+        max_length=255,
+        description="CIDR, IP or hostname to sweep. Omit to sweep the attached subnets.",
+    )
+    arp_timeout: float = Field(default=2.0, ge=0.5, le=30.0)
+    host_timeout: int = Field(default=60, ge=5, le=600)
+
+
+class DiscoveredHostOut(BaseModel):
+    ip_address: str
+    mac_address: Optional[str] = None
+    hostname: Optional[str] = None
+    vendor: Optional[str] = None
+    device_type: Optional[str] = None
+    os: Optional[str] = None
+    is_gateway: bool = False
+    source: str = "arp"
+
+    class Config:
+        from_attributes = True
+
+
+class DiscoveryResponse(BaseModel):
+    """Result of a discovery-only sweep, including why it may be empty."""
+
+    created: int
+    updated: int
+    subnets: List[str]
+    methods: List[str]
+    skipped_restricted: List[str]
+    warnings: List[str]
+    hosts: List[DiscoveredHostOut]
+
+
+class DeepScanResponse(BaseModel):
+    device_id: int
+    ip_address: str
+    created: int
+    updated: int
+    removed: int
+    ports: List[ScannedPortOut]
+    warnings: List[str]
+    os: Optional[str] = None
+    os_confidence: Optional[str] = None
 
 
 class TopologyNode(BaseModel):
@@ -80,14 +170,18 @@ class MetricSummary(BaseModel):
     metric_type: str
     timestamp: datetime
     value: float
+    tags: Optional[Dict[str, Any]] = None
 
 
 class DeviceDetail(BaseModel):
     device: DeviceOut
     type_guess: Optional[str]
     type_confidence: Optional[float]
+    vulnerability_counts: Dict[str, int] = {}
     vulnerabilities: List[VulnerabilitySummary]
+    ports: List[ScannedPortOut]
     scripts: List[ScriptJobSummary]
+    scans: List[ScanSummary]
     metrics: List[MetricSummary]
 
 
@@ -108,6 +202,50 @@ async def list_devices(
     result = await db.execute(stmt)
     devices = result.scalars().all()
     return [DeviceOut.from_orm(d) for d in devices]
+
+
+@router.post(
+    "/discover",
+    response_model=DiscoveryResponse,
+    summary="Discover devices only (no port scanning)",
+    dependencies=[Depends(require_scan_role())],
+)
+async def discover_devices(
+    payload: DiscoverRequest,
+    db: AsyncSession = Depends(db_session),
+) -> DiscoveryResponse:
+    """Sweep for hosts and record them in the device inventory.
+
+    Discovery only — no port scans, no NSE scripts. Omit ``target`` to sweep the
+    directly attached subnets. Restricted/fragile VLANs are refused rather than
+    probed, and anything skipped is reported back in ``skipped_restricted`` so
+    an empty result is never ambiguous.
+    """
+    try:
+        outcome = await run_device_discovery(
+            db,
+            target=payload.target,
+            arp_timeout=payload.arp_timeout,
+            host_timeout=payload.host_timeout,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return DiscoveryResponse(
+        created=outcome.created,
+        updated=outcome.updated,
+        subnets=outcome.subnets,
+        methods=outcome.methods,
+        skipped_restricted=outcome.skipped_restricted,
+        warnings=outcome.warnings,
+        hosts=[
+            DiscoveredHostOut.model_validate(host, from_attributes=True)
+            for host in outcome.hosts
+        ],
+    )
 
 
 @router.get(
@@ -155,16 +293,27 @@ async def get_topology(
         VulnerabilitySeverity.CRITICAL: 4,
     }
 
+    # Aggregate findings per device in one query. Reading ``d.vulnerabilities``
+    # here would trigger an implicit lazy load, which async SQLAlchemy raises on.
+    severity_result = await db.execute(
+        select(
+            Vulnerability.device_id,
+            Vulnerability.severity,
+            func.count(Vulnerability.id),
+        ).group_by(Vulnerability.device_id, Vulnerability.severity)
+    )
+    severity_by_device: dict[int, dict[VulnerabilitySeverity, int]] = {}
+    for owner_id, severity, count in severity_result.all():
+        severity_by_device.setdefault(owner_id, {})[severity] = int(count)
+
     nodes: list[TopologyNode] = []
 
     for d in devices:
-        max_sev: Optional[VulnerabilitySeverity] = None
-        if d.vulnerabilities:
-            max_sev = max(
-                (v.severity for v in d.vulnerabilities),
-                key=lambda s: severity_rank.get(s, 0),
-            )
-        vuln_count = len(d.vulnerabilities or [])
+        counts = severity_by_device.get(d.id, {})
+        max_sev: Optional[VulnerabilitySeverity] = (
+            max(counts, key=lambda s: severity_rank.get(s, 0)) if counts else None
+        )
+        vuln_count = sum(counts.values())
 
         nodes.append(
             TopologyNode(
@@ -190,7 +339,6 @@ async def get_topology(
         link_stmt = select(Metric).where(Metric.metric_type == "topology_link")
         link_result = await db.execute(link_stmt)
         link_metrics = link_result.scalars().all()
-        
         seen_links = set()
         for lm in link_metrics:
             tags = lm.tags or {}
@@ -332,23 +480,65 @@ async def get_device_detail(
         for s in scripts
     ]
 
-    # Simple global metric snapshot for context: latest internet_health metric.
+    # Listening ports recorded by the last deep scan of this device. Queried
+    # explicitly rather than through ``device.ports``: async SQLAlchemy cannot
+    # lazy-load a relationship implicitly.
+    port_result = await db.execute(
+        select(DevicePort)
+        .where(DevicePort.device_id == device_id)
+        .order_by(DevicePort.protocol, DevicePort.port)
+    )
+    ports = [ScannedPortOut.model_validate(p, from_attributes=True) for p in port_result.scalars().all()]
+
+    # Severity totals across all findings, not just the newest five.
+    count_result = await db.execute(
+        select(Vulnerability.severity, func.count(Vulnerability.id))
+        .where(Vulnerability.device_id == device_id)
+        .group_by(Vulnerability.severity)
+    )
+    vulnerability_counts = {
+        (severity.value if hasattr(severity, "value") else str(severity)): int(count)
+        for severity, count in count_result.all()
+    }
+
+    # Scan jobs that targeted this device's address.
+    scan_result = await db.execute(
+        select(ScanJob)
+        .where(ScanJob.target == device.ip_address)
+        .order_by(ScanJob.created_at.desc())
+        .limit(5)
+    )
+    scans = [
+        ScanSummary(
+            id=job.id,
+            profile=job.profile,
+            target=job.target,
+            status=job.status.value,
+            created_at=job.created_at,
+            completed_at=job.completed_at,
+        )
+        for job in scan_result.scalars().all()
+    ]
+
+    # Recent metrics scoped to THIS device. Previously this queried a single
+    # global "internet_health" sample without any device_id filter, so every
+    # device reported the same number as its own metric.
     metric_result = await db.execute(
         select(Metric)
-        .where(Metric.metric_type == "internet_health")
+        .where(Metric.device_id == device_id)
         .order_by(Metric.timestamp.desc())
-        .limit(1)
+        .limit(12)
     )
-    metric = metric_result.scalar_one_or_none()
-    metrics: list[MetricSummary] = []
-    if metric is not None:
-        metrics.append(
-            MetricSummary(
-                metric_type=metric.metric_type,
-                timestamp=metric.timestamp,
-                value=float(metric.value),
-            )
+    device_metrics = metric_result.scalars().all()
+    metrics: list[MetricSummary] = [
+        MetricSummary(
+            metric_type=m.metric_type,
+            timestamp=m.timestamp,
+            value=float(m.value),
+            tags=m.tags or None,
         )
+        for m in device_metrics
+    ]
 
     type_guess, type_confidence = _guess_device_type(device)
 
@@ -356,9 +546,82 @@ async def get_device_detail(
         device=DeviceOut.from_orm(device),
         type_guess=type_guess,
         type_confidence=type_confidence,
+        vulnerability_counts=vulnerability_counts,
         vulnerabilities=vuln_summaries,
+        ports=ports,
         scripts=script_summaries,
+        scans=scans,
         metrics=metrics,
+    )
+
+
+@router.post(
+    "/{device_id}/deep-scan",
+    response_model=DeepScanResponse,
+    summary="Scan one known device for listening ports and services",
+    dependencies=[Depends(require_scan_role())],
+)
+async def deep_scan_device(
+    device_id: int,
+    db: AsyncSession = Depends(db_session),
+) -> DeepScanResponse:
+    """Run a targeted service/version scan against a single device.
+
+    The opt-in second step after discovery: it fills in the ports and services
+    the light sweep deliberately ignores. Results replace the device's stored
+    port set, so the detail view reflects what is listening now.
+    """
+    device = await db.get(Device, device_id)
+    if device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Device not found",
+        )
+
+    observations, warnings = await scan_device_ports(device.ip_address)
+
+    created = updated = removed = 0
+    if observations or not warnings:
+        # A clean scan that found nothing listening is a real result and should
+        # clear stale rows. A scan that could not run (no nmap, restricted
+        # subnet, failure) leaves the previously stored ports untouched.
+        created, updated, removed = await upsert_device_ports(db, device.id, observations)
+
+    # Operating system. nmap's stack fingerprint is the strongest answer
+    # available; without nmap we fall back to the hostname, vendor and port
+    # signatures already known about this host rather than guessing.
+    os_label: Optional[str] = None
+    os_confidence: Optional[str] = None
+    try:
+        os_label, os_confidence = await asyncio.to_thread(
+            resolve_device_os,
+            ip_address=device.ip_address,
+            hostname=device.hostname,
+            vendor=device.vendor,
+            open_ports=[obs.port for obs in observations if obs.state == "open"],
+            mac_randomised=is_locally_administered(device.mac_address),
+        )
+    except Exception as exc:  # noqa: BLE001 - fingerprinting must not fail the scan
+        warnings.append(f"OS detection failed: {exc}")
+
+    if os_label:
+        device.os = os_label
+        device.updated_at = datetime.utcnow()
+        await db.commit()
+
+    return DeepScanResponse(
+        device_id=device.id,
+        ip_address=device.ip_address,
+        created=created,
+        updated=updated,
+        removed=removed,
+        ports=[
+            ScannedPortOut.model_validate(observation, from_attributes=True)
+            for observation in observations
+        ],
+        warnings=warnings,
+        os=os_label,
+        os_confidence=os_confidence,
     )
 
 
@@ -440,3 +703,76 @@ async def get_device_config_content(
             return FileResponse(filepath, media_type="text/plain")
 
     raise HTTPException(status_code=404, detail="Configuration file not found")
+
+
+# ---------------------------------------------------------------------------
+# Ping status
+# ---------------------------------------------------------------------------
+# The dashboard's reachability panel used to derive "online" purely from the
+# last_seen timestamp, which said nothing about whether the host answers now.
+# This endpoint asks the hosts directly: one ICMP packet each, in parallel,
+# with a short timeout so the dashboard stays responsive.
+
+SLOW_PING_MS = 100.0
+_PING_CONCURRENCY = 8
+
+
+def _classify_ping(latency_ms: float | None, reachable: bool) -> str:
+    if not reachable:
+        return "down"
+    if latency_ms is None:
+        return "up"
+    return "slow" if latency_ms > SLOW_PING_MS else "up"
+
+
+@router.get(
+    "/ping-status",
+    summary="ICMP-ping the most recently seen devices and classify each answer",
+)
+async def get_ping_status(
+    limit: int = Query(12, ge=1, le=64),
+    db: AsyncSession = Depends(db_session),
+    _user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Ping a slice of the inventory right now.
+
+    Results are ordered by last_seen (most recent first) so the dashboard shows
+    the devices the operator most plausibly cares about. One packet per host:
+    this is a health probe, not a scan.
+    """
+    result = await db.execute(
+        select(Device)
+        .order_by(Device.last_seen.desc().nullslast(), Device.id.asc())
+        .limit(limit)
+    )
+    devices = list(result.scalars().all())
+
+    semaphore = asyncio.Semaphore(_PING_CONCURRENCY)
+
+    async def _probe(device: Device) -> Dict[str, Any]:
+        async with semaphore:
+            outcome = await icmp_ping(device.ip_address, count=1, timeout_s=1.0)
+        return {
+            "id": device.id,
+            "hostname": device.hostname,
+            "ip_address": device.ip_address,
+            "status": _classify_ping(outcome.latency_ms, outcome.reachable),
+            "latency_ms": outcome.latency_ms,
+            "last_seen": device.last_seen.isoformat() if device.last_seen else None,
+            "error": outcome.error,
+        }
+
+    results = list(await asyncio.gather(*(_probe(device) for device in devices)))
+
+    summary = {
+        "up": sum(1 for r in results if r["status"] == "up"),
+        "slow": sum(1 for r in results if r["status"] == "slow"),
+        "down": sum(1 for r in results if r["status"] == "down"),
+        "total": len(results),
+    }
+
+    return {
+        "checked_at": datetime.utcnow().isoformat(),
+        "summary": summary,
+        "results": results,
+    }

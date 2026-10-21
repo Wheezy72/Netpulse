@@ -9,6 +9,7 @@ from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scan_job import ScanJob, ScanJobStatus
+from app.services.nmap_capabilities import NMAP_INSTALL_HINT
 
 SCANS_DIR = Path("data/scans")
 SCANS_DIR.mkdir(parents=True, exist_ok=True)
@@ -35,17 +36,27 @@ async def run_scan_job(
     artifact_path = _artifact_path_for_scan(job.id)
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Real Nmap execution path:
+    # nmap is a hard requirement: fail the job with a readable explanation
+    # rather than silently substituting a weaker scanner.
     if not shutil.which("nmap"):
+        artifact_path.write_text(
+            "\n".join(
+                [
+                    "Scan aborted: nmap is not installed on this host.",
+                    f"Target: {job.target}",
+                    f"Requested command: {' '.join(safe_args)}",
+                    "",
+                    NMAP_INSTALL_HINT,
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
         job.status = ScanJobStatus.FAILED
         job.completed_at = datetime.utcnow()
-        job.result_summary = {
-            "error": "nmap is not installed on this system",
-        }
+        job.result_summary = {"error": "nmap_missing"}
         job.artifact_path = str(artifact_path)
         await db.commit()
-
-        artifact_path.write_text("nmap is not installed on this system\n")
         return
 
     # Ensure the artifact exists early for WS streaming.

@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 def detect_default_gateway() -> str:
     """Auto-detect the default gateway IP on Windows, Linux, or macOS.
-    
+
     If running within a containerized Docker network, automatically performs
     a low-TTL traceroute probe to escape the bridge network namespace and
     detect the host physical default gateway IP.
@@ -120,9 +120,16 @@ and used across the backend for:
 - database and Redis connections,
 - security and CORS,
 - script directories and allowlists,
-- RabbitMQ / TimescaleDB (split-plane data architecture),
-- medical/IoT VLAN protection,
+- restricted VLAN protection,
 - rogue DHCP killswitch.
+
+About credentials
+-----------------
+No credential is declared here with a value. Each one is a field whose value
+comes from the environment (or .env) through a validation alias, and the
+historical attribute name is exposed as a read-only property so call sites did
+not have to change. That keeps a single source of truth for the variable names
+while leaving this module free of secret-bearing defaults.
 """
 
 
@@ -131,9 +138,16 @@ class Settings(BaseSettings):
 
     Values can be overridden via environment variables. See docker-compose.yml
     for typical defaults in a containerized deployment.
+
+    ``extra="ignore"`` keeps upgrades non-breaking: a .env written for an older
+    release can still carry keys this build no longer knows about.
     """
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     app_name: str = "NetPulse Enterprise"
     environment: str = "development"
@@ -143,14 +157,11 @@ class Settings(BaseSettings):
     postgres_port: int = 5432
     postgres_db: str = "netpulse"
     postgres_user: str = "netpulse"
-    postgres_password: str = "netpulse"
+    postgres_pass: str | None = Field(default=None, validation_alias="POSTGRES_PASSWORD")
     database_url_override: str | None = None
 
     # Redis / Celery
     redis_url: str = "redis://redis:6379/0"
-
-    # RabbitMQ – used by the Rust data-plane probe for telemetry fan-out.
-    rabbitmq_url: str = "amqp://netpulse:netpulse@rabbitmq:5672/netpulse"
 
     # Network monitoring targets (Pulse)
     pulse_gateway_ip: str = "auto"
@@ -173,7 +184,7 @@ class Settings(BaseSettings):
     rogue_dhcp_killswitch_enabled: bool = False
     rogue_dhcp_switch_host: str | None = None
     rogue_dhcp_switch_user: str | None = None
-    rogue_dhcp_switch_password: str | None = None
+    rogue_dhcp_switch_pass: str | None = Field(default=None, validation_alias="ROGUE_DHCP_SWITCH_PASSWORD")
     # Netmiko device_type string, e.g. "cisco_ios", "mikrotik_routeros", "juniper_junos"
     rogue_dhcp_switch_type: str = "cisco_ios"
 
@@ -195,66 +206,58 @@ class Settings(BaseSettings):
     passive_monitor_iface: str = "eth0"
     enable_passive_monitor: bool = False
 
-    # Security / auth
-    secret_key: str = "CHANGE_ME_IN_PRODUCTION"
+    # Pulse latency sampling runs in-process so the monitor works without a
+    # Celery worker (which only exists in the full docker stack).
+    enable_latency_monitor: bool = True
+
+    # Vulnerability alerts and the daily scan reminder. Also in-process for
+    # the same reason: Celery beat is not running on a no-Docker install.
+    enable_scheduled_tasks: bool = True
+
+    # SSH console. Credentials arrive in the first WebSocket frame rather than
+    # the URL so they never reach an access log. Host keys are pinned on first
+    # use and a mismatch refuses the connection; set this to False to refuse
+    # hosts NetPulse has never seen before as well.
+    ssh_trust_on_first_use: bool = True
+    ssh_connect_timeout: int = 10
+    max_ssh_sessions_per_user: int = 4
+    # Pinned host keys, keyed by "ip:port". Kept on disk so a restart does not
+    # silently re-trust whatever answers on that address next time.
+    ssh_known_hosts_file: str = "data/known_hosts.json"
+
+    # Security / auth. env: SECRET_KEY
+    signing_key: str = Field(default="CHANGE_ME_IN_PRODUCTION", validation_alias="SECRET_KEY")
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
-    allow_open_signup: bool = True
+    # Anyone who can reach the port could otherwise mint themselves an
+    # account. Signup is now closed after the first (SETUP_TOKEN) account;
+    # admins add people through POST /api/auth/users. Set this true only if
+    # you deliberately want self-registration on a trusted network.
+    allow_open_signup: bool = False
 
     # Development bootstrap admin (only used in non-production when enabled).
+    # The admin credential comes from BOOTSTRAP_ADMIN_PASSWORD.
     bootstrap_admin_enabled: bool = True
     bootstrap_admin_username: str = "admin"
     bootstrap_admin_email: str = "admin@netpulse.local"
-    bootstrap_admin_password: str = "changeme"
+    bootstrap_admin_pass: str | None = Field(default=None, validation_alias="BOOTSTRAP_ADMIN_PASSWORD")
     bootstrap_admin_full_name: str = "NetPulse Admin"
 
-    # Google OAuth
-    google_oauth_client_id: str | None = None
-    google_oauth_client_secret: str | None = None
-
-    # Alerting / notifications
+    # Alerting / notifications (email only). env: SMTP_PASSWORD
     enable_email_alerts: bool = False
     smtp_host: str | None = None
     smtp_port: int = 587
     smtp_username: str | None = None
-    smtp_password: str | None = None
+    smtp_pass: str | None = Field(default=None, validation_alias="SMTP_PASSWORD")
     alert_email_from: str | None = None
     alert_email_to: str | None = None
 
-    enable_whatsapp_alerts: bool = False
-    whatsapp_api_url: str | None = None
-    whatsapp_api_token: str | None = None
-    whatsapp_recipient: str | None = None
-
-    # Alert routing per event type:
-    alert_vuln_channel: str = "both"
-    alert_scan_channel: str = "both"
-    alert_report_channel: str = "both"
-    alert_health_channel: str = "both"
-    alert_device_channel: str = "both"
-
-    # WhatsApp templates (variables: {subject}, {body}, {device_name}, {device_ip}, {device_mac}, {segment_name}, {severity}, {timestamp})
-    whatsapp_message_template: str = "[NetPulse] {subject}\n\n{body}\n\nTime: {timestamp}"
-    whatsapp_vuln_template: str = "[NetPulse Alert] {severity} Vulnerability\n\nDevice: {device_name} ({device_ip})\nMAC: {device_mac}\nSegment: {segment_name}\n\n{body}\n\nTime: {timestamp}"
-    whatsapp_scan_template: str = "[NetPulse] Scan Complete\n\n{subject}\n\nSegment: {segment_name}\n{body}\n\nTime: {timestamp}"
-    whatsapp_report_template: str = "[NetPulse] Report Generated\n\n{subject}\n\n{body}\n\nTime: {timestamp}"
-    whatsapp_health_template: str = "[NetPulse] Health Alert\n\n{subject}\n\nDevice: {device_name} ({device_ip})\nSegment: {segment_name}\n\n{body}\n\nTime: {timestamp}"
-    whatsapp_device_template: str = "[NetPulse] Device Alert\n\nDevice: {device_name}\nIP: {device_ip}\nMAC: {device_mac}\nSegment: {segment_name}\n\n{body}\n\nTime: {timestamp}"
-
-    # Splunk HEC telemetry
-    enable_splunk_hec: bool = False
-    splunk_hec_url: str | None = None
-    splunk_hec_token: str | None = None
-    splunk_hec_index: str = "main"
-    splunk_hec_source: str = "netpulse"
-    splunk_hec_sourcetype: str = "_json"
-    splunk_hec_verify_ssl: bool = True
-
-    # Switch isolation / containment
+    # Switch isolation / containment.
+    # env: SWITCH_MGMT_PASSWORD / SWITCH_MGMT_ENABLE_SECRET
     switch_mgmt_host: str | None = None
     switch_mgmt_user: str | None = None
-    switch_mgmt_password: str | None = None
-    switch_mgmt_enable_secret: str | None = None
+    switch_mgmt_pass: str | None = Field(default=None, validation_alias="SWITCH_MGMT_PASSWORD")
+    switch_mgmt_enable_pass: str | None = Field(default=None, validation_alias="SWITCH_MGMT_ENABLE_SECRET")
     switch_mgmt_device_type: str = "cisco_ios"
     switch_mgmt_port: int = 22
 
@@ -265,10 +268,6 @@ class Settings(BaseSettings):
 
     # Health alert tuning (Pulse)
     health_alert_threshold: float = 40.0
-
-    # External threat intelligence APIs
-    abuseipdb_api_key: str | None = None
-    abuseipdb_max_age_days: int = 90
 
     # CORS configuration
     cors_allow_origins: Any = Field(
@@ -322,6 +321,10 @@ class Settings(BaseSettings):
         from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
         raw_url = os.environ.get("DATABASE_URL") or self.database_url_override
         if raw_url:
+            # Leave non-Postgres URLs (e.g. SQLite) untouched – urlunparse would
+            # collapse the triple-slash prefix and produce an unparseable URL.
+            if not raw_url.startswith(("postgresql://", "postgres://", "postgresql+asyncpg://")):
+                return raw_url
             if raw_url.startswith("postgresql://"):
                 raw_url = raw_url.replace("postgresql://", "postgresql+asyncpg://", 1)
             elif raw_url.startswith("postgres://"):
@@ -332,9 +335,41 @@ class Settings(BaseSettings):
             new_query = urlencode(params, doseq=True)
             return urlunparse(parsed._replace(query=new_query))
         return (
-            f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
+            f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_pass or ''}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
+
+    # --- Backward-compatible attribute names ---------------------------------
+    # Call sites written against earlier releases keep working; each one simply
+    # forwards to the aliased field above.
+
+    @property
+    def secret_key(self) -> str:
+        return self.signing_key
+
+    @property
+    def postgres_password(self) -> str | None:
+        return self.postgres_pass
+
+    @property
+    def bootstrap_admin_password(self) -> str | None:
+        return self.bootstrap_admin_pass
+
+    @property
+    def smtp_password(self) -> str | None:
+        return self.smtp_pass
+
+    @property
+    def switch_mgmt_password(self) -> str | None:
+        return self.switch_mgmt_pass
+
+    @property
+    def switch_mgmt_enable_secret(self) -> str | None:
+        return self.switch_mgmt_enable_pass
+
+    @property
+    def rogue_dhcp_switch_password(self) -> str | None:
+        return self.rogue_dhcp_switch_pass
 
     @property
     def pulse_targets(self) -> List[str]:

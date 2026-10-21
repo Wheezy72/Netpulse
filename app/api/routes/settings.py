@@ -8,7 +8,6 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_user
-from app.core.config import settings as app_settings
 from app.models.user import User
 from app.models.user_settings import UserSettings
 
@@ -18,8 +17,6 @@ router = APIRouter()
 class NotificationSettings(BaseModel):
     email_enabled: bool = False
     email_address: Optional[str] = None
-    whatsapp_enabled: bool = False
-    whatsapp_number: Optional[str] = None
     alert_on_critical: bool = True
     alert_on_warning: bool = False
     alert_on_device_down: bool = True
@@ -32,11 +29,6 @@ class AISettings(BaseModel):
     enabled: bool = False
     custom_base_url: Optional[str] = None
     custom_model: Optional[str] = None
-
-
-class ThreatIntelSettings(BaseModel):
-    abuseipdb_enabled: bool = False
-    abuseipdb_max_age: int = 90
 
 
 class ScanSchedule(BaseModel):
@@ -206,61 +198,6 @@ async def update_ai_settings(
     }
 
 
-def _is_abuseipdb_key_configured() -> bool:
-    return bool(os.environ.get("ABUSEIPDB_API_KEY") or app_settings.abuseipdb_api_key)
-
-
-@router.get(
-    "/threat-intel",
-    summary="Get threat intelligence settings",
-)
-async def get_threat_intel_settings(
-    db: AsyncSession = Depends(db_session),
-    current_user: User = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Retrieve threat intelligence settings for the current user."""
-    row = await _get_user_settings(db, current_user.id)
-    if row and row.threat_intel_settings:
-        s = ThreatIntelSettings(**row.threat_intel_settings)
-    else:
-        s = ThreatIntelSettings()
-
-    return {
-        "abuseipdb_enabled": s.abuseipdb_enabled,
-        "abuseipdb_api_key_configured": _is_abuseipdb_key_configured(),
-        "abuseipdb_max_age": s.abuseipdb_max_age,
-    }
-
-
-@router.put(
-    "/threat-intel",
-    summary="Update threat intelligence settings",
-)
-async def update_threat_intel_settings(
-    settings: ThreatIntelSettings,
-    db: AsyncSession = Depends(db_session),
-    current_user: User = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Update threat intelligence settings for the current user."""
-    await _upsert_user_settings(
-        db,
-        current_user.id,
-        threat_intel_settings=settings.model_dump(),
-    )
-
-    from app.services.abuseipdb import abuseipdb_service
-
-    abuseipdb_key = os.environ.get("ABUSEIPDB_API_KEY") or app_settings.abuseipdb_api_key
-    if settings.abuseipdb_enabled and abuseipdb_key:
-        abuseipdb_service.api_token = abuseipdb_key
-
-    return {
-        "abuseipdb_enabled": settings.abuseipdb_enabled,
-        "abuseipdb_api_key_configured": _is_abuseipdb_key_configured(),
-        "abuseipdb_max_age": settings.abuseipdb_max_age,
-    }
-
-
 @router.get(
     "/scan-schedule",
     response_model=ScanSchedule,
@@ -336,7 +273,4 @@ async def get_env_status(
     return {
         "openai_api_key": bool(os.environ.get("OPENAI_API_KEY")),
         "anthropic_api_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
-        "abuseipdb_api_key": bool(os.environ.get("ABUSEIPDB_API_KEY") or app_settings.abuseipdb_api_key),
-        "google_oauth_client_id": bool(os.environ.get("GOOGLE_OAUTH_CLIENT_ID") or app_settings.google_oauth_client_id),
-        "google_oauth_client_secret": bool(os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET") or app_settings.google_oauth_client_secret),
     }

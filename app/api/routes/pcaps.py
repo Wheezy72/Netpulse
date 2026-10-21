@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime
+from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, require_compliance_role
+from app.core.config import settings
 from app.models.pcap_meta import PcapFile, PcapPacket
 
 router = APIRouter()
@@ -194,6 +197,35 @@ async def query_pcap_packets(
         next_cursor = _encode_cursor(last.timestamp, last.packet_index)
 
     return PacketQueryResponse(items=items, next_cursor=next_cursor)
+
+
+@router.get(
+    "/{pcap_file_id}/download",
+    summary="Download the raw .pcap file (open it in Wireshark)",
+    dependencies=[Depends(require_compliance_role())],
+)
+async def download_pcap_file(
+    pcap_file_id: int,
+    db: AsyncSession = Depends(db_session),
+) -> FileResponse:
+    pcap_file = await db.get(PcapFile, pcap_file_id)
+    if not pcap_file:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PCAP not found")
+
+    storage_root = Path(settings.pcap_storage_dir).resolve()
+    file_path = Path(pcap_file.filepath).resolve()
+
+    # Only ever serve files from the configured pcap storage directory.
+    if storage_root not in file_path.parents:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid pcap path")
+    if not file_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PCAP file missing on disk")
+
+    return FileResponse(
+        path=str(file_path),
+        media_type="application/vnd.tcpdump.pcap",
+        filename=pcap_file.filename,
+    )
 
 
 @router.get(

@@ -1,13 +1,13 @@
 from app.models.audit_log import AuditLog
 from app.models.device import Device
 from app.models.device_baseline import DeviceBaseline
+from app.models.device_port import DevicePort
 from app.models.enforcement_action import EnforcementAction
 from app.models.metric import Metric
 from app.models.network_segment import NetworkSegment
 from app.models.security_telemetry import SecurityTelemetry
 from app.models.packet_capture import PacketCapture, PacketCaptureStatus, PacketHeader
 from app.models.pcap_meta import PcapFile, PcapPacket
-from app.models.router import Router, RouterInterfaceCounter
 from app.models.router_config_baseline import RouterConfigBaseline
 from app.models.scan_job import ScanJob
 from app.models.script_job import ScriptJob
@@ -20,6 +20,7 @@ __all__ = [
     "AuditLog",
     "Device",
     "DeviceBaseline",
+    "DevicePort",
     "EnforcementAction",
     "Metric",
     "NetworkSegment",
@@ -29,8 +30,6 @@ __all__ = [
     "PacketHeader",
     "PcapFile",
     "PcapPacket",
-    "Router",
-    "RouterInterfaceCounter",
     "RouterConfigBaseline",
     "ScanJob",
     "ScriptJob",

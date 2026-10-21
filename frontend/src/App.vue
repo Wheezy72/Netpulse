@@ -2,21 +2,42 @@
 /**
  * Root application shell.
  *
- * - Auth state managed by the Pinia auth store.
- * - Theme managed by the Pinia ui store.
- * - Navigation via Vue Router (lazy-loaded routes).
- * - Global Cmd+K / Ctrl+K command palette via VueUse useMagicKeys.
+ * Layout: fixed 64px icon rail (desktop) + sticky header with text tabs +
+ * scrollable canvas. On mobile the rail collapses into a slide-in drawer.
  */
-import { onMounted, computed, ref, watch } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
+import type { Component } from "vue";
 import { useRouter, useRoute } from "vue-router";
-import { useMagicKeys } from "@vueuse/core";
 import axios from "axios";
+import { useMagicKeys } from "@vueuse/core";
+import {
+  Bell,
+  ChevronDown,
+  Fish,
+  LayoutDashboard,
+  LoaderCircle,
+  Menu,
+  Monitor,
+  Moon,
+  Network,
+  Radar,
+  ScrollText,
+  Search,
+  Settings,
+  SquareTerminal,
+  Sun,
+  Wrench,
+  X,
+} from "lucide-vue-next";
 
+import BrandMark from "./components/ui/BrandMark.vue";
 import CommandPalette from "./components/features/CommandPalette.vue";
 import Toast from "./components/ui/Toast.vue";
 
 import { useAuthStore } from "./stores/auth";
+import { describeRequestError } from "./utils/requestError";
 import { useUiStore } from "./stores/ui";
+import { useDeviceDiscovery } from "./composables/useDeviceDiscovery";
 
 const router = useRouter();
 const route = useRoute();
@@ -29,14 +50,85 @@ function toggleTheme() {
   ui.setTheme(isNightshade.value ? "sysadmin" : "nightshade");
 }
 
+// The new surface sweeps in from the top-right corner instead of snapping.
+// Watching the store rather than the button also catches theme changes made
+// from the command palette or the login screen.
+const themeWipe = ref(0);
+const themeWipeFill = ref("");
+
+watch(
+  () => ui.theme,
+  (next) => {
+    themeWipeFill.value =
+      next === "nightshade"
+        ? "radial-gradient(circle at 28% 72%, rgba(16,185,129,0.28), transparent 58%), #09090b"
+        : "radial-gradient(circle at 28% 72%, rgba(79,70,229,0.20), transparent 58%), #f4f4f5";
+    themeWipe.value += 1;
+  }
+);
+
 const toastRef = ref<InstanceType<typeof Toast> | null>(null);
 const mobileMenuOpen = ref(false);
-const logoError = ref(false);
-const infoMode = ref<"full" | "compact">((localStorage.getItem("np-info-mode") as any) || "full");
+const profileOpen = ref(false);
 
-watch(infoMode, (val) => {
-  localStorage.setItem("np-info-mode", val);
+// The profile menu is click-driven. A hover-only menu broke as soon as the
+// pointer crossed the gap to the panel, so it could never be clicked.
+function toggleProfile(): void {
+  profileOpen.value = !profileOpen.value;
+}
+
+function closeProfile(): void {
+  profileOpen.value = false;
+}
+
+// Accounts can be created without an email, so the address is the last thing
+// to fall back on rather than the first thing shown.
+const profileLabel = computed(() => {
+  const u = auth.user;
+  return u?.full_name?.trim() || u?.username?.trim() || u?.email || "Signed in";
 });
+
+const profileDetail = computed(() => {
+  const u = auth.user;
+  if (!u?.email || u.email === profileLabel.value) return "";
+  return u.email;
+});
+
+const profileInitial = computed(() => {
+  const source = profileLabel.value.trim();
+  return (source[0] || "U").toUpperCase();
+});
+
+function onDocumentPointerDown(event: PointerEvent): void {
+  const target = event.target as HTMLElement | null;
+  if (!target?.closest("[data-profile-menu]")) closeProfile();
+}
+
+// Esc closes the quick-action flyout — a popover you can only dismiss by
+// clicking its little X is a trap on a keyboard-driven console.
+function onDocumentKeydown(event: KeyboardEvent): void {
+  if (event.key === "Escape" && activePanel.value) {
+    event.stopPropagation();
+    closePanel();
+  }
+}
+
+onMounted(() => {
+  document.addEventListener("pointerdown", onDocumentPointerDown);
+  document.addEventListener("keydown", onDocumentKeydown);
+  window.addEventListener("resize", closeProfile);
+});
+
+onUnmounted(() => {
+  document.removeEventListener("pointerdown", onDocumentPointerDown);
+  document.removeEventListener("keydown", onDocumentKeydown);
+  window.removeEventListener("resize", closeProfile);
+});
+
+watch(
+  () => route.fullPath,
+  () => closeProfile()
+);
 
 // Open the command palette with Cmd+K or Ctrl+K.
 const { Meta_k, Ctrl_k } = useMagicKeys();
@@ -46,15 +138,43 @@ watch([Meta_k, Ctrl_k], ([mk, ck]) => {
   }
 });
 
-const navItems = [
-  { id: "dashboard", label: "Dashboard", icon: "dashboard" },
-  { id: "topology", label: "Interactive Map", icon: "topology" },
-  { id: "devices", label: "Devices", icon: "devices" },
-  { id: "toolbox", label: "Operator Toolbox", icon: "toolbox" },
-  { id: "logs", label: "Logs", icon: "logs" },
-  { id: "offline-assistant", label: "Backup Friend", icon: "offline-assistant" },
-  { id: "settings", label: "Settings", icon: "settings" },
-] as const;
+function notify(type: "success" | "error" | "warning" | "info", message: string) {
+  toastRef.value?.show(type, message);
+}
+
+// One icon family for the whole shell. Every glyph is Lucide at stroke-width
+// 1.7 so the rail, the header and the panels all sit at the same optical
+// weight — the previous hand-drawn set mixed 1.7, 1.8 and 2.
+const icons = {
+  dashboard: LayoutDashboard,
+  topology: Network,
+  devices: Monitor,
+  toolbox: Wrench,
+  logs: ScrollText,
+  settings: Settings,
+  // Rail actions: things you fire rather than places you go.
+  nmap: Radar,
+  sweep: Search,
+  terminal: SquareTerminal,
+  wireshark: Fish,
+} satisfies Record<string, Component>;
+
+// Pages. The header tabs show the four main ones; the mobile drawer lists all.
+type NavPage = { id: string; label: string; icon: Component };
+
+const navItems: NavPage[] = [
+  { id: "dashboard", label: "Dashboard", icon: icons.dashboard },
+  { id: "topology", label: "Topology", icon: icons.topology },
+  { id: "devices", label: "Devices", icon: icons.devices },
+  { id: "toolbox", label: "Toolbox", icon: icons.toolbox },
+  { id: "logs", label: "Logs", icon: icons.logs },
+  { id: "settings", label: "Settings", icon: icons.settings },
+];
+
+// Header tabs: the navigation. The left rail never duplicates these.
+const headerTabs = navItems.filter((item) =>
+  ["dashboard", "topology", "devices", "toolbox"].includes(item.id)
+);
 
 function isActive(id: string) {
   return route.name === id;
@@ -64,6 +184,163 @@ function navigateTo(id: string) {
   router.push(`/${id}`);
   mobileMenuOpen.value = false;
 }
+
+// ---------------------------------------------------------------------------
+// Rail quick actions — things you *fire*, not places you go.
+// ---------------------------------------------------------------------------
+const railActions = [
+  { id: "scan", label: "Run a quick scan", icon: icons.nmap },
+  { id: "sweep", label: "Sweep the network for devices", icon: icons.sweep },
+  { id: "terminal", label: "Open MobaXterm", icon: icons.terminal },
+  { id: "wireshark", label: "Open Wireshark", icon: icons.wireshark },
+];
+
+const activePanel = ref<"scan" | "terminal" | null>(null);
+
+function runRailAction(id: string) {
+  if (id === "scan" || id === "terminal") {
+    activePanel.value = activePanel.value === id ? null : id;
+    if (activePanel.value === "terminal") void loadTerminalInfo();
+    return;
+  }
+  activePanel.value = null;
+  if (id === "sweep") void runSweep();
+  if (id === "wireshark") void launchWireshark();
+}
+
+function closePanel() {
+  activePanel.value = null;
+}
+
+// Quick scan -----------------------------------------------------------------
+const scanProfiles = [
+  { label: "Ping sweep — who is alive", command: "nmap -sn -T4" },
+  { label: "Top ports — fast service check", command: "nmap -F -T4" },
+  { label: "Version probe — services + versions", command: "nmap -sV -T4 -F" },
+  { label: "Full TCP — every port", command: "nmap -p- -T4" },
+];
+const scanProfile = ref(scanProfiles[0].label);
+const scanTarget = ref("");
+const scanBusy = ref(false);
+const lastScanId = ref<string | null>(null);
+
+// Conservative character allowlist — the backend validates again regardless.
+const TARGET_RE = /^[A-Za-z0-9.:/_-]{1,128}$/;
+
+async function runQuickScan() {
+  const target = scanTarget.value.trim();
+  if (!TARGET_RE.test(target)) {
+    notify(
+      "error",
+      "Enter a host, IP, range or CIDR — letters, digits, . : / _ - only."
+    );
+    return;
+  }
+  scanBusy.value = true;
+  lastScanId.value = null;
+  try {
+    const profile =
+      scanProfiles.find((p) => p.label === scanProfile.value) ?? scanProfiles[0];
+    const { data } = await axios.post<{ id: string }>("/api/nmap/execute", {
+      command: profile.command,
+      target,
+      save_results: true,
+    });
+    lastScanId.value = data.id;
+    notify("success", `Scan queued for ${target}. Live output is in the Toolbox.`);
+  } catch (e: any) {
+    notify("error", describeRequestError(e, "Scan could not be started."));
+  } finally {
+    scanBusy.value = false;
+  }
+}
+
+// Discovery sweep ------------------------------------------------------------
+const { discovering, discover, notice } = useDeviceDiscovery();
+
+async function runSweep() {
+  if (discovering.value) return;
+  const result = await discover(null);
+  if (notice.value) {
+    notify(
+      notice.value.kind === "ok"
+        ? "success"
+        : notice.value.kind === "warn"
+          ? "warning"
+          : "error",
+      notice.value.text
+    );
+  }
+  if (result && route.name !== "devices") {
+    router.push("/devices");
+  }
+}
+
+// Terminal / MobaXterm -------------------------------------------------------
+const termInfo = ref<{
+  platform: string;
+  kind: string;
+  available: boolean;
+  options: { index: number; name: string }[];
+  download_url: string | null;
+  note: string | null;
+} | null>(null);
+const termBusy = ref(false);
+
+async function loadTerminalInfo() {
+  try {
+    const { data } = await axios.get("/api/tools/terminal");
+    termInfo.value = data;
+  } catch {
+    termInfo.value = null;
+  }
+}
+
+// Wireshark launcher ---------------------------------------------------------
+// Same allowlist model as the terminal: the browser asks, the backend resolves
+// a fixed executable path. Nothing from the client is ever passed to a shell.
+const wiresharkBusy = ref(false);
+
+async function launchWireshark() {
+  if (wiresharkBusy.value) return;
+  wiresharkBusy.value = true;
+  try {
+    const { data } = await axios.get("/api/tools/wireshark");
+    if (!data.available) {
+      notify(
+        "warning",
+        data.note || "Wireshark is not installed on this machine."
+      );
+      if (data.download_url) window.open(data.download_url, "_blank", "noopener");
+      return;
+    }
+    await axios.post("/api/tools/wireshark/open", { index: 0 });
+    notify("success", "Wireshark opened.");
+  } catch (e: any) {
+    notify(
+      "error",
+      e?.response?.data?.detail || "Could not open Wireshark."
+    );
+  } finally {
+    wiresharkBusy.value = false;
+  }
+}
+
+async function openTerminal(index: number) {
+  termBusy.value = true;
+  try {
+    const { data } = await axios.post<{ name: string }>("/api/tools/terminal/open", {
+      index,
+    });
+    notify("success", `${data.name} opened.`);
+    activePanel.value = null;
+  } catch (e: any) {
+    notify("error", e?.response?.data?.detail || "Could not open the terminal.");
+  } finally {
+    termBusy.value = false;
+  }
+}
+
 
 async function handleLogout() {
   await auth.logout();
@@ -75,39 +352,16 @@ async function handleAuthSuccess(arg: string | { token: string; rememberMe?: boo
   const persist = typeof arg === "string" ? true : (arg.rememberMe ?? true);
   auth.setToken(t, persist);
   await auth.loadUser();
-  router.push("/dashboard");
+  // Resume the page that triggered login when it is a safe local path.
+  const redirect = route.query.redirect;
+  const target =
+    typeof redirect === "string" && redirect.startsWith("/") && !redirect.startsWith("//")
+      ? redirect
+      : "/dashboard";
+  router.push(target);
 }
 
 onMounted(async () => {
-  // Handle Google OAuth callback.
-  const isGoogleCallback = window.location.pathname === "/auth/google/callback";
-  if (isGoogleCallback) {
-    const urlParams = new URLSearchParams(window.location.search);
-    const code = urlParams.get("code");
-    const state = urlParams.get("state");
-    const savedState = sessionStorage.getItem("np-oauth-state");
-    sessionStorage.removeItem("np-oauth-state");
-    window.history.replaceState({}, "", "/");
-
-    if (code && state === savedState) {
-      try {
-        const { default: axios } = await import("axios");
-        const redirectUri = `${window.location.origin}/auth/google/callback`;
-        const { data } = await axios.post<{ access_token: string }>("/api/auth/google/callback", {
-          code,
-          redirect_uri: redirectUri,
-        });
-        auth.setToken(data.access_token);
-        await auth.loadUser();
-        router.push("/dashboard");
-      } catch {
-        router.push("/login");
-      }
-    } else {
-      router.push("/login");
-    }
-  }
-
   if (window.innerWidth < 768) {
     ui.sidebarExpanded = false;
     localStorage.setItem("np-sidebar-expanded", "false");
@@ -133,16 +387,18 @@ async function handleForcePasswordChange() {
     forceError.value = "Passwords do not match.";
     return;
   }
-  
+
   forceSubmitting.value = true;
   try {
     await axios.post("/api/auth/update-password", {
       new_password: forceNewPassword.value,
     });
-    // Load the updated user profile
     await auth.loadUser();
   } catch (err: any) {
-    forceError.value = err?.response?.data?.detail ?? err?.response?.data?.error?.message ?? "Failed to update password.";
+    forceError.value =
+      err?.response?.data?.detail ??
+      err?.response?.data?.error?.message ??
+      "Failed to update password.";
   } finally {
     forceSubmitting.value = false;
   }
@@ -150,299 +406,477 @@ async function handleForcePasswordChange() {
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col cyber-canvas relative overflow-hidden bg-[var(--np-bg)] text-[var(--np-text)] transition-all duration-300">
-    <!-- Ambient drifting purple glow behind everything -->
-    <div class="absolute inset-0 ambient-glow pointer-events-none z-0" />
-
+  <div class="min-h-screen cyber-canvas canvas-glow relative text-[var(--np-text)]">
     <!-- Command palette (global) -->
     <CommandPalette />
 
     <!-- Unauthenticated: just render the router-view (Login / Register) -->
     <template v-if="!auth.isAuthenticated || route.meta?.guest">
-      <div class="w-full relative z-10">
-        <RouterView v-slot="{ Component }">
-          <component
-            :is="Component"
-            :theme="ui.theme"
-            :info-mode="infoMode"
-            @update:infoMode="infoMode = $event"
-            @login-success="handleAuthSuccess"
-            @register-success="handleAuthSuccess"
-            @switch-to-register="router.push('/register')"
-            @switch-to-login="router.push('/login')"
-            @toggle-theme="ui.setTheme(ui.theme === 'nightshade' ? 'sysadmin' : 'nightshade')"
-          />
-        </RouterView>
-      </div>
+      <RouterView v-slot="{ Component }">
+        <component
+          :is="Component"
+          :theme="ui.theme"
+          @login-success="handleAuthSuccess"
+          @register-success="handleAuthSuccess"
+          @switch-to-register="router.push('/register')"
+          @switch-to-login="router.push('/login')"
+          @toggle-theme="ui.setTheme(ui.theme === 'nightshade' ? 'sysadmin' : 'nightshade')"
+        />
+      </RouterView>
     </template>
 
     <!-- Authenticated shell -->
     <template v-else>
       <!-- Force Password Change Mode -->
-      <template v-if="auth.user?.force_password_change">
-        <div class="min-h-screen w-full flex items-center justify-center p-4 relative z-50 bg-[var(--np-bg)] transition-colors duration-300">
-          <div class="np-login-panel w-full max-w-md p-8 relative">
-            <div class="text-center mb-6">
-              <h1 class="text-xl font-bold tracking-wider mb-2 font-mono text-emerald-400 animate-pulse">
-                SECURITY INITIALIZATION
-              </h1>
-              <p class="text-[0.65rem] font-mono text-slate-300/60 uppercase tracking-wider">
-                First login password reset required
-              </p>
+      <div
+        v-if="auth.user?.force_password_change"
+        class="min-h-screen w-full flex items-center justify-center p-4 relative z-50 bg-[var(--np-bg)]"
+      >
+        <div class="np-login-panel w-full max-w-md p-8 relative">
+          <div class="text-center mb-6">
+            <h1 class="np-brand-text animate-pulse text-xl font-bold tracking-wider mb-2 font-mono">
+              Set a new password
+            </h1>
+            <p class="text-[0.65rem] font-mono text-[var(--np-text-muted)] uppercase tracking-wider">
+              First login password reset required
+            </p>
+          </div>
+
+          <form @submit.prevent="handleForcePasswordChange" class="space-y-4">
+            <div>
+              <label class="block text-[0.65rem] uppercase tracking-wider mb-1.5 font-mono text-[var(--np-text-muted)]">
+                New Password (min 6 characters)
+              </label>
+              <input
+                v-model="forceNewPassword"
+                type="password"
+                class="np-neon-input w-full rounded-lg px-4 py-2.5 text-xs font-mono"
+                placeholder="••••••••••••"
+                required
+              />
             </div>
-            
-            <form @submit.prevent="handleForcePasswordChange" class="space-y-4">
-              <div>
-                <label class="block text-[0.65rem] uppercase tracking-wider mb-1.5 font-mono text-slate-300/60">
-                  New Password (min 6 characters)
-                </label>
-                <input
-                  v-model="forceNewPassword"
-                  type="password"
-                  class="np-neon-input w-full rounded-lg px-4 py-2.5 text-xs font-mono bg-[#0d0a1b]"
-                  placeholder="••••••••••••"
-                  required
-                />
-              </div>
 
-              <div>
-                <label class="block text-[0.65rem] uppercase tracking-wider mb-1.5 font-mono text-slate-300/60">
-                  Confirm New Password
-                </label>
-                <input
-                  v-model="forceConfirmPassword"
-                  type="password"
-                  class="np-neon-input w-full rounded-lg px-4 py-2.5 text-xs font-mono bg-[#0d0a1b]"
-                  placeholder="••••••••••••"
-                  required
-                />
-              </div>
-
-              <div class="pt-2">
-                <button
-                  type="submit"
-                  class="np-login-btn w-full rounded-lg px-4 py-2.5 text-xs font-semibold flex items-center justify-center gap-2"
-                  :disabled="forceSubmitting"
-                >
-                  <svg
-                    v-if="forceSubmitting"
-                    class="w-4 h-4 animate-spin"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                  </svg>
-                  <span>{{ forceSubmitting ? "UPDATING PASSWORD..." : "UPDATE & INITIALIZE" }}</span>
-                </button>
-              </div>
-
-              <p v-if="forceError" class="text-center text-xs text-rose-400 font-mono">
-                {{ forceError }}
-              </p>
-            </form>
-
-            <div class="mt-6 pt-4 border-t border-slate-500/10 flex items-center justify-center gap-2">
-              <span class="np-status-dot" />
-              <span class="text-[0.65rem] font-mono text-slate-400/40 uppercase tracking-widest">
-                Policy Active &bull; Netpulse Security
-              </span>
+            <div>
+              <label class="block text-[0.65rem] uppercase tracking-wider mb-1.5 font-mono text-[var(--np-text-muted)]">
+                Confirm New Password
+              </label>
+              <input
+                v-model="forceConfirmPassword"
+                type="password"
+                class="np-neon-input w-full rounded-lg px-4 py-2.5 text-xs font-mono"
+                placeholder="••••••••••••"
+                required
+              />
             </div>
+
+            <div class="pt-2">
+              <button
+                type="submit"
+                class="np-login-btn w-full rounded-lg px-4 py-2.5 text-xs font-semibold flex items-center justify-center gap-2"
+                :disabled="forceSubmitting"
+              >
+                <LoaderCircle v-if="forceSubmitting" class="h-4 w-4 animate-spin" :stroke-width="1.7" />
+                <span>{{ forceSubmitting ? "Updating…" : "Update password" }}</span>
+              </button>
+            </div>
+
+            <p v-if="forceError" class="text-center text-xs text-rose-400 font-mono">
+              {{ forceError }}
+            </p>
+          </form>
+
+          <div class="mt-6 pt-4 border-t border-[var(--np-border-subtle)] flex items-center justify-center gap-2">
+            <span class="np-status-dot" />
+            <span class="text-[0.65rem] font-mono text-[var(--np-text-dim)] uppercase tracking-widest">
+              Signed in &bull; Netpulse
+            </span>
           </div>
         </div>
-      </template>
+      </div>
 
       <!-- Standard Shell -->
       <template v-else>
-      <header class="sticky top-0 z-40 w-full border-b border-[var(--np-border-subtle)] bg-[var(--np-glass-bg)] backdrop-blur-md transition-all duration-200">
-        <div class="w-full mx-auto px-4 md:px-6 h-16 flex items-center justify-between gap-4">
-          
-          <!-- Left: Logo & Netpulse title -->
-          <div class="flex items-center gap-2.5 shrink-0">
-            <div class="h-8 w-8 rounded-lg flex items-center justify-center bg-emerald-500/15 border border-emerald-500/35 shadow-lg shadow-emerald-500/5">
-              <img v-if="!logoError" src="/logo.png" alt="NP" class="h-4.5 w-4.5 object-contain" @error="logoError = true" />
-              <span v-else class="text-[0.65rem] font-bold font-mono text-emerald-400">NP</span>
-            </div>
-            <div class="flex flex-col">
-              <div class="flex items-center gap-1.5 leading-none">
-                <span class="text-xs uppercase tracking-widest np-header-logo-text">NetPulse</span>
-                <span class="text-[0.5rem] px-1 py-0.2 rounded font-mono np-header-logo-version">v0.1.0</span>
-              </div>
-              <span class="text-[0.55rem] uppercase tracking-widest mt-0.5 np-header-logo-subtitle">Command Console</span>
+        <!-- Left: 64px icon rail (desktop) -->
+        <aside
+          class="hidden md:flex fixed left-0 top-0 z-40 h-screen w-16 flex-col items-center border-r border-[var(--np-border-subtle)] bg-[var(--np-surface)]/85 backdrop-blur-xl"
+        >
+          <!-- Brand -->
+          <div class="flex h-16 w-full items-center justify-center border-b border-[var(--np-border-subtle)]">
+            <div class="np-brand-bg np-brand-border np-brand-text flex h-9 w-9 items-center justify-center rounded-xl border shadow-lg shadow-[0_0_14px_var(--np-accent-glow)]">
+              <BrandMark :size="20" />
             </div>
           </div>
 
-          <!-- Center: Pill Navigation Capsule -->
-          <nav class="hidden lg:flex items-center bg-[var(--np-surface-elevated)] border border-[var(--np-border-subtle)] rounded-full p-1 gap-0.5 shadow-inner">
+          <!-- Quick actions, vertically centered: things you fire, not page links -->
+          <nav class="flex flex-1 flex-col items-center justify-center gap-1.5 w-full px-2">
             <button
-              v-for="item in navItems"
+              v-for="item in railActions"
               :key="item.id"
               type="button"
-              @click="navigateTo(item.id)"
-              class="px-4 py-2 rounded-full text-[0.7rem] uppercase tracking-wider transition-all duration-150 flex items-center gap-1.5 border border-transparent np-nav-btn"
-              :class="{ 'active shadow': isActive(item.id) }"
+              :title="item.label"
+              :aria-label="item.label"
+              @click.stop.prevent="runRailAction(item.id)"
+              class="group relative flex h-10 w-10 items-center justify-center rounded-xl border transition-all duration-200"
+              :class="
+                activePanel === item.id
+                  ? 'np-brand-border np-brand-bg np-brand-text shadow-[0_0_18px_var(--np-accent-glow)]'
+                  : 'border-transparent text-[var(--np-text-dim)] hover:border-[var(--np-border-subtle)] hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)]'
+              "
             >
-              <span>{{ item.label }}</span>
+              <component :is="item.icon" class="h-[18px] w-[18px]" :stroke-width="1.7" />
+              <span
+                v-if="item.id === 'sweep' && discovering"
+                class="absolute -right-0.5 -top-0.5 h-2 w-2 animate-ping rounded-full bg-[var(--np-accent)]"
+              />
+              <!-- Tooltip -->
+              <span
+                class="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-md border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)] px-2 py-1 text-[0.6rem] font-mono uppercase tracking-wider text-[var(--np-text)] opacity-0 shadow-lg transition-opacity group-hover:opacity-100"
+              >
+                {{ item.label }}
+              </span>
             </button>
           </nav>
 
-          <!-- Right: Action utilities & Profile -->
-          <div class="flex items-center gap-2">
-            <!-- Cmd+K Hint Trigger -->
+          <div class="pb-4 text-[0.5rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">v0.1</div>
+        </aside>
+
+        <!-- Invisible click-catcher so a tap outside closes the panel.
+             It used to paint an opaque surface over the whole viewport, which
+             greyed out the entire app for a small popover — the page behind
+             stays fully visible now. -->
+        <div
+          v-if="activePanel"
+          class="fixed inset-0 z-[45] bg-transparent"
+          @click="closePanel"
+        />
+
+        <!-- Quick nmap scan -->
+        <section
+          v-if="activePanel === 'scan'"
+          class="glass-card glass-card--static fixed left-[4.5rem] top-1/2 z-[60] w-[19.5rem] -translate-y-1/2 p-4 max-sm:left-3 max-sm:right-3 max-sm:top-20 max-sm:w-auto max-sm:translate-y-0"
+        >
+          <header class="flex items-start justify-between gap-2">
+            <div>
+              <p class="text-[0.55rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Quick scan</p>
+              <h2 class="mt-0.5 text-sm font-bold text-[var(--np-text)]">nmap without leaving the page</h2>
+            </div>
             <button
               type="button"
-              @click="ui.openCommandPalette()"
-              class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full transition-all text-xs np-header-search"
-              title="Open command palette"
+              class="rounded-md p-1 text-[var(--np-text-dim)] transition-colors hover:text-[var(--np-text)]"
+              aria-label="Close"
+              @click="closePanel"
             >
-              <span class="text-[0.65rem] font-bold">Search…</span>
-              <kbd class="text-[0.55rem] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-bold">⌘K</kbd>
+              <X class="h-4 w-4" :stroke-width="1.7" />
             </button>
+          </header>
 
-            <!-- Theme Switcher -->
+          <label class="mt-3 block text-[0.6rem] font-mono uppercase tracking-wider text-[var(--np-text-dim)]">
+            Target
+          </label>
+          <input
+            v-model="scanTarget"
+            type="text"
+            placeholder="192.168.1.0/24 or one-host"
+            class="np-neon-input mt-1 w-full px-3 py-2 font-mono text-xs"
+            @keyup.enter="runQuickScan"
+          />
+
+          <label class="mt-2.5 block text-[0.6rem] font-mono uppercase tracking-wider text-[var(--np-text-dim)]">
+            Profile
+          </label>
+          <select v-model="scanProfile" class="np-neon-input mt-1 w-full cursor-pointer px-2 py-2 text-xs">
+            <option v-for="p in scanProfiles" :key="p.command" :value="p.label">{{ p.label }}</option>
+          </select>
+
+          <div class="mt-3 flex gap-2">
             <button
               type="button"
-              @click="toggleTheme"
-              class="p-2 rounded-full transition-all np-header-theme-btn"
-              :title="isNightshade ? 'Switch to SysAdmin' : 'Switch to Nightshade'"
+              class="np-cyber-btn flex-1 py-2 text-[0.65rem] uppercase tracking-wider"
+              :disabled="scanBusy || discovering"
+              @click="runQuickScan"
             >
-              <svg v-if="isNightshade" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-              </svg>
-              <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-              </svg>
+              {{ scanBusy ? "Queuing…" : "Run scan" }}
             </button>
+            <button
+              type="button"
+              class="rounded-xl border border-[var(--np-border-subtle)] px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-wider text-[var(--np-text-muted)] transition-colors hover:text-[var(--np-text)]"
+              @click="navigateTo('toolbox'); closePanel()"
+            >
+              Toolbox
+            </button>
+          </div>
 
-            <!-- Profile Dropdown (using CSS hover for dropdown display) -->
-            <div class="relative group">
+          <p v-if="lastScanId" class="np-accent-text mt-2 font-mono text-[0.6rem]">
+            Scan {{ lastScanId }} queued — watch live output in the Toolbox.
+          </p>
+        </section>
+
+        <!-- Terminal / MobaXterm -->
+        <section
+          v-if="activePanel === 'terminal'"
+          class="glass-card glass-card--static fixed left-[4.5rem] top-1/2 z-[60] w-[19.5rem] -translate-y-1/2 p-4 max-sm:left-3 max-sm:right-3 max-sm:top-20 max-sm:w-auto max-sm:translate-y-0"
+        >
+          <header class="flex items-start justify-between gap-2">
+            <div>
+              <p class="text-[0.55rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Desktop</p>
+              <h2 class="mt-0.5 text-sm font-bold text-[var(--np-text)]">Open MobaXterm</h2>
+            </div>
+            <button
+              type="button"
+              class="rounded-md p-1 text-[var(--np-text-dim)] transition-colors hover:text-[var(--np-text)]"
+              aria-label="Close"
+              @click="closePanel"
+            >
+              <X class="h-4 w-4" :stroke-width="1.7" />
+            </button>
+          </header>
+
+          <p v-if="!termInfo" class="mt-3 text-xs text-[var(--np-text-dim)]">Checking what's installed…</p>
+
+          <template v-else>
+            <div v-if="termInfo.available" class="mt-3 flex flex-col gap-1.5">
               <button
+                v-for="opt in termInfo.options"
+                :key="opt.index"
                 type="button"
-                class="flex items-center gap-2 pl-2 pr-3 py-1 rounded-full transition-all text-left np-header-profile-btn"
+                class="flex items-center justify-between rounded-xl border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)]/60 px-3 py-2 text-left text-xs font-semibold text-[var(--np-text)] transition-colors hover:border-[var(--np-border)] disabled:opacity-50"
+                :disabled="termBusy"
+                @click="openTerminal(opt.index)"
               >
-                <div class="w-6 h-6 rounded-full flex items-center justify-center text-[0.65rem] font-bold bg-emerald-500/20 text-emerald-600 border border-emerald-500/35">
-                  {{ (auth.user?.email?.[0] || "U").toUpperCase() }}
-                </div>
-                <div class="hidden md:flex flex-col text-xs leading-tight">
-                  <span class="truncate max-w-[80px] np-header-profile-name">{{ auth.user?.email?.split('@')[0] || "Operator" }}</span>
-                  <span class="text-[0.55rem] font-mono uppercase tracking-wider np-header-profile-role">{{ auth.user?.role || "operator" }}</span>
-                </div>
-                <svg class="w-3 h-3 np-header-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                </svg>
+                <span>{{ opt.name }}</span>
+                <span class="np-accent-text font-mono text-[0.6rem]">Open</span>
               </button>
-              
-              <!-- Dropdown Menu -->
-              <div class="absolute right-0 mt-2 w-48 rounded-xl border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)] backdrop-blur-md shadow-xl py-1 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200 z-[100]">
-                <div class="px-4 py-2 border-b border-[var(--np-border-subtle)]">
-                  <p class="text-[0.6rem] text-[var(--np-text-dim)] uppercase tracking-widest font-mono font-bold">Operator</p>
-                  <p class="text-xs font-bold text-[var(--np-text)] truncate mt-0.5">{{ auth.user?.email || "operator@netpulse.local" }}</p>
+              <p class="mt-1 text-[0.6rem] text-[var(--np-text-dim)]">
+                Found on this machine — nothing is executed unless you click it.
+              </p>
+            </div>
+
+            <div v-else class="mt-3">
+              <p class="text-xs text-[var(--np-text-muted)]">{{ termInfo.note }}</p>
+              <a
+                v-if="termInfo.download_url"
+                :href="termInfo.download_url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="np-cyber-btn mt-3 inline-block w-full py-2 text-center text-[0.65rem] uppercase tracking-wider"
+              >
+                Download MobaXterm
+              </a>
+            </div>
+          </template>
+        </section>
+
+        <!-- Content column, offset by the rail -->
+        <div class="flex min-h-screen flex-col md:pl-16">
+          <!-- Sticky header: text tabs left, utilities right -->
+          <header
+            class="sticky top-0 z-30 w-full border-b border-[var(--np-border-subtle)] bg-[var(--np-glass-bg)] backdrop-blur-xl"
+          >
+            <div class="flex h-16 items-center justify-between gap-3 px-4 md:px-8">
+              <!-- Mobile brand -->
+              <div class="flex items-center gap-2 md:hidden">
+                <div class="np-brand-bg np-brand-border np-brand-text flex h-8 w-8 items-center justify-center rounded-lg border">
+                  <BrandMark :size="17" />
+                </div>
+                <span class="text-xs uppercase tracking-widest font-semibold">NetPulse</span>
+              </div>
+
+              <!-- Desktop text tabs with active underline -->
+              <nav class="hidden md:flex h-16 items-stretch gap-1 overflow-x-auto">
+                <button
+                  v-for="item in headerTabs"
+                  :key="item.id"
+                  type="button"
+                  @click="navigateTo(item.id)"
+                  class="relative px-4 text-[0.72rem] font-semibold uppercase tracking-wider transition-colors"
+                  :class="
+                    isActive(item.id)
+                      ? 'text-[var(--np-text)]'
+                      : 'text-[var(--np-text-dim)] hover:text-[var(--np-text)]'
+                  "
+                >
+                  {{ item.label }}
+              <span
+                v-if="isActive(item.id)"
+                class="absolute inset-x-3 bottom-0 h-[2px] rounded-full bg-[var(--np-accent)] shadow-[0_0_12px_var(--np-accent-glow)]"
+              />
+                </button>
+              </nav>
+
+              <!-- Utilities -->
+              <div class="flex items-center gap-1.5 sm:gap-2">
+                <button
+                  type="button"
+                  @click="router.push('/settings')"
+                  class="flex items-center gap-2 rounded-full border px-3 py-1.5 text-[0.65rem] font-semibold transition-all"
+                  :class="
+                    isActive('settings')
+                      ? 'border-[var(--np-accent-border)] bg-[var(--np-accent-soft)] text-[var(--np-accent)]'
+                      : 'border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)]/60 text-[var(--np-text-dim)] hover:border-[var(--np-border)] hover:text-[var(--np-text)]'
+                  "
+                  title="Settings"
+                  aria-label="Settings"
+                >
+                  <Settings class="h-3.5 w-3.5" :stroke-width="1.7" />
+                  <span class="hidden lg:inline">Settings</span>
+                </button>
+
+                <button
+                  type="button"
+                  @click="router.push('/logs')"
+                  class="relative flex h-9 w-9 items-center justify-center rounded-full border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)]/60 text-[var(--np-text-dim)] transition-all hover:text-[var(--np-text)]"
+                  title="Notifications"
+                >
+                  <Bell class="h-4 w-4" :stroke-width="1.7" />
+                  <span class="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]" />
+                </button>
+
+                <button
+                  type="button"
+                  @click="toggleTheme"
+                  class="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)]/60 text-[var(--np-text-dim)] transition-all hover:text-[var(--np-text)]"
+                  :title="isNightshade ? 'Switch to light' : 'Switch to dark'"
+                >
+                  <Moon v-if="isNightshade" class="h-4 w-4" :stroke-width="1.7" />
+                  <Sun v-else class="h-4 w-4" :stroke-width="1.7" />
+                </button>
+
+                <!-- Profile menu (click to open, Escape/outside click to close) -->
+                <div class="relative" data-profile-menu>
+                  <button
+                    type="button"
+                    :aria-expanded="profileOpen"
+                    aria-haspopup="menu"
+                    @click="toggleProfile"
+                    class="flex items-center gap-2 rounded-full border py-1 pl-1 pr-2 transition-all hover:border-[var(--np-border)]"
+                    :class="profileOpen ? 'border-[var(--np-border)] bg-[var(--np-surface-hover)]' : 'border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)]/60'"
+                  >
+                    <div class="np-brand-bg np-brand-border np-brand-text flex h-7 w-7 items-center justify-center rounded-full border text-[0.65rem] font-bold">
+                      {{ profileInitial }}
+                    </div>
+                    <ChevronDown class="h-3 w-3 text-[var(--np-text-dim)]" :stroke-width="1.7" />
+                  </button>
+
+                  <div
+                    v-if="profileOpen"
+                    role="menu"
+                    class="absolute right-0 top-full z-[100] mt-2 w-52 rounded-xl border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)] py-1 shadow-2xl"
+                  >
+                    <div class="border-b border-[var(--np-border-subtle)] px-4 py-2">
+                      <p class="text-[0.55rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Signed in as</p>
+                      <p class="mt-0.5 truncate text-xs font-bold text-[var(--np-text)]">{{ profileLabel }}</p>
+                      <p v-if="profileDetail" class="truncate text-[0.6rem] text-[var(--np-text-dim)]">{{ profileDetail }}</p>
+                      <p class="np-brand-text text-[0.55rem] font-mono uppercase tracking-wider">{{ auth.user?.role }}</p>
+                    </div>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      @click="closeProfile(); handleLogout()"
+                      class="flex w-full items-center gap-2.5 px-4 py-2 text-xs font-bold text-[var(--np-danger)] transition-colors hover:bg-[var(--np-surface-hover)]"
+                    >
+                      Logout
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Hamburger (mobile) -->
+                <button
+                  type="button"
+                  @click="mobileMenuOpen = !mobileMenuOpen"
+                  class="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)]/60 text-[var(--np-text-dim)] transition-all hover:text-[var(--np-text)] md:hidden"
+                  title="Menu"
+                  aria-label="Menu"
+                >
+                  <Menu class="h-4 w-4" :stroke-width="1.7" />
+                </button>
+              </div>
+            </div>
+          </header>
+
+          <!-- Mobile navigation overlay -->
+          <div
+            v-if="mobileMenuOpen"
+            class="fixed inset-0 z-40 bg-[var(--np-surface-elevated)] backdrop-blur-sm md:hidden"
+            @click="mobileMenuOpen = false"
+          />
+
+          <transition name="drawer">
+            <aside
+              v-if="mobileMenuOpen"
+              class="fixed right-0 top-0 z-50 flex h-full w-[min(18rem,86vw)] flex-col gap-6 overflow-y-auto border-l border-[var(--np-border-subtle)] bg-[var(--np-surface)] p-5 shadow-2xl md:hidden"
+            >
+              <div class="flex items-center justify-between border-b border-[var(--np-border-subtle)] pb-4">
+                <span class="text-xs font-bold uppercase tracking-wider text-[var(--np-text-dim)]">Navigation</span>
+                <button @click="mobileMenuOpen = false" class="p-1 text-[var(--np-text-muted)]" aria-label="Close menu">
+                  <X class="h-5 w-5" :stroke-width="1.7" />
+                </button>
+              </div>
+
+              <nav class="flex flex-col gap-1">
+                <button
+                  v-for="item in navItems"
+                  :key="item.id"
+                  type="button"
+                  @click="navigateTo(item.id)"
+                  class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider transition-all"
+                  :class="
+                    isActive(item.id)
+                      ? 'np-brand-bg np-brand-text np-brand-border border'
+                      : 'text-[var(--np-text-dim)] hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)] border border-transparent'
+                  "
+                >
+                  <component :is="item.icon" class="h-4 w-4 shrink-0" :stroke-width="1.7" />
+                  {{ item.label }}
+                </button>
+              </nav>
+
+              <div class="mt-auto flex flex-col gap-3 border-t border-[var(--np-border-subtle)] pt-4">
+                <div class="px-1">
+                  <span class="block truncate text-xs font-bold text-[var(--np-text)]">{{ profileLabel }}</span>
+                  <span class="np-brand-text text-[0.55rem] font-mono uppercase tracking-wider">{{ auth.user?.role }}</span>
                 </div>
                 <button
                   type="button"
                   @click="handleLogout"
-                  class="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors text-left font-bold"
+                  class="flex w-full items-center justify-center gap-2 rounded-xl border border-rose-500/25 bg-rose-500/10 py-2.5 text-xs font-bold uppercase tracking-wider text-rose-400"
                 >
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                  </svg>
-                  <span>Logout</span>
+                  Logout
                 </button>
               </div>
-            </div>
+            </aside>
+          </transition>
 
-            <!-- Hamburger Button for Mobile -->
-            <button
-              type="button"
-              @click="mobileMenuOpen = !mobileMenuOpen"
-              class="lg:hidden p-2 rounded-full border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)] text-[var(--np-text-dim)] hover:text-emerald-500 hover:border-emerald-500/35 transition-all"
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-          </div>
+          <!-- Canvas -->
+          <main class="flex-1 px-4 py-6 md:px-8 md:py-8">
+            <div class="mx-auto w-full max-w-[1600px]">
+              <RouterView v-slot="{ Component }">
+                <component
+                  :is="Component"
+                  :theme="ui.theme"
+                  :is-admin="auth.isAdmin"
+                  @login-success="handleAuthSuccess"
+                  @register-success="handleAuthSuccess"
+                  @switch-to-register="router.push('/register')"
+                  @switch-to-login="router.push('/login')"
+                  @toggle-theme="ui.setTheme(ui.theme === 'nightshade' ? 'sysadmin' : 'nightshade')"
+                  @toast="(type: any, msg: string) => toastRef?.show(type, msg)"
+                />
+              </RouterView>
+            </div>
+          </main>
         </div>
-      </header>
-
-      <!-- Mobile navigation overlay backdrop -->
-      <div
-        v-if="mobileMenuOpen"
-        class="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden transition-opacity"
-        @click="mobileMenuOpen = false"
-      />
-
-      <!-- Mobile navigation menu -->
-      <transition name="drawer">
-        <aside
-          v-if="mobileMenuOpen"
-          class="fixed top-0 right-0 z-50 w-64 h-full bg-[var(--np-surface-elevated)] border-l border-[var(--np-border-subtle)] p-6 flex flex-col gap-6 lg:hidden shadow-2xl"
-        >
-          <div class="flex items-center justify-between border-b border-[var(--np-border-subtle)] pb-4">
-            <span class="text-xs font-bold uppercase tracking-wider text-[var(--np-text-dim)]">Navigation</span>
-            <button @click="mobileMenuOpen = false" class="p-1 text-[var(--np-text-muted)] hover:text-[var(--np-text)]">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-          </div>
-
-          <nav class="flex flex-col gap-2">
-            <button
-              v-for="item in navItems"
-              :key="item.id"
-              type="button"
-              @click="navigateTo(item.id)"
-              class="w-full text-left px-4 py-3 rounded-xl text-xs uppercase tracking-wider transition-all border border-transparent np-nav-btn"
-              :class="{ 'active': isActive(item.id) }"
-            >
-              {{ item.label }}
-            </button>
-          </nav>
-
-          <div class="mt-auto border-t border-[var(--np-border-subtle)] pt-4 flex flex-col gap-3">
-            <div class="flex items-center gap-2 px-1">
-              <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold bg-emerald-500/20 text-emerald-600 border border-emerald-500/35">
-                {{ (auth.user?.email?.[0] || "U").toUpperCase() }}
-              </div>
-              <div class="flex flex-col text-xs leading-none">
-                <span class="text-[var(--np-text)] font-bold truncate max-w-[120px]">{{ auth.user?.email || "Operator" }}</span>
-                <span class="text-[0.55rem] text-emerald-600 font-mono uppercase tracking-wider mt-0.5 font-bold">{{ auth.user?.role || "operator" }}</span>
-              </div>
-            </div>
-            <button
-              type="button"
-              @click="handleLogout"
-              class="w-full flex items-center justify-center gap-2.5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider bg-rose-500/10 text-rose-500 border border-rose-500/25 hover:bg-rose-500/20 transition-all"
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-              <span>Logout</span>
-            </button>
-          </div>
-        </aside>
-      </transition>
-
-      <!-- Main content view (contained within standard maximum width layout) -->
-      <main class="flex-1 w-full mx-auto px-4 md:px-6 py-6 overflow-y-auto relative z-10">
-        <RouterView v-slot="{ Component }">
-          <component
-            :is="Component"
-            :theme="ui.theme"
-            :is-admin="auth.isAdmin"
-            :info-mode="infoMode"
-            @update:infoMode="infoMode = $event"
-            @login-success="handleAuthSuccess"
-            @register-success="handleAuthSuccess"
-            @switch-to-register="router.push('/register')"
-            @switch-to-login="router.push('/login')"
-            @toggle-theme="ui.setTheme(ui.theme === 'nightshade' ? 'sysadmin' : 'nightshade')"
-            @toast="(type: any, msg: string) => toastRef?.show(type, msg)"
-          />
-        </RouterView>
-      </main>
+      </template>
     </template>
-  </template>
 
     <Toast ref="toastRef" :theme="ui.theme" />
+
+    <!-- Theme switch sweep. Decorative only: it is removed on animationend. -->
+    <div
+      v-if="themeWipe"
+      :key="themeWipe"
+      class="np-theme-wipe"
+      :style="{ background: themeWipeFill }"
+      @animationend="themeWipe = 0"
+    />
   </div>
 </template>

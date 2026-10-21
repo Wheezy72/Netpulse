@@ -11,6 +11,7 @@ This module:
 """
 
 import asyncio
+import os
 import statistics
 from dataclasses import dataclass
 from datetime import datetime
@@ -41,14 +42,18 @@ async def _ping_target(target: str, count: int = 15, timeout: int = 1) -> PingRe
       returns non-zero on partial loss.
     """
 
+    # Windows ping has different flags (-n / -w, in milliseconds) and its
+    # output never says "packets transmitted". Without this branch every target
+    # looked 100% lost on Windows, which is why Pulse appeared broken.
+    is_windows = os.name == "nt"
+    if is_windows:
+        argv = ["ping", "-n", str(count), "-w", str(max(1, timeout) * 1000), target]
+    else:
+        argv = ["ping", "-c", str(count), "-W", str(timeout), target]
+
     try:
         process = await asyncio.create_subprocess_exec(
-            "ping",
-            "-c",
-            str(count),
-            "-W",
-            str(timeout),
-            target,
+            *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -60,20 +65,35 @@ async def _ping_target(target: str, count: int = 15, timeout: int = 1) -> PingRe
 
     latencies: List[float] = []
     for line in stdout.splitlines():
-        if "bytes from" in line and "time=" in line:
-            try:
-                # Example: "64 bytes from 1.1.1.1: icmp_seq=1 ttl=57 time=12.3 ms"
-                time_part = line.split("time=", 1)[1]
-                ms_str = time_part.split()[0]
-                latencies.append(float(ms_str))
-            except (IndexError, ValueError):
-                continue
+        if "time" not in line or ("bytes from" not in line and "Reply from" not in line):
+            continue
+        try:
+            # Linux: "64 bytes from 1.1.1.1: icmp_seq=1 ttl=57 time=12.3 ms"
+            # Windows: "Reply from 1.1.1.1: bytes=32 time=12ms TTL=117"
+            # Sub-millisecond replies: "time<1ms".
+            time_part = line.split("time", 1)[1].lstrip("=<> ")
+            if time_part.lower().startswith("time"):
+                time_part = time_part[4:].lstrip("=<> ")
+            ms_str = time_part.split()[0].replace("ms", "").strip()
+            latencies.append(float(ms_str) if ms_str else 0.5)
+        except (IndexError, ValueError):
+            continue
 
     # Prefer summary line parsing for tx/rx/loss.
     sent = None
     received = None
     loss_pct = None
     for line in stdout.splitlines():
+        if "Lost =" in line and "loss" in line:
+            # Windows: "Packets: Sent = 4, Received = 4, Lost = 0 (0% loss),"
+            try:
+                parts = line.replace("%", "").split(",")
+                sent = int(parts[0].split("=")[1].strip())
+                received = int(parts[1].split("=")[1].strip())
+                loss_pct = float(parts[2].split("(")[1].split()[0])
+                break
+            except (IndexError, ValueError):
+                pass
         if "packets transmitted" in line and "packet loss" in line:
             # e.g. "15 packets transmitted, 14 received, 6% packet loss, time 14014ms"
             try:

@@ -24,7 +24,6 @@ from app.services.latency_monitor import monitor_latency
 from app.services.packet_capture import capture_to_pcap
 from app.services.recon import passive_arp_discovery
 from app.services.script_executor import execute_script
-from app.services.snmp_poller import poll_network_metrics as poll_network_metrics_service
 
 logger = get_task_logger(__name__)
 
@@ -169,21 +168,6 @@ def passive_arp_discovery_task() -> None:
                 except ValueError as exc:
                     # Interface not found or not usable; log and skip rather than crashing.
                     logger.warning("Passive ARP discovery skipped: %s", exc)
-        finally:
-            await engine.dispose()
-
-    asyncio.run(_run())
-
-
-@celery_app.task(name="app.tasks.poll_network_metrics")
-def poll_network_metrics() -> None:
-    """Celery task that polls configured routers via SNMP and stores real metrics."""
-
-    async def _run() -> None:
-        engine, factory = _create_session_factory()
-        try:
-            async with factory() as session:
-                await poll_network_metrics_service(session)
         finally:
             await engine.dispose()
 

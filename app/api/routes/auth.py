@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import secrets
 from datetime import datetime, timedelta
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from email_validator import EmailNotValidError, validate_email
+from jose import jwt
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -17,6 +19,8 @@ from app.api.deps import (
     db_session,
     get_current_user,
     get_password_hash,
+    optional_current_user,
+    subject_for_user,
     verify_password,
     security_scheme,
 )
@@ -32,17 +36,30 @@ _RATE_LIMIT_KEY_PREFIX = "np:login_attempts:"
 _RATE_LIMIT_MAX_ATTEMPTS = 5
 _RATE_LIMIT_WINDOW_SECONDS = 300
 
+# Password recovery is unauthenticated and every request mints a fresh secret
+# and writes it to the log, so it gets a tighter bucket of its own.
+_RESET_RATE_LIMIT_KEY_PREFIX = "np:reset_attempts:"
+_RESET_RATE_LIMIT_MAX_ATTEMPTS = 5
+_RESET_RATE_LIMIT_WINDOW_SECONDS = 900
 
-def _rate_limit_key_for_ip(client_ip: str) -> str:
-    return f"{_RATE_LIMIT_KEY_PREFIX}{client_ip}"
+# Usernames are shown in the UI and used to sign in, so keep them predictable.
+USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{3,64}$")
 
 
-async def _enforce_login_rate_limit(request: Request) -> None:
-    """Block the request if the client IP has exceeded the login attempt ceiling.
+async def _enforce_rate_limit(
+    request: Request,
+    *,
+    key_prefix: str,
+    max_attempts: int,
+    window_seconds: int,
+    message: str,
+) -> None:
+    """Block the request once the client IP exceeds the attempt ceiling.
 
-    Uses a Redis sorted-set sliding window: timestamps are members scored by their
-    Unix epoch, so ZREMRANGEBYSCORE + ZCARD runs atomically in a single pipeline.
-    
+    Uses a Redis sorted-set sliding window: timestamps are members scored by
+    their Unix epoch, so ZREMRANGEBYSCORE + ZCARD + ZADD run atomically in a
+    single pipeline.
+
     Extracts the real client IP from X-Forwarded-For or X-Real-IP headers to
     properly handle proxied requests.
     """
@@ -53,25 +70,57 @@ async def _enforce_login_rate_limit(request: Request) -> None:
         client_ip = x_forwarded_for.split(",")[0].strip()
     elif x_real_ip := request.headers.get("X-Real-IP"):
         client_ip = x_real_ip.strip()
-    
+
     redis_client = get_redis()
-    rate_limit_key = _rate_limit_key_for_ip(client_ip)
+    rate_limit_key = f"{key_prefix}{client_ip}"
     current_unix_time = datetime.utcnow().timestamp()
-    window_start_time = current_unix_time - _RATE_LIMIT_WINDOW_SECONDS
+    window_start_time = current_unix_time - window_seconds
 
     async with redis_client.pipeline(transaction=True) as pipeline:
         pipeline.zremrangebyscore(rate_limit_key, "-inf", window_start_time)
         pipeline.zcard(rate_limit_key)
         pipeline.zadd(rate_limit_key, {str(current_unix_time): current_unix_time})
-        pipeline.expire(rate_limit_key, _RATE_LIMIT_WINDOW_SECONDS)
+        pipeline.expire(rate_limit_key, window_seconds)
         results = await pipeline.execute()
 
     attempt_count_before_this_request = results[1]
-    if attempt_count_before_this_request >= _RATE_LIMIT_MAX_ATTEMPTS:
+    if attempt_count_before_this_request >= max_attempts:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many login attempts. Please try again later.",
+            detail=message,
         )
+
+
+async def _enforce_login_rate_limit(request: Request) -> None:
+    """Ceiling on sign-in attempts per client IP."""
+    await _enforce_rate_limit(
+        request,
+        key_prefix=_RATE_LIMIT_KEY_PREFIX,
+        max_attempts=_RATE_LIMIT_MAX_ATTEMPTS,
+        window_seconds=_RATE_LIMIT_WINDOW_SECONDS,
+        message="Too many login attempts. Please try again later.",
+    )
+
+
+async def _enforce_reset_rate_limit(request: Request) -> None:
+    """Ceiling on password-reset requests and token attempts per client IP."""
+    await _enforce_rate_limit(
+        request,
+        key_prefix=_RESET_RATE_LIMIT_KEY_PREFIX,
+        max_attempts=_RESET_RATE_LIMIT_MAX_ATTEMPTS,
+        window_seconds=_RESET_RATE_LIMIT_WINDOW_SECONDS,
+        message="Too many password reset requests. Please try again later.",
+    )
+
+
+def token_subject_for(user: User) -> str:
+    """Subject to put in a token for this user.
+
+    The email stays the subject whenever there is one: the WebSocket endpoints
+    and any token already in the wild resolve users that way. Accounts created
+    without an address fall back to the id form.
+    """
+    return user.email or subject_for_user(user)
 
 
 class TokenResponse(BaseModel):
@@ -115,17 +164,48 @@ class LoginRequest(BaseModel):
     remember_me: bool = False
 
 
-class CreateUserRequest(EmailRequest):
+class CreateUserRequest(BaseModel):
+    """Registration payload.
+
+    An email address is optional: an account can be created with a username
+    only and attach an address later from Settings, which is what makes
+    password recovery possible for it.
+    """
+
     username: str
+    email: str | None = None
     password: str
     full_name: str | None = None
     setup_token: str | None = None
+    # Only honoured for an authenticated admin; anyone else is forced to the
+    # default viewer role.
+    role: str | None = None
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value: str) -> str:
+        candidate = (value or "").strip()
+        if not USERNAME_PATTERN.match(candidate):
+            raise ValueError(
+                "Username must be 3-64 characters: letters, digits, dot, dash or underscore."
+            )
+        return candidate
+
+    @field_validator("email")
+    @classmethod
+    def validate_optional_email(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        candidate = value.strip()
+        if not candidate:
+            return None
+        return _normalize_email(candidate)
 
 
 class UserMeResponse(BaseModel):
     id: int
     username: str
-    email: str
+    email: str | None = None
     full_name: str | None = None
     role: UserRole
     force_password_change: bool
@@ -151,10 +231,12 @@ async def login(
             detail="Incorrect username or password",
         )
 
-    if user.auth_provider != "local" or not user.hashed_password:
+    # Accounts without a local password hash (e.g. imported OAuth users) cannot
+    # sign in locally; a generic message avoids leaking which accounts exist.
+    if not user.hashed_password:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="This account uses Google sign-in. Please use the Google button to log in.",
+            detail="Incorrect username or password",
         )
 
     if not verify_password(payload.password, user.hashed_password):
@@ -169,7 +251,7 @@ async def login(
         else timedelta(minutes=settings.access_token_expire_minutes)
     )
     token = create_access_token(
-        subject=user.email,
+        subject=token_subject_for(user),
         role=user.role.value,
         expires_delta=access_token_expires,
     )
@@ -199,7 +281,7 @@ async def logout(
             exp = payload.get("exp", 0)
             current_time = int(datetime.utcnow().timestamp())
             ttl = max(exp - current_time, 0)
-            
+
             if ttl > 0:
                 import hashlib
                 digest = hashlib.sha256(token.encode()).hexdigest()[:32]
@@ -241,6 +323,7 @@ async def read_current_user(
 async def create_user(
     payload: CreateUserRequest,
     db: AsyncSession = Depends(db_session),
+    caller: User | None = Depends(optional_current_user),
 ) -> Dict[str, Any]:
     """Create a new local user.
 
@@ -255,7 +338,12 @@ async def create_user(
     existing_any = await db.execute(select(User).limit(1))
     first_user = existing_any.scalar_one_or_none()
 
-    existing = await db.execute(select(User).where((User.email == payload.email) | (User.username == payload.username)))
+    # Only compare the email when one was supplied: `User.email == None` compiles
+    # to IS NULL and would match every other account created without an address.
+    conditions = [User.username == payload.username]
+    if payload.email:
+        conditions.append(User.email == payload.email)
+    existing = await db.execute(select(User).where(or_(*conditions)))
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -277,17 +365,37 @@ async def create_user(
             )
 
     if first_user and not settings.allow_open_signup:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User signup is disabled. Ask an administrator to provision access.",
-        )
+        # Closed signup: only an admin may add accounts. Without this, anyone
+        # who could reach the port could mint a viewer account for themselves.
+        if caller is None or caller.role != UserRole.ADMIN:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User signup is disabled. Ask an administrator to provision access.",
+            )
+
+    # The first account owns the box. After that everyone is a viewer unless
+    # an authenticated admin explicitly asks for admin — and even then only
+    # when open signup is closed, so a self-registered account cannot
+    # promote itself.
+    if not first_user:
+        assigned_role = UserRole.ADMIN
+    elif payload.role and caller is not None and caller.role == UserRole.ADMIN:
+        try:
+            assigned_role = UserRole(payload.role.strip().lower())
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown role. Use 'admin' or 'viewer'.",
+            ) from None
+    else:
+        assigned_role = UserRole.VIEWER
 
     user = User(
         username=payload.username,
         email=payload.email,
         full_name=payload.full_name,
         hashed_password=get_password_hash(payload.password),
-        role=UserRole.ADMIN if not first_user else UserRole.OPERATOR,
+        role=assigned_role,
     )
     db.add(user)
     await db.commit()
@@ -357,6 +465,7 @@ async def update_password(
 @router.post(
     "/forgot-password",
     summary="Request a password reset token",
+    dependencies=[Depends(_enforce_reset_rate_limit)],
 )
 async def forgot_password(
     payload: ForgotPasswordRequest,
@@ -365,7 +474,10 @@ async def forgot_password(
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
 
-    if user is None or user.auth_provider != "local":
+    # Accounts without a local password or without an address cannot recover by
+    # email. Return the same generic message so the response never reveals which
+    # accounts exist or which one is missing an address.
+    if user is None or user.auth_provider != "local" or not user.email:
         # Return generic message to prevent user enumeration
         return {"message": "If an account with that email exists, a reset link has been generated."}
 
@@ -386,6 +498,7 @@ async def forgot_password(
 @router.post(
     "/reset-password",
     summary="Reset password using a valid reset token",
+    dependencies=[Depends(_enforce_reset_rate_limit)],
 )
 async def reset_password(
     payload: ResetPasswordRequest,
@@ -422,4 +535,3 @@ async def reset_password(
     await db.commit()
 
     return {"message": "Password has been reset successfully. You can now sign in."}
-

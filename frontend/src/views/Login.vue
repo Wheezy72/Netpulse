@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import axios from "axios";
 import { useRouter } from "vue-router";
+
+import { Eye, EyeOff, LoaderCircle } from "lucide-vue-next";
+
+import { describeRequestError } from "../utils/requestError";
 import { computed, onMounted, onUnmounted, ref, nextTick } from "vue";
 
 type Theme = "nightshade" | "sysadmin";
@@ -14,12 +18,21 @@ const router = useRouter();
 
 const isNightshade = computed(() => props.theme === "nightshade");
 
+// Particle field hue follows the active theme's accent (emerald in dark,
+// indigo in light) instead of hardcoded purple, so the background never
+// paints a colour that belongs to the other theme.
+const particleHue = computed(() => (isNightshade.value ? 158 : 243));
+
 const username = ref("");
 const password = ref("");
 const showPassword = ref(false);
 const rememberMe = ref(true);
 const isSubmitting = ref(false);
 const errorMessage = ref<string | null>(null);
+// The status line used to claim "Secure Connection · System Online" whatever
+// was actually true. It now asks the API, so a phone that cannot reach this
+// machine is told before the first sign-in attempt fails.
+const serverReachable = ref<boolean | null>(null);
 const showContent = ref(false);
 
 const typedTitle = ref("");
@@ -28,8 +41,6 @@ const showField1 = ref(false);
 const showField2 = ref(false);
 const showButton = ref(false);
 const showStatus = ref(false);
-const googleEnabled = ref(false);
-const googleClientId = ref("");
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 let animationId: number | null = null;
@@ -49,7 +60,6 @@ interface Particle {
   vy: number;
   radius: number;
   opacity: number;
-  hue: number;
 }
 
 function initParticles(canvas: HTMLCanvasElement): Particle[] {
@@ -63,7 +73,6 @@ function initParticles(canvas: HTMLCanvasElement): Particle[] {
       vy: (Math.random() - 0.5) * 0.4,
       radius: Math.random() * 1.8 + 0.5,
       opacity: Math.random() * 0.3 + 0.1,
-      hue: Math.random() > 0.5 ? 280 : 310, // Purple or Magenta
     });
   }
   return particles;
@@ -82,9 +91,12 @@ function animateCanvas() {
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const accentColor = isNightshade.value
-      ? { r: 232, g: 121, b: 249 }  // emerald-400
-      : { r: 245, g: 158, b: 11 };  // amber-500
+    const hue = particleHue.value;
+    // The same alpha that reads as a glow on a dark surface reads as a
+    // smudge on a light one, so the field is painted deeper and stronger
+    // in the light theme. Without this the light pages look dead.
+    const strength = isNightshade.value ? 1 : 2.1;
+    const lightness = isNightshade.value ? 60 : 46;
 
     for (let i = 0; i < particles.length; i++) {
       const p = particles[i];
@@ -96,7 +108,7 @@ function animateCanvas() {
 
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fillStyle = `hsla(${p.hue}, 80%, 65%, ${p.opacity})`;
+      ctx.fillStyle = `hsla(${hue}, 75%, ${lightness}%, ${Math.min(p.opacity * strength, 0.65)})`;
       ctx.fill();
 
       for (let j = i + 1; j < particles.length; j++) {
@@ -105,11 +117,11 @@ function animateCanvas() {
         const dy = p.y - p2.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist < connectionDist) {
-          const alpha = (1 - dist / connectionDist) * 0.12;
+          const alpha = (1 - dist / connectionDist) * (isNightshade.value ? 0.12 : 0.24);
           ctx.beginPath();
           ctx.moveTo(p.x, p.y);
           ctx.lineTo(p2.x, p2.y);
-          ctx.strokeStyle = `hsla(290, 70%, 60%, ${alpha})`;
+          ctx.strokeStyle = `hsla(${hue}, 65%, 55%, ${alpha})`;
           ctx.lineWidth = 0.5;
           ctx.stroke();
         }
@@ -149,8 +161,20 @@ function typeTitle() {
   }, 120);
 }
 
+/** Ask the API whether this machine can be reached at all. */
+async function checkServer(): Promise<void> {
+  try {
+    await axios.get("/api/health/live", { timeout: 4000 });
+    serverReachable.value = true;
+  } catch {
+    serverReachable.value = false;
+  }
+}
+
 onMounted(async () => {
   await nextTick();
+
+  void checkServer();
 
   const canvas = canvasRef.value;
   if (canvas) {
@@ -165,7 +189,6 @@ onMounted(async () => {
   }, 530);
 
   typeTitle();
-  loadGoogleConfig();
 
   setTimeout(() => { showContent.value = true; }, 100);
   setTimeout(() => { showField1.value = true; }, 400);
@@ -180,28 +203,6 @@ onUnmounted(() => {
   if (typingInterval !== null) clearInterval(typingInterval);
   window.removeEventListener("resize", handleResize);
 });
-
-async function loadGoogleConfig(): Promise<void> {
-  try {
-    const { data } = await axios.get<{ client_id: string | null; enabled: boolean }>(
-      "/api/auth/google/config"
-    );
-    googleEnabled.value = data.enabled;
-    googleClientId.value = data.client_id || "";
-  } catch {
-    googleEnabled.value = false;
-  }
-}
-
-function handleGoogleLogin(): void {
-  if (!googleClientId.value) return;
-  const state = crypto.randomUUID();
-  sessionStorage.setItem("np-oauth-state", state);
-  const redirectUri = `${window.location.origin}/auth/google/callback`;
-  const scope = encodeURIComponent("openid email profile");
-  const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${googleClientId.value}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scope}&state=${state}&access_type=offline&prompt=consent`;
-  window.location.href = url;
-}
 
 async function handleSubmit(): Promise<void> {
   errorMessage.value = null;
@@ -222,8 +223,9 @@ async function handleSubmit(): Promise<void> {
       }
     );
     emit("login-success", { token: data.access_token, rememberMe: rememberMe.value });
-  } catch {
-    errorMessage.value = "Access denied. Check your credentials.";
+  } catch (error) {
+    // An unreachable server is not a wrong password; say which one happened.
+    errorMessage.value = describeRequestError(error, "That username and password don't match.");
   } finally {
     isSubmitting.value = false;
   }
@@ -231,7 +233,7 @@ async function handleSubmit(): Promise<void> {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center relative overflow-hidden bg-[#0a0a14]">
+  <div class="min-h-screen flex items-center justify-center relative overflow-hidden" :style="{ backgroundColor: 'var(--np-bg)' }">
     <canvas
       ref="canvasRef"
       class="absolute inset-0 w-full h-full"
@@ -251,11 +253,11 @@ async function handleSubmit(): Promise<void> {
         <div class="text-center mb-8">
           <h1 class="np-login-title text-2xl tracking-wide mb-1">
             <span>{{ typedTitle }}</span><span
-              class="inline-block w-[2px] h-[1.1em] ml-[2px] align-middle bg-emerald-400"
-              :style="{ opacity: showCursor ? 1 : 0 }"
+              class="inline-block w-[2px] h-[1.1em] ml-[2px] align-middle"
+              :style="{ backgroundColor: 'var(--np-accent)', opacity: showCursor ? 1 : 0 }"
             />
           </h1>
-          <p class="text-xs font-mono text-slate-400/50">
+          <p class="text-xs font-mono text-[var(--np-text-muted)]">
             Network Operations Console
           </p>
         </div>
@@ -265,14 +267,14 @@ async function handleSubmit(): Promise<void> {
             class="np-stagger-item"
             :class="showField1 ? 'np-stagger-visible' : 'np-stagger-hidden'"
           >
-            <label class="block text-xs uppercase tracking-wider mb-2 font-mono text-slate-300/60">
+            <label class="block text-xs font-medium mb-2 text-[var(--np-text-muted)]">
               Username
             </label>
             <input
               v-model="username"
               type="text"
               autocomplete="username"
-              class="np-neon-input w-full rounded-lg px-4 py-3 text-sm font-mono bg-[#0d0a1b]"
+              class="np-neon-input w-full rounded-lg px-4 py-3 text-sm"
               placeholder="admin"
             />
           </div>
@@ -281,7 +283,7 @@ async function handleSubmit(): Promise<void> {
             class="np-stagger-item"
             :class="showField2 ? 'np-stagger-visible' : 'np-stagger-hidden'"
           >
-            <label class="block text-xs uppercase tracking-wider mb-2 font-mono text-slate-300/60">
+            <label class="block text-xs font-medium mb-2 text-[var(--np-text-muted)]">
               Password
             </label>
             <div class="relative">
@@ -289,25 +291,18 @@ async function handleSubmit(): Promise<void> {
                 v-model="password"
                 :type="showPassword ? 'text' : 'password'"
                 autocomplete="current-password"
-                class="np-neon-input w-full rounded-lg px-4 py-3 pr-11 text-sm font-mono"
+                class="np-neon-input w-full rounded-lg px-4 py-3 pr-11 text-sm"
                 placeholder="••••••••••••"
               />
               <button
                 type="button"
                 @click="showPassword = !showPassword"
-                class="absolute inset-y-0 right-0 flex items-center px-3 transition-opacity text-emerald-400/50 hover:text-emerald-400"
+                class="absolute inset-y-0 right-0 flex items-center px-3 transition-opacity np-dim-text hover:np-brand-text"
                 tabindex="-1"
                 :title="showPassword ? 'Hide password' : 'Show password'"
               >
-                <!-- Eye open -->
-                <svg v-if="!showPassword" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
-                <!-- Eye closed -->
-                <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                </svg>
+                <Eye v-if="!showPassword" class="w-4 h-4" :stroke-width="1.7" />
+                <EyeOff v-else class="w-4 h-4" :stroke-width="1.7" />
               </button>
             </div>
           </div>
@@ -321,16 +316,17 @@ async function handleSubmit(): Promise<void> {
               <input
                 v-model="rememberMe"
                 type="checkbox"
-                class="rounded accent-emerald-500"
+                class="rounded"
+                :style="{ accentColor: 'var(--np-accent)' }"
               />
-              <span class="text-xs font-mono text-slate-300/60">
+              <span class="text-xs font-mono text-[var(--np-text-muted)]">
                 Remember me
               </span>
             </label>
             <button
               type="button"
               @click="router.push('/forgot-password')"
-              class="text-xs transition-colors text-slate-400/50 hover:text-emerald-400"
+              class="text-xs transition-colors np-dim-text hover:np-brand-text"
             >
               Forgot password?
             </button>
@@ -343,56 +339,27 @@ async function handleSubmit(): Promise<void> {
             <button
               type="submit"
               class="np-login-btn w-full rounded-lg px-4 py-3 text-sm font-semibold flex items-center justify-center gap-2"
+              :class="theme === 'sysadmin' ? 'np-login-btn--solid' : ''"
               :disabled="isSubmitting"
             >
-              <!-- Spinner -->
-              <svg
-                v-if="isSubmitting"
-                class="w-4 h-4 animate-spin"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-              </svg>
+              <LoaderCircle v-if="isSubmitting" class="w-4 h-4 animate-spin" :stroke-width="1.7" />
               <span>{{ isSubmitting ? "Signing in…" : "Sign In" }}</span>
             </button>
           </div>
 
-          <p v-if="errorMessage" class="text-center text-sm text-rose-400">
+          <p v-if="errorMessage" class="text-center text-sm text-[var(--np-danger)]">
             {{ errorMessage }}
           </p>
         </form>
 
-        <div v-if="googleEnabled" class="mt-5">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="flex-1 h-px bg-slate-500/20" />
-            <span class="text-xs font-mono text-slate-400/40">or</span>
-            <div class="flex-1 h-px bg-slate-500/20" />
-          </div>
-          <button
-            type="button"
-            @click="handleGoogleLogin"
-            class="w-full flex items-center justify-center gap-3 rounded-lg px-4 py-3 text-sm font-medium border transition-all duration-300 hover:scale-[1.01] border-slate-500/20 bg-slate-500/5 text-slate-200 hover:bg-slate-500/10 hover:border-emerald-400/30"
-          >
-            <svg class="w-5 h-5" viewBox="0 0 24 24">
-              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-            </svg>
-            Sign in with Google
-          </button>
-        </div>
-
-        <div class="mt-6 pt-5 border-t border-slate-500/15 text-center">
-          <p class="text-xs text-slate-400/40 mb-2">
+        <div class="mt-6 pt-5 border-t border-[var(--np-border-subtle)] text-center">
+          <p class="mb-2 text-xs text-[var(--np-text-dim)]">
             Don't have an account?
           </p>
           <button
             type="button"
             @click="emit('switch-to-register')"
-            class="text-sm transition-colors text-emerald-400 hover:text-emerald-300"
+            class="text-sm transition-colors np-brand-text hover:np-brand-strong"
           >
             Create Account
           </button>
@@ -403,9 +370,15 @@ async function handleSubmit(): Promise<void> {
         class="np-stagger-item mt-6 flex items-center justify-center gap-2"
         :class="showStatus ? 'np-stagger-visible' : 'np-stagger-hidden'"
       >
-        <span class="np-status-dot" />
-        <span class="text-xs font-mono tracking-wider text-emerald-400/50">
-          Secure Connection &bull; System Online
+        <span class="np-status-dot" :class="serverReachable === false ? 'np-status-dot--down' : ''" />
+        <span class="text-[0.7rem] np-dim-text">
+          {{
+            serverReachable === null
+              ? 'Checking the server…'
+              : serverReachable
+                ? 'Server reachable'
+                : 'Cannot reach the server'
+          }}
         </span>
       </div>
     </div>
@@ -420,8 +393,8 @@ async function handleSubmit(): Promise<void> {
   border-radius: 50%;
   pointer-events: none;
   z-index: 1;
-  border: 1px solid rgba(168, 85, 247, 0.08);
-  box-shadow: 0 0 60px rgba(217, 70, 239, 0.04), inset 0 0 60px rgba(139, 92, 246, 0.02);
+  border: 1px solid color-mix(in srgb, var(--np-accent) 12%, transparent);
+  box-shadow: 0 0 60px color-mix(in srgb, var(--np-accent) 6%, transparent), inset 0 0 60px color-mix(in srgb, var(--np-accent) 4%, transparent);
   animation: pulseRing 5s ease-in-out infinite;
 }
 .np-pulse-ring--delayed {
@@ -436,19 +409,32 @@ async function handleSubmit(): Promise<void> {
 }
 
 .np-login-btn {
-  background: linear-gradient(135deg, rgba(217, 70, 239, 0.2), rgba(168, 85, 247, 0.15));
-  border: 1px solid rgba(217, 70, 239, 0.4);
-  color: #f0abfc;
+  background: color-mix(in srgb, var(--np-accent) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--np-accent) 45%, transparent);
+  color: var(--np-accent-strong);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  transition: all 0.3s ease;
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
   position: relative;
   overflow: hidden;
 }
+/* Light theme: a pale indigo pill with indigo type reads as disabled.
+   A solid accent fill makes the primary action unmistakable. */
+.np-login-btn--solid {
+  background: var(--np-accent);
+  border-color: var(--np-accent);
+  color: #ffffff;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--np-accent) 22%, transparent);
+}
+.np-login-btn--solid:hover {
+  background: var(--np-accent-strong);
+  border-color: var(--np-accent-strong);
+}
+
 .np-login-btn:hover {
-  background: linear-gradient(135deg, rgba(217, 70, 239, 0.3), rgba(168, 85, 247, 0.25));
-  border-color: rgba(217, 70, 239, 0.6);
-  box-shadow: 0 0 30px rgba(217, 70, 239, 0.2);
+  background: color-mix(in srgb, var(--np-accent) 30%, transparent);
+  border-color: color-mix(in srgb, var(--np-accent) 65%, transparent);
+  box-shadow: 0 0 30px color-mix(in srgb, var(--np-accent) 25%, transparent);
 }
 .np-login-btn:disabled {
   opacity: 0.5;
@@ -488,12 +474,19 @@ async function handleSubmit(): Promise<void> {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #d946ef;
-  box-shadow: 0 0 8px rgba(217, 70, 239, 0.5);
+  background: var(--np-accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--np-accent) 50%, transparent);
   animation: statusPulse 2s ease-in-out infinite;
 }
+
+/* Unreachable: stop pulsing, because nothing is there to answer. */
+.np-status-dot--down {
+  background: var(--np-danger);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--np-danger) 50%, transparent);
+  animation: none;
+}
 @keyframes statusPulse {
-  0%, 100% { box-shadow: 0 0 4px rgba(217, 70, 239, 0.3); }
-  50% { box-shadow: 0 0 14px rgba(217, 70, 239, 0.7); }
+  0%, 100% { box-shadow: 0 0 4px color-mix(in srgb, var(--np-accent) 30%, transparent); }
+  50% { box-shadow: 0 0 14px color-mix(in srgb, var(--np-accent) 70%, transparent); }
 }
 </style>

@@ -132,8 +132,10 @@ if %errorLevel% equ 0 (
         echo [+] Nmap found in Program Files!
         set "PATH=C:\Program Files (x86)\Nmap;%PATH%"
     ) else (
-        echo [!] Nmap not found. Install from https://nmap.org/download.html
-        echo     Scanning features will be limited without Nmap.
+        echo [!] Nmap is required. Install it from https://nmap.org/download.html
+        echo     then run this script again.
+        pause
+        exit /b 1
     )
 )
 
@@ -185,8 +187,6 @@ if not exist ".env" (
         echo # Email Alerts
         echo ENABLE_EMAIL_ALERTS=false
         echo.
-        echo # WhatsApp Alerts
-        echo ENABLE_WHATSAPP_ALERTS=false
         echo.
         echo # AI Assistant (optional)
         echo # OPENAI_API_KEY=sk-...

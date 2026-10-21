@@ -62,7 +62,7 @@ class NetFlowProtocol(asyncio.DatagramProtocol):
 
         header = struct.unpack("!HHIIIIBBH", data[:24])
         count = header[1]
-        
+
         # Each record is 48 bytes
         record_offset = 24
         expected_len = 24 + (count * 48)
@@ -74,7 +74,7 @@ class NetFlowProtocol(asyncio.DatagramProtocol):
             for i in range(count):
                 offset = record_offset + (i * 48)
                 record_data = data[offset : offset + 48]
-                
+
                 # Format for 48 bytes NetFlow v5 record:
                 # !IIIHHIIIIHHBBBBHHBBH
                 # srcaddr (4B), dstaddr (4B), nexthop (4B), input (2B), output (2B),
@@ -82,7 +82,7 @@ class NetFlowProtocol(asyncio.DatagramProtocol):
                 # pad1 (1B), tcp_flags (1B), prot (1B), tos (1B), src_as (2B), dst_as (2B),
                 # src_mask (1B), dst_mask (1B), pad2 (2B)
                 rec = struct.unpack("!IIIHHIIIIHHBBBBHHBBH", record_data)
-                
+
                 src_ip = self.ip_to_str(rec[0])
                 dst_ip = self.ip_to_str(rec[1])
                 packets = rec[5]
@@ -148,11 +148,11 @@ class NetFlowProtocol(asyncio.DatagramProtocol):
 async def start_flow_collector() -> None:
     """Start NetFlow daemon background task."""
     loop = asyncio.get_running_loop()
-    
+
     import socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    
+
     if hasattr(socket, "SO_REUSEPORT"):
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
 

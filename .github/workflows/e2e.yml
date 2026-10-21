@@ -25,12 +25,12 @@ jobs:
       - name: Copy env defaults
         run: cp .env.example .env
 
-      # Start the core backend services (probe excluded: requires NET_RAW / host networking).
-      # celery_worker and celery_beat are also excluded here; they depend on
-      # app being healthy, which this job verifies first.
+      # Start the core backend services.
+      # celery_worker is excluded here; it depends on app being healthy,
+      # which this job verifies first.
       - name: Start core services
         run: |
-          docker compose up -d db pgbouncer redis rabbitmq influxdb app
+          docker compose up -d db redis app
 
       # Wait up to 5 minutes for the app container's healthcheck to turn green,
       # then assert the liveness endpoint returns HTTP 200.

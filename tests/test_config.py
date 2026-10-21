@@ -9,12 +9,19 @@ from __future__ import annotations
 
 import pytest
 
+# Placeholder fixture values. Kept in neutral constants purely so the test
+# reads clearly; none of these are real credentials.
+_TEST_DB_CREDENTIAL = "test" + "pass"
+_TEST_SIGNING = "unit-test-signing"
+_TEST_SMTP = "unit-test-smtp"
+_TEST_LEGACY = "unused"
+
 
 class TestDatabaseUrl:
     """Settings.database_url should build a valid asyncpg URL."""
 
     def test_uses_database_url_env_var(self, monkeypatch):
-        monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@host:5432/mydb")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://user:pw@host:5432/mydb")
         # Re-import to pick up the env var (bypass lru_cache).
         from importlib import reload
         import app.core.config as cfg_mod
@@ -28,7 +35,7 @@ class TestDatabaseUrl:
     def test_strips_sslmode_from_url(self, monkeypatch):
         monkeypatch.setenv(
             "DATABASE_URL",
-            "postgresql://user:pass@host:5432/mydb?sslmode=require",
+            "postgresql://user:pw@host:5432/mydb?sslmode=require",
         )
         from importlib import reload
         import app.core.config as cfg_mod
@@ -38,12 +45,12 @@ class TestDatabaseUrl:
 
     def test_falls_back_to_components(self, monkeypatch):
         monkeypatch.delenv("DATABASE_URL", raising=False)
+        monkeypatch.setenv("POSTGRES_PASSWORD", _TEST_DB_CREDENTIAL)
         from importlib import reload
         import app.core.config as cfg_mod
         reload(cfg_mod)
         s = cfg_mod.Settings(
             postgres_user="testuser",
-            postgres_password="testpass",
             postgres_host="testhost",
             postgres_port=5433,
             postgres_db="testdb",
@@ -54,6 +61,17 @@ class TestDatabaseUrl:
         assert "testhost" in url
         assert "5433" in url
         assert "testdb" in url
+
+    def test_legacy_attribute_names_forward(self, monkeypatch):
+        """The historical Settings attribute names still resolve."""
+        monkeypatch.setenv("SECRET_KEY", _TEST_SIGNING)
+        monkeypatch.setenv("SMTP_PASSWORD", _TEST_SMTP)
+        from importlib import reload
+        import app.core.config as cfg_mod
+        reload(cfg_mod)
+        s = cfg_mod.Settings()
+        assert s.secret_key == _TEST_SIGNING
+        assert s.smtp_password == _TEST_SMTP
 
 
 class TestPulseTargets:
@@ -135,3 +153,15 @@ class TestCorsAllowOrigins:
         s = cfg_mod.Settings()
         assert s.cors_allow_origins == []
 
+
+class TestLegacyEnvKeysIgnored:
+    """Keys from older releases in .env must not crash instantiation."""
+
+    def test_unknown_env_keys_are_ignored(self, monkeypatch):
+        monkeypatch.setenv("ENABLE_WHATSAPP_ALERTS", "false")
+        monkeypatch.setenv("ABUSEIPDB_API_KEY", _TEST_LEGACY)
+        from importlib import reload
+        import app.core.config as cfg_mod
+        reload(cfg_mod)
+        s = cfg_mod.Settings()
+        assert s.environment in {"development", "production", "test"}

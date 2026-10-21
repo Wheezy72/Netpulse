@@ -24,7 +24,6 @@ class UserSettings(Base):
 
     notification_settings: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
     ai_settings: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    threat_intel_settings: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
     scan_schedule: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(

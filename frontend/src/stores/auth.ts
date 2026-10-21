@@ -2,11 +2,15 @@ import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import axios from "axios";
 
-type Role = "admin" | "operator" | "auditor";
+/** Two roles: admin acts, viewer observes. */
+type Role = "admin" | "viewer";
 
 interface CurrentUser {
   id: number;
-  email: string;
+  /** The sign-in name. Accounts are created with a username and may have no
+   *  email at all, so this is the only identifier always present. */
+  username: string;
+  email: string | null;
   full_name: string | null;
   role: Role;
   force_password_change: boolean;

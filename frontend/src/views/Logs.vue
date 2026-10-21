@@ -3,12 +3,12 @@ import axios from "axios";
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
 import { RecycleScroller, DynamicScroller, DynamicScrollerItem } from "vue-virtual-scroller";
 import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
+import { Search } from "lucide-vue-next";
 
 type Theme = "nightshade" | "sysadmin";
 
 interface Props {
   theme: Theme;
-  infoMode?: "full" | "compact";
 }
 
 const props = defineProps<Props>();
@@ -106,20 +106,27 @@ function truncateMessage(msg: string, len = 60): string {
   return msg.length > len ? msg.slice(0, len) + "..." : msg;
 }
 
-const levelFilter = ref<string>("network");
+const levelFilter = ref<string>("all");
 const searchQuery = ref<string>("");
 const autoRefresh = ref(true);
 const refreshInterval = ref<number | null>(null);
 
 const isNightshade = computed(() => props.theme === "nightshade");
 
-const levelColors = {
-  debug: { bg: "bg-slate-500/20", text: "text-slate-400", border: "border-slate-500/40" },
-  info: { bg: "bg-emerald-500/20", text: "text-emerald-400", border: "border-emerald-500/40" },
-  warning: { bg: "bg-amber-500/20", text: "text-amber-400", border: "border-amber-500/40" },
-  error: { bg: "bg-rose-500/20", text: "text-rose-400", border: "border-rose-500/40" },
-  critical: { bg: "bg-red-600/30", text: "text-red-400", border: "border-red-500/50" },
+// Theme-aware level chips. The classes live in styles.css and resolve to the
+// dark or light semantic palette, so INFO is sky-blue (not emerald) in light
+// mode and nothing bleeds across themes.
+const levelClassMap: Record<string, string> = {
+  debug: "np-level-debug",
+  info: "np-level-info",
+  warning: "np-level-warning",
+  error: "np-level-error",
+  critical: "np-level-critical",
 };
+
+function levelClass(level: string): string {
+  return levelClassMap[level] ?? levelClassMap.info;
+}
 
 async function loadLogs(): Promise<void> {
   loading.value = true;
@@ -223,15 +230,13 @@ const syslogSourceFilter = ref("");
 const syslogSearchFilter = ref("");
 const syslogToggling = ref(false);
 
-function getSeverityStyle(severity: string): { style: string } {
+function getSeverityClass(severity: string): string {
   const s = severity.toLowerCase();
-  if (s === "emergency" || s === "alert" || s === "critical") {
-    return { style: "background: rgba(244, 63, 94, 0.08); color: #f43f5e; border-color: rgba(244, 63, 94, 0.2);" };
-  } else if (s === "error" || s === "warning") {
-    return { style: "background: rgba(245, 158, 11, 0.08); color: #f59e0b; border-color: rgba(245, 158, 11, 0.2);" };
-  } else {
-    return { style: "background: rgba(113, 105, 139, 0.08); color: #a69fbe; border-color: rgba(113, 105, 139, 0.2);" };
-  }
+  if (s === "emergency" || s === "alert" || s === "critical") return "np-level-critical";
+  if (s === "error") return "np-level-error";
+  if (s === "warning") return "np-level-warning";
+  if (s === "debug") return "np-level-debug";
+  return "np-level-info";
 }
 
 async function loadSyslogStatus(): Promise<void> {
@@ -345,10 +350,10 @@ onUnmounted(() => {
         :key="tab"
         @click="activeTab = (tab as 'application' | 'syslog')"
         class="px-4 py-2.5 text-xs font-semibold tracking-wider uppercase border-b-2 -mb-px transition-colors"
-        :style="activeTab === tab ? 'border-color: var(--np-accent-primary); color: var(--np-accent-primary);' : ''"
+        :style="activeTab === tab ? 'border-color: var(--np-accent); color: var(--np-accent);' : ''"
         :class="activeTab === tab
           ? ''
-          : 'border-transparent text-slate-400/50 hover:text-white hover:border-slate-500/30'"
+          : 'border-transparent text-[var(--np-text-dim)] hover:text-[var(--np-text)] hover:border-[var(--np-border)]'"
       >
         {{ tab === 'application' ? 'Application Logs' : 'Syslog Receiver' }}
       </button>
@@ -373,15 +378,19 @@ onUnmounted(() => {
           <button
             @click="toggleAutoRefresh"
             class="np-cyber-btn flex items-center gap-1.5"
-            :class="autoRefresh ? 'border-emerald-500/50 text-emerald-400' : ''"
+            :class="autoRefresh ? 'np-brand-border np-brand-text' : ''"
           >
-            <span class="w-1.5 h-1.5 rounded-full" :class="autoRefresh ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400/30'"></span>
+            <span
+              class="w-1.5 h-1.5 rounded-full"
+              :class="autoRefresh ? 'animate-pulse' : ''"
+              :style="autoRefresh ? { background: 'var(--np-accent)' } : { background: 'var(--np-text-dim)' }"
+            ></span>
             {{ autoRefresh ? 'Live' : 'Paused' }}
           </button>
           <button @click="loadLogs" :disabled="loading" class="np-cyber-btn disabled:opacity-40">
             {{ loading ? '…' : 'Refresh' }}
           </button>
-          <button @click="clearLogs" class="np-cyber-btn border-red-500/30 text-red-400 hover:border-red-400">Clear</button>
+          <button @click="clearLogs" class="np-cyber-btn np-level-error">Clear</button>
         </div>
       </header>
 
@@ -390,11 +399,11 @@ onUnmounted(() => {
         <div
           v-for="(count, level) in { debug: stats.debug, info: stats.info, warning: stats.warning, error: stats.error, critical: stats.critical }"
           :key="level"
-          class="flex items-center justify-between rounded border px-3 py-2"
-          :class="[(levelColors as any)[level].bg, (levelColors as any)[level].border]"
+          class="flex items-center justify-between rounded px-3 py-2"
+          :class="levelClass(level as string)"
         >
-          <span class="text-[0.65rem] font-semibold uppercase tracking-widest" :class="(levelColors as any)[level].text">{{ level }}</span>
-          <span class="font-mono text-sm font-bold" :class="(levelColors as any)[level].text">{{ count }}</span>
+          <span class="text-[0.65rem] font-semibold uppercase tracking-widest">{{ level }}</span>
+          <span class="font-mono text-sm font-bold">{{ count }}</span>
         </div>
       </div>
 
@@ -405,7 +414,6 @@ onUnmounted(() => {
           @change="loadLogs"
           class="np-neon-input px-3 py-1.5 text-xs"
         >
-          <option value="network">Network Activity</option>
           <option value="all">All Levels</option>
           <option value="debug">Debug</option>
           <option value="info">Info</option>
@@ -414,9 +422,7 @@ onUnmounted(() => {
           <option value="critical">Critical</option>
         </select>
         <div class="relative flex-1 min-w-[200px]">
-          <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style="color: var(--np-text-dim);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+          <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style="color: var(--np-text-dim);" :stroke-width="1.7" />
           <input
             v-model="searchQuery"
             type="text"
@@ -431,7 +437,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="error" class="rounded border border-red-500/40 bg-red-500/5 px-4 py-3 text-xs text-red-400">
+      <div v-if="error" class="np-level-error rounded px-4 py-3 text-xs">
         {{ error }}
       </div>
 
@@ -447,23 +453,23 @@ onUnmounted(() => {
           v-else
           class="h-[calc(100vh-28rem)] min-h-[300px]"
           :items="indexedLogs"
-          :item-size="infoMode === 'compact' ? 40 : 56"
+          :item-size="56"
           key-field="_idx"
           v-slot="{ item: log, index }"
         >
           <div
-            class="flex items-start gap-3 px-4 border-b transition-colors hover:bg-white/[0.025]"
+            class="flex items-start gap-3 px-4 border-b transition-colors hover:bg-[var(--np-surface-hover)]"
             style="border-color: var(--np-border-subtle);"
             :class="[
               { 'cursor-pointer': isErrorLevel(log.level) },
-              infoMode === 'compact' ? 'py-1' : 'py-2.5'
+              'py-2.5'
             ]"
             @click="isErrorLevel(log.level) ? toggleErrorExpand(index) : undefined"
           >
             <!-- Level badge -->
             <span
               class="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[0.6rem] font-bold uppercase"
-              :class="[(levelColors as any)[log.level]?.bg || levelColors.info.bg, (levelColors as any)[log.level]?.text || levelColors.info.text]"
+              :class="levelClass(log.level)"
             >{{ log.level }}</span>
 
             <div class="min-w-0 flex-1">
@@ -509,7 +515,11 @@ onUnmounted(() => {
         <div class="flex flex-wrap items-center gap-2">
           <!-- Status pip -->
           <div class="flex items-center gap-2 rounded border px-3 py-1.5 text-xs" style="border-color: var(--np-border);">
-            <span class="w-1.5 h-1.5 rounded-full" :class="syslogStatus.running ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400/30'"></span>
+            <span
+              class="w-1.5 h-1.5 rounded-full"
+              :class="syslogStatus.running ? 'animate-pulse' : ''"
+              :style="syslogStatus.running ? { background: 'var(--np-accent)' } : { background: 'var(--np-text-dim)' }"
+            ></span>
             <span style="color: var(--np-text-muted);">{{ syslogStatus.running ? 'Running' : 'Stopped' }}</span>
             <span class="font-mono" style="color: var(--np-text);">{{ syslogStatus.message_count }} msgs</span>
           </div>
@@ -517,14 +527,14 @@ onUnmounted(() => {
             @click="toggleSyslogListener"
             :disabled="syslogToggling"
             class="np-cyber-btn"
-            :class="syslogStatus.running ? 'border-red-500/40 text-red-400' : 'border-emerald-500/40 text-emerald-400'"
+            :class="syslogStatus.running ? 'np-level-error' : 'np-brand-border np-brand-text'"
           >
             {{ syslogToggling ? '…' : syslogStatus.running ? 'Stop' : 'Start' }}
           </button>
           <button @click="loadSyslogMessages" :disabled="syslogLoading" class="np-cyber-btn disabled:opacity-40">
             {{ syslogLoading ? '…' : 'Refresh' }}
           </button>
-          <button @click="clearSyslogMessages" class="np-cyber-btn border-red-500/30 text-red-400 hover:border-red-400">Clear All</button>
+          <button @click="clearSyslogMessages" class="np-cyber-btn np-level-error">Clear All</button>
         </div>
       </header>
 
@@ -557,7 +567,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="syslogError" class="rounded border border-red-500/40 bg-red-500/5 px-4 py-3 text-xs text-red-400">
+      <div v-if="syslogError" class="np-level-error rounded px-4 py-3 text-xs">
         {{ syslogError }}
       </div>
 
@@ -566,28 +576,28 @@ onUnmounted(() => {
         <div v-if="syslogMessages.length === 0 && !syslogLoading" class="p-8 text-center text-sm" style="color: var(--np-text-dim);">
           No syslog messages found
         </div>
-        <table v-else class="w-full text-left text-xs">
+        <table v-else class="w-full text-left text-xs tabular-nums">
           <thead>
             <tr>
-              <th class="px-4" :class="infoMode === 'compact' ? 'py-1' : 'py-2.5'">Timestamp</th>
-              <th class="px-4" :class="infoMode === 'compact' ? 'py-1' : 'py-2.5'">Source IP</th>
-              <th class="px-4" :class="infoMode === 'compact' ? 'py-1' : 'py-2.5'">Severity</th>
-              <th class="px-4" :class="infoMode === 'compact' ? 'py-1' : 'py-2.5'">Hostname</th>
-              <th class="px-4" :class="infoMode === 'compact' ? 'py-1' : 'py-2.5'">Message</th>
+              <th class="px-4" :class="'py-2.5'">Timestamp</th>
+              <th class="px-4" :class="'py-2.5'">Source IP</th>
+              <th class="px-4" :class="'py-2.5'">Severity</th>
+              <th class="px-4" :class="'py-2.5'">Hostname</th>
+              <th class="px-4" :class="'py-2.5'">Message</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(msg, idx) in syslogMessages" :key="idx" class="transition-colors hover:bg-white/[0.025]">
-              <td class="whitespace-nowrap px-4 font-mono" :class="infoMode === 'compact' ? 'py-0.5' : 'py-2'" style="color: var(--np-text-muted);">{{ msg.timestamp }}</td>
-              <td class="whitespace-nowrap px-4 font-mono" :class="infoMode === 'compact' ? 'py-0.5' : 'py-2'" style="color: var(--np-accent-secondary);">{{ msg.source_ip }}</td>
-              <td class="whitespace-nowrap px-4" :class="infoMode === 'compact' ? 'py-0.5' : 'py-2'">
-                <span class="rounded px-1.5 py-0.5 text-[0.6rem] font-bold uppercase border"
-                   :style="getSeverityStyle(msg.severity).style">
+            <tr v-for="(msg, idx) in syslogMessages" :key="idx" class="transition-colors hover:bg-[var(--np-surface-hover)]">
+              <td class="whitespace-nowrap px-4 font-mono" :class="'py-2'" style="color: var(--np-text-muted);">{{ msg.timestamp }}</td>
+              <td class="whitespace-nowrap px-4 font-mono" :class="'py-2'" style="color: var(--np-accent-secondary);">{{ msg.source_ip }}</td>
+              <td class="whitespace-nowrap px-4" :class="'py-2'">
+                <span class="rounded px-1.5 py-0.5 text-[0.6rem] font-bold uppercase"
+                   :class="getSeverityClass(msg.severity)">
                   {{ msg.severity }}
                 </span>
               </td>
-              <td class="whitespace-nowrap px-4 font-mono" :class="infoMode === 'compact' ? 'py-0.5' : 'py-2'" style="color: var(--np-text-dim);">{{ msg.hostname }}</td>
-              <td class="max-w-md truncate px-4 font-mono" :class="infoMode === 'compact' ? 'py-0.5' : 'py-2'" style="color: var(--np-text);" :title="msg.message">{{ msg.message }}</td>
+              <td class="whitespace-nowrap px-4 font-mono" :class="'py-2'" style="color: var(--np-text-dim);">{{ msg.hostname }}</td>
+              <td class="max-w-md truncate px-4 font-mono" :class="'py-2'" style="color: var(--np-text);" :title="msg.message">{{ msg.message }}</td>
             </tr>
           </tbody>
         </table>

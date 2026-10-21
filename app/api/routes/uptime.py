@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import db_session, require_admin, require_compliance_role
 
 from app.models.uptime import UptimeCheck, UptimeTarget
+from app.services.icmp import ping as icmp_ping
 
 router = APIRouter(prefix="/uptime", tags=["uptime"])
 
@@ -268,57 +269,29 @@ async def _ping_check(target: UptimeTarget, now: datetime) -> UptimeCheck:
             error_message="Invalid ping target",
         )
 
-    try:
-        process = await asyncio.create_subprocess_exec(
-            "ping", "-c", "3", "-W", "2", target.target,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=10)
+    # Three packets, two-second timeout, via the platform-correct helper
+    # (the previous inline call used Linux-only flags and reported every
+    # Windows host as down).
+    outcome = await icmp_ping(target.target, count=3, timeout_s=2.0)
 
-        if process.returncode != 0:
-            return UptimeCheck(
-                target_id=target.id,
-                timestamp=now,
-                status="down",
-                error_message="Ping failed (no response)",
-            )
-
-        latencies = []
-        for line in stdout.decode().splitlines():
-            if "time=" in line:
-                try:
-                    time_part = line.split("time=")[1]
-                    ms_str = time_part.split()[0]
-                    latencies.append(float(ms_str))
-                except (IndexError, ValueError):
-                    continue
-
-        avg_latency = sum(latencies) / len(latencies) if latencies else None
-        status = "up"
-        if avg_latency and avg_latency > 200:
-            status = "degraded"
-
-        return UptimeCheck(
-            target_id=target.id,
-            timestamp=now,
-            status=status,
-            latency_ms=avg_latency,
-        )
-    except asyncio.TimeoutError:
+    if not outcome.reachable:
         return UptimeCheck(
             target_id=target.id,
             timestamp=now,
             status="down",
-            error_message="Ping timed out",
+            error_message=outcome.error or "Ping failed (no response)",
         )
-    except Exception as e:
-        return UptimeCheck(
-            target_id=target.id,
-            timestamp=now,
-            status="down",
-            error_message=str(e)[:500],
-        )
+
+    status = "up"
+    if outcome.latency_ms and outcome.latency_ms > 200:
+        status = "degraded"
+
+    return UptimeCheck(
+        target_id=target.id,
+        timestamp=now,
+        status=status,
+        latency_ms=outcome.latency_ms,
+    )
 
 
 async def _http_check(target: UptimeTarget, now: datetime) -> UptimeCheck:

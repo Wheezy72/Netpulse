@@ -2,9 +2,9 @@
 Pytest configuration and shared fixtures for the NetPulse test suite.
 
 Tests are designed to run without any external services (no database,
-no Redis, no RabbitMQ). Each test file imports only the modules it
+no Redis). Each test file imports only the modules it
 needs — avoiding the full app.main initialisation chain — so that
-the suite can run in CI with a minimal set of pip packages.
+the suite runs in CI off requirements.txt (see .github/workflows/ci.yml).
 """
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ def _isolate_env(monkeypatch):
         "SECRET_KEY": "test-secret-key-for-ci",
         "DATABASE_URL": "postgresql+asyncpg://netpulse:netpulse@localhost:5432/netpulse",
         "REDIS_URL": "redis://localhost:6379/0",
-        "RABBITMQ_URL": "amqp://netpulse:netpulse@localhost:5672/netpulse",
         "ENVIRONMENT": "development",
     }
     for key, value in defaults.items():

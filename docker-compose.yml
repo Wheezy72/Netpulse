@@ -10,7 +10,9 @@ services:
       POSTGRES_DB: netpulse
       POSTGRES_USER: netpulse
       POSTGRES_PASSWORD: netpulse
-    # Port is intentionally NOT exposed externally - all app traffic goes via pgbouncer.
+    # Bound to localhost only – app traffic stays on the host loopback.
+    ports:
+      - "127.0.0.1:5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -20,67 +22,18 @@ services:
       retries: 10
       start_period: 30s
 
-  # Connection pooler – sits in front of Postgres, reduces connection overhead.
-  pgbouncer:
-    image: bitnamilegacy/pgbouncer:1.24.1
-    container_name: netpulse-pgbouncer
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      POSTGRESQL_HOST: db
-      POSTGRESQL_PORT: 5432
-      POSTGRESQL_DATABASE: netpulse
-      POSTGRESQL_USERNAME: netpulse
-      POSTGRESQL_PASSWORD: netpulse
-      PGBOUNCER_DATABASE: netpulse
-      PGBOUNCER_PORT: 5432
-      PGBOUNCER_POOL_MODE: session
-      PGBOUNCER_MAX_CLIENT_CONN: 200
-      PGBOUNCER_DEFAULT_POOL_SIZE: 25
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "true"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   redis:
     image: redis:7-alpine
     container_name: netpulse-redis
     restart: unless-stopped
+    # Bound to localhost only.
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-
-  # ---------------------------------------------------------------------------
-  # Message broker – RabbitMQ (used by the Rust probe for telemetry fan-out)
-  # ---------------------------------------------------------------------------
-  rabbitmq:
-    image: rabbitmq:3.13-management-alpine
-    container_name: netpulse-rabbitmq
-    restart: unless-stopped
-    environment:
-      RABBITMQ_DEFAULT_USER: netpulse
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-netpulse}
-      RABBITMQ_DEFAULT_VHOST: netpulse
-    ports:
-      - "5672:5672"    # AMQP
-      - "15672:15672"  # Management UI
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
 
   # ---------------------------------------------------------------------------
   # Application
@@ -94,7 +47,7 @@ services:
     restart: unless-stopped
     network_mode: host
     depends_on:
-      pgbouncer:
+      db:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -104,12 +57,11 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
-      # Run as root in container to allow raw sockets and packet capture capabilties
+      # Run as root in container to allow raw sockets and packet capture capabilities
     user: "0"
     environment:
       DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@127.0.0.1:5432/netpulse
       REDIS_URL: redis://127.0.0.1:6379/0
-      RABBITMQ_URL: amqp://netpulse:${RABBITMQ_PASSWORD:-netpulse}@127.0.0.1:5672/netpulse
       SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
       ENVIRONMENT: ${ENVIRONMENT:-production}
       BOOTSTRAP_ADMIN_ENABLED: ${BOOTSTRAP_ADMIN_ENABLED:-true}
@@ -124,10 +76,15 @@ services:
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["http://localhost:8000"]}
     volumes:
       - app_data:/app/data
+      # PCAPs land on the host so they can be opened directly in Wireshark
+      # (e.g. data/pcaps/capture_xxxx.pcap).
+      - ./data/pcaps:/app/data/pcaps
     cap_add:
       - NET_RAW
       - NET_ADMIN
 
+  # Celery worker with the beat scheduler embedded (-B) so a separate
+  # beat container is no longer needed.
   celery_worker:
     build:
       context: .
@@ -139,43 +96,12 @@ services:
     depends_on:
       app:
         condition: service_healthy
-      pgbouncer:
+      db:
         condition: service_healthy
       redis:
         condition: service_healthy
     # --concurrency=4 caps parallelism; --max-tasks-per-child=100 recycles workers to prevent memory leaks.
-    command: ["celery", "-A", "app.core.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=4", "--max-tasks-per-child=100"]
-    user: "0"
-    environment:
-      DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@127.0.0.1:5432/netpulse
-      REDIS_URL: redis://127.0.0.1:6379/0
-      RABBITMQ_URL: amqp://netpulse:${RABBITMQ_PASSWORD:-netpulse}@127.0.0.1:5672/netpulse
-      SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
-      ENVIRONMENT: ${ENVIRONMENT:-production}
-      SCRIPTS_BASE_DIR: /app/scripts
-      PCAP_STORAGE_DIR: /app/data/pcaps
-    volumes:
-      - app_data:/app/data
-    cap_add:
-      - NET_RAW
-      - NET_ADMIN
-
-  celery_beat:
-    build:
-      context: .
-      dockerfile: docker/backend.Dockerfile
-      network: host
-    container_name: netpulse-beat
-    restart: unless-stopped
-    network_mode: host
-    depends_on:
-      app:
-        condition: service_healthy
-      pgbouncer:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    command: ["celery", "-A", "app.core.celery_app.celery_app", "beat", "--loglevel=info"]
+    command: ["celery", "-A", "app.core.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=4", "--max-tasks-per-child=100", "--beat"]
     user: "0"
     environment:
       DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@127.0.0.1:5432/netpulse
@@ -186,24 +112,8 @@ services:
       PCAP_STORAGE_DIR: /app/data/pcaps
     volumes:
       - app_data:/app/data
-
-  # ---------------------------------------------------------------------------
-  # Data-plane probe (Rust) – passive packet capture, HL7/DICOM BPF drop, telemetry fan-out
-  # ---------------------------------------------------------------------------
-  probe:
-    build:
-      context: ./probes
-      dockerfile: Dockerfile
-      network: host
-    container_name: netpulse-probe
-    restart: unless-stopped
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    network_mode: host  # needs raw packet access
-    environment:
-      RABBITMQ_URL: amqp://netpulse:${RABBITMQ_PASSWORD:-netpulse}@localhost:5672/netpulse
-      PROBE_IFACE: ${PROBE_IFACE:-eth0}
+      # The worker indexes PCAPs, so it needs the same host-visible directory.
+      - ./data/pcaps:/app/data/pcaps
     cap_add:
       - NET_RAW
       - NET_ADMIN
@@ -211,4 +121,3 @@ services:
 volumes:
   db_data:
   app_data:
-  rabbitmq_data:

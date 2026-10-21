@@ -15,9 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, require_admin, require_compliance_role
 from app.core.config import settings
+from app.models.device import Device
 from app.models.enforcement_action import EnforcementAction
 from app.models.user import User
-from app.services.enforcement import isolate_switch_port
+from app.services.enforcement import isolate_host, isolate_switch_port, release_host
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -77,6 +78,11 @@ class AttemptKickRequest(BaseModel):
 
 class IsolateSwitchPortRequest(BaseModel):
     port: str
+    reason: str | None = None
+
+
+class IsolateHostRequest(BaseModel):
+    ip: str
     reason: str | None = None
 
 
@@ -318,6 +324,81 @@ async def attempt_kick(
 
     asyncio.create_task(_attempt_kick_worker(request.ip, request.duration_s))
     return {"status": "kick_scheduled", "ip": request.ip, "duration_s": request.duration_s}
+
+
+@router.post("/isolate")
+async def isolate_node(
+    request: IsolateHostRequest,
+    db: AsyncSession = Depends(db_session),
+    _user: User = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Isolate a node by dropping its traffic in this host's firewall.
+
+    This is real enforcement (iptables/nft on Linux, Windows Firewall on
+    Windows), not just a bookkeeping row. It refuses to run against the
+    network's default gateway to avoid cutting ourselves off.
+    """
+    if not _validate_ip(request.ip):
+        raise HTTPException(status_code=400, detail="Invalid IP address format")
+
+    gateway_stmt = select(Device).where(Device.is_gateway.is_(True))
+    gateways = (await db.execute(gateway_stmt)).scalars().all()
+    if any(g.ip_address == request.ip for g in gateways):
+        raise HTTPException(
+            status_code=400,
+            detail="Refusing to isolate the network gateway — that would cut this segment off.",
+        )
+
+    try:
+        result = await isolate_host(request.ip, reason=request.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=f"Firewall isolation failed: {exc}") from exc
+
+    db.add(
+        EnforcementAction(
+            ip=request.ip,
+            mac=None,
+            action_type="isolate",
+            reason=request.reason,
+            created_at=datetime.utcnow(),
+        )
+    )
+    await db.commit()
+
+    return {"status": "isolated", "ip": request.ip, **result}
+
+
+@router.post("/isolate/release")
+async def release_node(
+    request: UnblockRequest,
+    db: AsyncSession = Depends(db_session),
+    _user: User = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Undo a previous /isolate for this address."""
+    if not _validate_ip(request.ip):
+        raise HTTPException(status_code=400, detail="Invalid IP address format")
+
+    try:
+        result = await release_host(request.ip)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=f"Firewall release failed: {exc}") from exc
+
+    db.add(
+        EnforcementAction(
+            ip=request.ip,
+            mac=None,
+            action_type="unblock",
+            reason="isolation released",
+            created_at=datetime.utcnow(),
+        )
+    )
+    await db.commit()
+
+    return {"status": "released", "ip": request.ip, **result}
 
 
 @router.post("/switch-port/isolate")

@@ -129,6 +129,12 @@ case $PKG_MGR in
   pacman) install_packages_pacman ;;
 esac
 
+if ! command -v nmap >/dev/null 2>&1; then
+  print_error "nmap is required but was not installed. Install it and re-run."
+  exit 1
+fi
+print_success "nmap present: $(nmap --version | head -n 1)"
+
 print_status "Ensuring PostgreSQL service is running..."
 if command -v systemctl >/dev/null 2>&1; then
   systemctl enable postgresql || true
@@ -198,11 +204,6 @@ SMTP_PASSWORD=
 ALERT_EMAIL_FROM=
 ALERT_EMAIL_TO=
 
-# WhatsApp Alerts
-ENABLE_WHATSAPP_ALERTS=false
-WHATSAPP_API_URL=
-WHATSAPP_API_TOKEN=
-WHATSAPP_RECIPIENT=
 
 # AI Assistant (optional)
 # OPENAI_API_KEY=sk-...

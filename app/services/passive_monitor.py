@@ -10,7 +10,6 @@ from scapy.all import ARP, BOOTP, DHCP, Ether, Packet, sniff  # type: ignore[imp
 
 from app.core.config import settings
 from app.services.recon import record_probe_telemetry
-from app.services.splunk_service import get_splunk_service
 
 logger = logging.getLogger(__name__)
 
@@ -81,18 +80,6 @@ async def evaluate_signature(event: DiscoveryEvent) -> DiscoveryEvent:
         "payload": event.payload,
     }
     await record_probe_telemetry(telemetry, source="passive_monitor")
-
-    if not event.trusted:
-        await get_splunk_service().emit(
-            {
-                "type": "passive.discovery.anomaly",
-                "severity": "high",
-                "signature": event.signature,
-                "source_mac": event.source_mac,
-                "source_ip": event.source_ip,
-                "payload": event.payload,
-            }
-        )
 
     return event
 

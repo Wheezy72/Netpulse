@@ -31,20 +31,16 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
-    path: "/packets",
-    redirect: "/toolbox",
-  },
-  {
     path: "/logs",
     name: "logs",
     component: () => import("../views/Logs.vue"),
     meta: { requiresAuth: true },
   },
   {
+    // The offline "Backup Friend" assistant duplicated the device views —
+    // removed. Old bookmarks land on the canonical inventory instead.
     path: "/offline-assistant",
-    name: "offline-assistant",
-    component: () => import("../views/OfflineAssistant.vue"),
-    meta: { requiresAuth: true },
+    redirect: "/devices",
   },
   {
     path: "/settings",
@@ -55,7 +51,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: "/login",
     name: "login",
-    component: () => import("../views/Login.vue"),
+    component: () => import("../views/LoginView.vue"),
     meta: { guest: true },
   },
   {
@@ -80,6 +76,8 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
+  // Every navigation starts at the top of the canvas.
+  scrollBehavior: () => ({ left: 0, top: 0 }),
 });
 
 router.beforeEach(async (to, from, next) => {
@@ -91,7 +89,8 @@ router.beforeEach(async (to, from, next) => {
   }
 
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
-    next({ name: "login" });
+    // Remember where the user was headed so login can resume it.
+    next({ name: "login", query: { redirect: to.fullPath } });
   } else if (to.meta.guest && auth.isAuthenticated) {
     next({ name: "dashboard" });
   } else {

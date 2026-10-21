@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
+import type { Component } from "vue";
+import { CircleCheck, CircleX, Info, TriangleAlert, X } from "lucide-vue-next";
 
 interface Props {
   theme: "nightshade" | "sysadmin";
@@ -49,52 +51,42 @@ defineExpose({ show, success, error, warning, info });
 
 const isNightshade = () => props.theme === "nightshade";
 
-function getIcon(type: ToastMessage["type"]): string {
+function getIcon(type: ToastMessage["type"]): Component {
   switch (type) {
     case "success":
-      return "M5 13l4 4L19 7";
+      return CircleCheck;
     case "error":
-      return "M6 18L18 6M6 6l12 12";
+      return CircleX;
     case "warning":
-      return "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z";
+      return TriangleAlert;
     case "info":
     default:
-      return "M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z";
+      return Info;
   }
 }
 
 function getColors(type: ToastMessage["type"]): { bg: string; border: string; text: string; icon: string } {
-  const cyber = isNightshade();
+  // Light theme needs dark text on a pale surface; the old dark-theme
+  // palette (e.g. text-green-100 on white) was effectively invisible.
+  const dark = isNightshade();
   switch (type) {
     case "success":
-      return {
-        bg: cyber ? "bg-emerald-500/20" : "bg-green-500/20",
-        border: cyber ? "border-emerald-400/50" : "border-green-400/50",
-        text: cyber ? "text-emerald-100" : "text-green-100",
-        icon: cyber ? "text-emerald-400" : "text-green-400",
-      };
+      return dark
+        ? { bg: "bg-emerald-500/15", border: "border-emerald-400/40", text: "text-emerald-100", icon: "text-emerald-400" }
+        : { bg: "bg-emerald-50", border: "border-emerald-600/45", text: "text-emerald-900", icon: "text-emerald-700" };
     case "error":
-      return {
-        bg: "bg-red-500/20",
-        border: "border-red-400/50",
-        text: "text-red-100",
-        icon: "text-red-400",
-      };
+      return dark
+        ? { bg: "bg-red-500/15", border: "border-red-400/40", text: "text-red-100", icon: "text-red-400" }
+        : { bg: "bg-red-50", border: "border-red-600/45", text: "text-red-900", icon: "text-red-700" };
     case "warning":
-      return {
-        bg: "bg-amber-500/20",
-        border: "border-amber-400/50",
-        text: "text-amber-100",
-        icon: "text-amber-400",
-      };
+      return dark
+        ? { bg: "bg-amber-500/15", border: "border-amber-400/40", text: "text-amber-100", icon: "text-amber-400" }
+        : { bg: "bg-amber-50", border: "border-amber-700/45", text: "text-amber-900", icon: "text-amber-700" };
     case "info":
     default:
-      return {
-        bg: "bg-sky-500/10",
-        border: "border-sky-500/20",
-        text: cyber ? "text-sky-200" : "text-sky-800",
-        icon: cyber ? "text-sky-400" : "text-sky-600",
-      };
+      return dark
+        ? { bg: "bg-sky-500/15", border: "border-sky-400/35", text: "text-sky-100", icon: "text-sky-400" }
+        : { bg: "bg-sky-50", border: "border-sky-700/45", text: "text-sky-900", icon: "text-sky-700" };
   }
 }
 </script>
@@ -108,15 +100,12 @@ function getColors(type: ToastMessage["type"]): { bg: string; border: string; te
         class="flex items-start gap-3 px-4 py-3 rounded-lg border backdrop-blur-lg shadow-lg"
         :class="[getColors(toast.type).bg, getColors(toast.type).border]"
       >
-        <svg
+        <component
+          :is="getIcon(toast.type)"
           class="w-5 h-5 flex-shrink-0 mt-0.5"
           :class="getColors(toast.type).icon"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="getIcon(toast.type)" />
-        </svg>
+          :stroke-width="1.7"
+        />
         <p class="text-sm flex-1" :class="getColors(toast.type).text">
           {{ toast.message }}
         </p>
@@ -124,10 +113,10 @@ function getColors(type: ToastMessage["type"]): { bg: string; border: string; te
           @click="remove(toast.id)"
           class="p-0.5 rounded transition-colors opacity-70 hover:opacity-100"
           :class="getColors(toast.type).icon"
+          aria-label="Dismiss"
+          title="Dismiss"
         >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-          </svg>
+          <X class="w-4 h-4" :stroke-width="1.7" />
         </button>
       </div>
     </TransitionGroup>
@@ -136,11 +125,11 @@ function getColors(type: ToastMessage["type"]): { bg: string; border: string; te
 
 <style scoped>
 .toast-enter-active {
-  transition: all 0.3s ease-out;
+  transition: opacity 0.3s ease-out, transform 0.3s ease-out;
 }
 
 .toast-leave-active {
-  transition: all 0.2s ease-in;
+  transition: opacity 0.2s ease-in, transform 0.2s ease-in;
 }
 
 .toast-enter-from {
