@@ -17,6 +17,7 @@ idempotent and safe to run on every boot.
 """
 
 import asyncio
+import logging
 import os
 import time
 from contextlib import asynccontextmanager, suppress
@@ -97,7 +98,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     existing tables are never dropped or altered, so Alembic migrations remain
     the authoritative mechanism for schema changes in production.
     """
-    import logging
     logger = logging.getLogger("app.main")
     setup_logging()
     await init_pool()
@@ -111,15 +111,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
 
-            # 2. Try to setup TimescaleDB hypertable in a separate transaction
-            try:
-                async with engine.begin() as conn:
-                    from sqlalchemy import text
-                    await conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"))
-                    await conn.execute(text("SELECT create_hypertable('metrics', 'timestamp', if_not_exists => TRUE);"))
-            except Exception as e:
-                # Silently fallback if timescaledb extension is not present (e.g. SQLite / normal PG tests)
-                logger.warning(f"Could not setup TimescaleDB hypertable: {e}")
+            # 2. TimescaleDB is optional. Only Postgres can carry the
+            #    extension, and a plain Postgres install or a restricted user
+            #    is a normal configuration, not an error worth a full SQL
+            #    traceback on every boot.
+            if engine.dialect.name == "postgresql":
+                try:
+                    async with engine.begin() as conn:
+                        from sqlalchemy import text
+                        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"))
+                        await conn.execute(text("SELECT create_hypertable('metrics', 'timestamp', if_not_exists => TRUE);"))
+                except Exception as exc:
+                    logger.info(
+                        "TimescaleDB not used (%s); metrics stay in ordinary PostgreSQL tables.",
+                        type(exc).__name__,
+                    )
 
             logger.info("Successfully connected to the database and initialized schema.")
             break
@@ -130,7 +136,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 raise
             logger.warning(f"Database connection attempt {attempt}/{max_retries} failed: {e}. Retrying in {retry_delay}s...")
             await asyncio.sleep(retry_delay)
-    if settings.bootstrap_admin_enabled:
+    # Only pre-create the first admin when a password was actually supplied.
+    # An unset BOOTSTRAP_ADMIN_PASSWORD used to be hashed as None (crashing the
+    # boot) and the Docker default used to be "changeme" (a known credential).
+    # With neither, an empty install shows the first-run setup screen instead.
+    if settings.bootstrap_admin_enabled and settings.bootstrap_admin_pass:
         async with async_session_factory() as session:  # type: ignore
             result = await session.execute(select(User).limit(1))  # type: ignore
             if result.scalar_one_or_none() is None:
@@ -170,9 +180,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 logging.getLogger("app.main").warning("Latency monitor tick failed: %s", exc)
             await asyncio.sleep(10)
 
-    # Vulnerability alerts every5 minutes; the scan reminder once a day.
+    # Vulnerability alerts every 5 minutes; the scan reminder once a day.
     _VULN_ALERT_INTERVAL = 300
     _SCAN_REMINDER_INTERVAL = 86400
+    # Discovery runs on the same cadence as the alert sweep: without it the
+    # inventory (and therefore the topology) only changed when somebody pressed
+    # "sweep", which read as a cached map on a live network.
+    _DISCOVERY_INTERVAL = 300
 
     async def _scheduled_task_loop() -> None:
         """Run the jobs Celery beat would have scheduled.
@@ -182,13 +196,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         scans, so a no-Docker install behaved differently from the full stack.
         """
         from app.services.alerts import process_vulnerability_alerts, send_system_alert
+        from app.services.device_discovery import run_device_discovery
+        from app.services.scan_scheduler import run_due_scheduled_scans
 
         log = logging.getLogger("app.main")
         last_reminder = 0.0
+        last_discovery = 0.0
         log.info(
             "In-process scheduler running: vulnerability alerts every %ss, "
-            "scan reminder every %ss (Celery beat not required).",
+            "device discovery every %ss, scan reminder every %ss "
+            "(Celery beat not required).",
             _VULN_ALERT_INTERVAL,
+            _DISCOVERY_INTERVAL,
             _SCAN_REMINDER_INTERVAL,
         )
 
@@ -203,7 +222,43 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             except Exception as exc:  # keep the loop alive
                 log.warning("Vulnerability alert tick failed: %s", exc)
 
-                # Wall clock, not the loop's monotonic clock: monotonic time starts
+            # Schedules saved in Settings → Scheduler. This is the reader the
+            # tab was missing; without it the toggle did nothing at all.
+            try:
+                async with async_session_factory() as session:  # type: ignore[union-attr]
+                    queued = await run_due_scheduled_scans(session)
+                if queued:
+                    log.info("Scheduled scan: queued %s job(s).", queued)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # keep the loop alive
+                log.warning("Scheduled scan tick failed: %s", exc)
+
+            # Background discovery keeps last_seen honest, retires stale twins
+            # and picks up phones that joined since the last pass. It holds the
+            # discovery lock, so an operator's manual sweep is never doubled up.
+            if time.time() - last_discovery >= _DISCOVERY_INTERVAL:
+                last_discovery = time.time()
+                try:
+                    async with async_session_factory() as session:  # type: ignore[union-attr]
+                        outcome = await run_device_discovery(session)
+                    if outcome.warnings:
+                        log.info(
+                            "Discovery sweep skipped: %s", "; ".join(outcome.warnings)
+                        )
+                    else:
+                        log.info(
+                            "Discovery sweep: %s new, %s refreshed across %s.",
+                            outcome.created,
+                            outcome.updated,
+                            ", ".join(outcome.subnets) or "no subnets",
+                        )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # keep the loop alive
+                    log.warning("Discovery sweep failed: %s", exc)
+
+            # Wall clock, not the loop's monotonic clock: monotonic time starts
             # at zero when the process starts, so a daily reminder would not
             # fire for a full day of uptime and never at all across restarts.
             now = time.time()
@@ -271,12 +326,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await close_pool()
 
 
+# The interactive docs are a development convenience. In production they
+# advertise every route and schema, so they follow ENVIRONMENT rather than a
+# `debug` setting that never existed (which used to leave them always on).
+_docs_enabled = settings.environment == "development"
+
 app = FastAPI(
     title=settings.app_name,
     lifespan=lifespan,
-    docs_url="/api/docs" if getattr(settings, "debug", True) else None,
-    redoc_url="/api/redoc" if getattr(settings, "debug", True) else None,
-    openapi_url="/api/openapi.json" if getattr(settings, "debug", True) else None,
+    docs_url="/api/docs" if _docs_enabled else None,
+    redoc_url="/api/redoc" if _docs_enabled else None,
+    openapi_url="/api/openapi.json" if _docs_enabled else None,
 )
 
 app.state.limiter = limiter
@@ -288,11 +348,11 @@ app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestValidationMiddleware)
 
-_cors_origins = (
-    ["*"]
-    if settings.environment == "development"
-    else getattr(settings, "cors_allow_origins", ["http://localhost:8000"])
-)
+# A wildcard origin together with credentials is rejected by every browser,
+# so the wildcard was never usable — it only looked permissive. The configured
+# list covers the SPA (same origin in production) and the Vite dev server,
+# whose proxy makes API calls same-origin as well.
+_cors_origins = list(settings.cors_allow_origins or [])
 
 app.add_middleware(
     CORSMiddleware,
@@ -305,6 +365,46 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api")
+
+
+@app.get("/api/security/status", include_in_schema=False)
+async def security_status() -> dict:
+    """Return security status information.
+
+    Registered before the SPA catch-all: Starlette matches in registration
+    order, so a route declared after ``/{catchall:path}`` was unreachable and
+    answered "API endpoint not found".
+    """
+    return {
+        "rate_limiting": "enabled",
+        "security_headers": "enabled",
+        "input_validation": "enabled",
+        "cors_protection": "enabled",
+        "request_size_limit": "10MB",
+    }
+
+
+def _frontend_dir() -> str:
+    """Locate the built SPA for both Docker and bare-metal Linux installs.
+
+    The container puts it at /app/static; a checkout that ran `npm run build`
+    has it in frontend/dist. Returning the first directory that actually has
+    an index.html keeps `uvicorn app.main:app` usable on a Linux host without
+    a separate web server.
+    """
+    from pathlib import Path
+
+    project_root = Path(__file__).resolve().parent.parent
+    candidates = [
+        project_root / "static",
+        Path.cwd() / "frontend" / "dist",
+        project_root / "frontend" / "dist",
+        Path("/app/static"),
+    ]
+    for candidate in candidates:
+        if (candidate / "index.html").is_file():
+            return str(candidate)
+    return str(candidates[0])
 
 
 @app.get("/{catchall:path}", include_in_schema=False)
@@ -320,28 +420,45 @@ async def serve_vue_spa(catchall: str):
             content={"error": {"code": 404, "message": "API endpoint not found"}}
         )
 
-    static_dir = "/app/static"
-    file_path = os.path.join(static_dir, catchall)
+    static_dir = _frontend_dir()
+    root = os.path.realpath(static_dir)
+    requested = os.path.realpath(os.path.join(root, catchall))
 
-    if catchall and os.path.isfile(file_path):
-        return FileResponse(file_path)
+    # Resolve first, then confirm the result stayed inside the build directory
+    # so a crafted path cannot read files elsewhere on the host.
+    if (
+        catchall
+        and requested.startswith(root + os.sep)
+        and os.path.isfile(requested)
+    ):
+        return FileResponse(requested)
 
-    index_path = os.path.join(static_dir, "index.html")
+    index_path = os.path.join(root, "index.html")
     if os.path.isfile(index_path):
         return FileResponse(index_path)
 
     return JSONResponse(
         status_code=404,
-        content={"error": "Frontend build not found in /app/static"}
+        content={
+            "error": (
+                "Frontend build not found. Run 'cd frontend && npm run build' "
+                "or use the Vite dev server."
+            )
+        },
     )
 
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
-    """Return HTTP errors in a consistent JSON envelope."""
+    """Return HTTP errors in a consistent JSON envelope.
+
+    ``exc.headers`` is forwarded so challenges and retry hints survive the
+    envelope — a 401 without ``WWW-Authenticate`` is not a valid challenge.
+    """
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": {"code": exc.status_code, "message": exc.detail}},
+        headers=exc.headers,
     )
 
 
@@ -373,22 +490,15 @@ async def validation_exception_handler(
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catch-all handler – prevents leaking internal details to clients."""
-    import logging
     logger = logging.getLogger("app.main")
-    logger.error(f"Unhandled exception during {request.method} {request.url.path}: {exc}", exc_info=True)
+    logger.error(
+        "Unhandled exception during %s %s: %s",
+        request.method,
+        request.url.path,
+        exc,
+        exc_info=True,
+    )
     return JSONResponse(
         status_code=500,
         content={"error": {"code": 500, "message": "Internal server error"}},
     )
-
-
-@app.get("/api/security/status", include_in_schema=False)
-async def security_status() -> dict:
-    """Return security status information."""
-    return {
-        "rate_limiting": "enabled",
-        "security_headers": "enabled",
-        "input_validation": "enabled",
-        "cors_protection": "enabled",
-        "request_size_limit": "10MB",
-    }

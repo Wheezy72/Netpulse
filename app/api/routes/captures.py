@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,8 +34,7 @@ class CaptureResponse(BaseModel):
     finished_at: Optional[str]
     error_message: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.post(

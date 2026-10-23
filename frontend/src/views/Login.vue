@@ -33,6 +33,9 @@ const errorMessage = ref<string | null>(null);
 // was actually true. It now asks the API, so a phone that cannot reach this
 // machine is told before the first sign-in attempt fails.
 const serverReachable = ref<boolean | null>(null);
+// Public sign-up does not exist. Only an empty instance shows the setup link,
+// and it disappears as soon as the first administrator exists.
+const needsSetup = ref(false);
 const showContent = ref(false);
 
 const typedTitle = ref("");
@@ -161,6 +164,18 @@ function typeTitle() {
   }, 120);
 }
 
+/** Ask the API whether this instance still needs its first administrator. */
+async function checkSetup(): Promise<void> {
+  try {
+    const { data } = await axios.get<{ needs_setup: boolean }>("/api/auth/setup-status", {
+      timeout: 4000,
+    });
+    needsSetup.value = !!data.needs_setup;
+  } catch {
+    needsSetup.value = false;
+  }
+}
+
 /** Ask the API whether this machine can be reached at all. */
 async function checkServer(): Promise<void> {
   try {
@@ -175,6 +190,7 @@ onMounted(async () => {
   await nextTick();
 
   void checkServer();
+  void checkSetup();
 
   const canvas = canvasRef.value;
   if (canvas) {
@@ -353,16 +369,21 @@ async function handleSubmit(): Promise<void> {
         </form>
 
         <div class="mt-6 pt-5 border-t border-[var(--np-border-subtle)] text-center">
-          <p class="mb-2 text-xs text-[var(--np-text-dim)]">
-            Don't have an account?
+          <template v-if="needsSetup">
+            <p class="mb-2 text-xs text-[var(--np-text-dim)]">
+              No administrator exists yet.
+            </p>
+            <button
+              type="button"
+              @click="emit('switch-to-register')"
+              class="text-sm transition-colors np-brand-text hover:np-brand-strong"
+            >
+              Set up this instance
+            </button>
+          </template>
+          <p v-else class="text-xs text-[var(--np-text-dim)]">
+            Accounts are created by an administrator in Settings → Users.
           </p>
-          <button
-            type="button"
-            @click="emit('switch-to-register')"
-            class="text-sm transition-colors np-brand-text hover:np-brand-strong"
-          >
-            Create Account
-          </button>
         </div>
       </div>
 

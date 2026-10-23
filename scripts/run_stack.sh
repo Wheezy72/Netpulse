@@ -18,7 +18,8 @@ cd "$ROOT_DIR"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "WARNING: Running without root privileges."
-  echo "Some network scans (SYN, OS detection) may not work."
+  echo "ARP discovery and SYN/OS scans need root or CAP_NET_RAW on Linux."
+  echo "Without it, discovery falls back to the ARP table and nmap connect scans."
   echo "For full functionality, run with: sudo $0"
   echo ""
   read -p "Continue anyway? [y/N] " -n 1 -r
@@ -33,6 +34,22 @@ if [ -d ".venv" ]; then
   source .venv/bin/activate
 fi
 
+if ! command -v python >/dev/null 2>&1; then
+  echo "ERROR: python is not on PATH. Run ./scripts/setup_linux.sh first." >&2
+  exit 1
+fi
+
+if ! command -v nmap >/dev/null 2>&1; then
+  echo "WARNING: nmap is not installed; scan profiles will refuse to run." >&2
+fi
+
+if command -v redis-cli >/dev/null 2>&1; then
+  if ! redis-cli -h 127.0.0.1 ping >/dev/null 2>&1; then
+    echo "WARNING: Redis is not answering on 127.0.0.1:6379." >&2
+    echo "         Start it with: sudo systemctl start redis-server" >&2
+  fi
+fi
+
 pids=()
 
 start_proc() {
@@ -44,9 +61,12 @@ start_proc() {
   pids+=("$pid")
 }
 
+# The backend runs its own in-process scheduler (latency sampling, discovery,
+# vulnerability alerts, scheduled scans), so Celery *beat* is deliberately not
+# started here: running both doubled every metric and every alert. The worker
+# stays for on-demand background tasks.
 start_proc "backend" python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 start_proc "worker" celery -A app.core.celery_app.celery_app worker -l info
-start_proc "beat" celery -A app.core.celery_app.celery_app beat -l info
 start_proc "frontend" bash -lc "cd frontend && npm run dev"
 
 cleanup() {
@@ -64,8 +84,8 @@ cleanup() {
 trap cleanup INT TERM
 
 echo "==> NetPulse stack is running."
-echo "   Backend:  http://localhost:8000"
-echo "   Frontend: http://localhost:5000 (dev server) or http://localhost:8000 if using Docker"
+echo "   App:        http://localhost:8000  (the built UI, if setup_linux.sh ran the build)"
+echo "   Dev server: http://localhost:6969  (Vite; it prints another port if 6969 is busy)"
 echo "Press Ctrl+C to stop all services."
 
 # Wait for child processes

@@ -226,6 +226,53 @@ def _parse_safe_nmap_args(command: str, target: str) -> list[str]:
     return safe
 
 
+# Scan types that craft packets by hand and therefore need raw sockets.
+_RAW_SCAN_TYPES = {"-sS", "-sA", "-sW", "-sM", "-sZ", "-sN", "-sF", "-sX"}
+
+
+def _apply_unprivileged_mode(args: list[str]) -> list[str]:
+    """Adapt a safe argv to a box where nmap cannot open raw sockets.
+
+    A Windows install with the Npcap driver stopped (or any unprivileged Unix
+    user) makes `nmap -sn`/`-sS` die with "dnet: Failed to open device", which
+    the UI can only show as "scan failed". nmap itself can still work there:
+    `--unprivileged` switches host discovery and port scanning to connect(),
+    and `-Pn` stops it from attempting a raw ping probe first.
+
+    The target is always the last element, so it survives the rewrite.
+    """
+    body, target = args[:-1], args[-1]
+
+    if "-sn" in body:
+        # A ping sweep has no ports to scan; only host discovery applies.
+        cleaned = [tok for tok in body if tok != "-PE"]
+        if "--unprivileged" not in cleaned:
+            cleaned.append("--unprivileged")
+        return [*cleaned, target]
+
+    rewritten: list[str] = []
+    has_connect_scan = False
+    for tok in body:
+        if tok in _RAW_SCAN_TYPES:
+            if not has_connect_scan:
+                rewritten.append("-sT")
+                has_connect_scan = True
+            continue
+        if tok == "-sT":
+            has_connect_scan = True
+        rewritten.append(tok)
+
+    if not has_connect_scan:
+        # Insert right after the binary name so later flags keep their order.
+        rewritten.insert(1, "-sT")
+    if "-Pn" not in rewritten:
+        rewritten.append("-Pn")
+    if "--unprivileged" not in rewritten:
+        rewritten.append("--unprivileged")
+
+    return [*rewritten, target]
+
+
 def get_scan_type_from_command(command: str) -> str:
     if "--script" in command or "-sC" in command:
         return "Script Scan"
@@ -375,6 +422,8 @@ async def execute_nmap(
             )
 
         safe_args = _parse_safe_nmap_args(request.command or "", request.target)
+        if not caps.privileged:
+            safe_args = _apply_unprivileged_mode(safe_args)
         command_str = " ".join(safe_args)
         job_profile = get_scan_type_from_command(command_str)
         job_arguments = {

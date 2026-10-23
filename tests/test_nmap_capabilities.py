@@ -59,7 +59,18 @@ def test_unprivileged_uses_connect_scan_and_notes_it(profile: str) -> None:
     plan = plan_command(profile, TARGET, _caps(privileged=False))
     assert "-sT" in plan.argv
     assert "-sS" not in plan.argv
+    assert "--unprivileged" in plan.argv
+    assert "-Pn" in plan.argv
     assert "No raw-socket privileges, using TCP connect scan" in plan.notes
+
+
+def test_unprivileged_sweep_skips_raw_ping_flags() -> None:
+    """A sweep without raw sockets must not ask nmap for raw ARP/ICMP."""
+    plan = plan_command("sweep", TARGET, _caps(privileged=False))
+    assert "-PE" not in plan.argv
+    assert "-Pn" not in plan.argv  # -Pn would report every address as up
+    assert "--unprivileged" in plan.argv
+    assert plan.argv[-1] == TARGET
 
 
 # ── Per-profile argv ─────────────────────────────────────────────────────────
@@ -200,3 +211,94 @@ def test_detect_capabilities_without_nmap(monkeypatch: pytest.MonkeyPatch) -> No
     assert caps.vuln_scripts == ()
     assert caps.scripts_dir is None
     assert isinstance(caps.detected_at, datetime)
+
+
+# ── Linux raw-socket privileges ─────────────────────────────────────────────
+
+
+class TestLinuxRawSocketPrivileges:
+    """Linux grants raw sockets by capability, not only by UID."""
+
+    def test_process_cap_eff_net_raw_bit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import io
+
+        monkeypatch.setattr(
+            nmap_capabilities,
+            "open",
+            lambda *_args, **_kwargs: io.StringIO("Name:\tpython3\nCapEff:\t0000000000002000\n"),
+            raising=False,
+        )
+        assert nmap_capabilities._linux_process_has_cap_net_raw() is True
+
+    def test_process_without_net_raw(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import io
+
+        monkeypatch.setattr(
+            nmap_capabilities,
+            "open",
+            lambda *_args, **_kwargs: io.StringIO("Name:\tpython3\nCapEff:\t0000000000000000\n"),
+            raising=False,
+        )
+        assert nmap_capabilities._linux_process_has_cap_net_raw() is False
+
+    @staticmethod
+    def _file_caps(*, effective: bool = True, net_raw: bool = True) -> bytes:
+        import struct
+
+        magic = 0x02000000 | (0x1 if effective else 0x0)
+        permitted_low = (1 << 13) if net_raw else 0
+        return struct.pack("<IIII", magic, permitted_low, 0, 0)
+
+    def test_setcap_binary_is_recognised(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # setcap on nmap gives the child the capability even when we have none.
+        monkeypatch.setattr(
+            nmap_capabilities.os, "getxattr", lambda *_: self._file_caps(), raising=False
+        )
+        assert nmap_capabilities._linux_binary_has_cap_net_raw("/usr/bin/nmap") is True
+
+    def test_binary_without_the_effective_flag_is_not_trusted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            nmap_capabilities.os,
+            "getxattr",
+            lambda *_: self._file_caps(effective=False),
+            raising=False,
+        )
+        assert nmap_capabilities._linux_binary_has_cap_net_raw("/usr/bin/nmap") is False
+
+    def test_binary_without_net_raw(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            nmap_capabilities.os,
+            "getxattr",
+            lambda *_: self._file_caps(net_raw=False),
+            raising=False,
+        )
+        assert nmap_capabilities._linux_binary_has_cap_net_raw("/usr/bin/nmap") is False
+
+    def test_missing_binary(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert nmap_capabilities._linux_binary_has_cap_net_raw(None) is False
+
+    def test_non_root_linux_falls_back_to_binary_capabilities(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(nmap_capabilities.os, "name", "posix")
+        monkeypatch.setattr(nmap_capabilities.sys, "platform", "linux")
+        monkeypatch.setattr(
+            nmap_capabilities.os, "geteuid", lambda: 1000, raising=False
+        )
+        monkeypatch.setattr(
+            nmap_capabilities, "_linux_process_has_cap_net_raw", lambda: False
+        )
+        monkeypatch.setattr(
+            nmap_capabilities, "_linux_binary_has_cap_net_raw", lambda _path: True
+        )
+        assert nmap_capabilities._has_raw_socket_privileges() is True
+
+    def test_root_is_privileged(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(nmap_capabilities.os, "name", "posix")
+        monkeypatch.setattr(nmap_capabilities.sys, "platform", "linux")
+        monkeypatch.setattr(
+            nmap_capabilities.os, "geteuid", lambda: 0, raising=False
+        )
+        assert nmap_capabilities._has_raw_socket_privileges() is True

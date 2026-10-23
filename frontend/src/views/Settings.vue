@@ -5,10 +5,17 @@ import { Lock, TriangleAlert } from "lucide-vue-next";
 
 import ToggleSwitch from "../components/ui/ToggleSwitch.vue";
 import AccountPanel from "../components/settings/AccountPanel.vue";
+import UsersPanel from "../components/settings/UsersPanel.vue";
 
 type Theme = "nightshade" | "sysadmin";
 
-type SettingsTab = "account" | "notifications" | "network" | "schedule" | "backup";
+type SettingsTab =
+  | "account"
+  | "users"
+  | "notifications"
+  | "network"
+  | "schedule"
+  | "backup";
 
 interface Props {
   theme: Theme;
@@ -41,6 +48,8 @@ interface ScanScheduleSettings {
   scan_type: string;
   segments: number[];
   notify_on_complete: boolean;
+  last_run: string | null;
+  last_result: string | null;
 }
 
 interface BackupFile {
@@ -206,6 +215,8 @@ const scanSchedule = ref<ScanScheduleSettings>({
   scan_type: "quick",
   segments: [],
   notify_on_complete: true,
+  last_run: null,
+  last_result: null,
 });
 const scanScheduleSaving = ref(false);
 const scanScheduleMessage = ref<string | null>(null);
@@ -391,6 +402,7 @@ onMounted(async () => {
       <button
         v-for="tab in [
           { key: 'account', label: 'Account' },
+          ...(isAdmin ? [{ key: 'users', label: 'Users' }] : []),
           { key: 'notifications', label: 'Alerts' },
           { key: 'network', label: 'Network' },
           { key: 'schedule', label: 'Scheduler' },
@@ -414,6 +426,9 @@ onMounted(async () => {
     <!-- Account. The theme lives in the top bar on every page, so a General
          tab that only printed its name earned its place nowhere. -->
     <AccountPanel v-if="activeSettingsTab === 'account'" />
+
+    <!-- Admins add accounts here: public sign-up is closed on purpose. -->
+    <UsersPanel v-else-if="activeSettingsTab === 'users' && isAdmin" />
 
     <!-- Notifications -->
     <section v-else-if="activeSettingsTab === 'notifications'" class="np-panel p-4 space-y-6">
@@ -607,7 +622,14 @@ onMounted(async () => {
         </div>
       </header>
 
-      <div class="np-settings-section space-y-3 text-xs">
+      <div v-if="!isAdmin" class="np-settings-section">
+        <p class="text-[0.75rem] text-[var(--np-text-dim)] font-semibold">
+          Only an administrator can schedule scans. A viewer account can see
+          the current schedule but cannot change it.
+        </p>
+      </div>
+
+      <div v-else class="np-settings-section space-y-3 text-xs">
         <div class="flex items-center justify-between">
           <span :class="isNightshade ? 'text-teal-100' : 'text-[var(--np-text-muted)]'">Enabled</span>
           <ToggleSwitch v-model="scanSchedule.enabled" :theme="theme" />
@@ -640,6 +662,19 @@ onMounted(async () => {
               <span class="font-mono">{{ seg.name }}</span>
             </label>
           </div>
+          <p class="mt-2 text-[0.68rem] text-[var(--np-text-dim)]">
+            Leave all unchecked to scan every active segment, or the attached subnet when none are configured. Restricted subnets are always skipped.
+          </p>
+        </div>
+
+        <div class="rounded border border-[var(--np-border-subtle)] px-3 py-2 text-[0.7rem] text-[var(--np-text-muted)]">
+          <p>
+            <span class="font-semibold text-[var(--np-text)]">Last run:</span>
+            {{ scanSchedule.last_run ? new Date(scanSchedule.last_run).toLocaleString() : "Never" }}
+          </p>
+          <p v-if="scanSchedule.last_result" class="mt-0.5 text-[var(--np-text-dim)]">
+            {{ scanSchedule.last_result }}
+          </p>
         </div>
 
         <div class="flex items-center justify-between">

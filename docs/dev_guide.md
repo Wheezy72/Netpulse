@@ -228,9 +228,10 @@ If you run the web server without `celery_worker` + `celery_beat`, dashboards wi
 ### Authentication
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/auth/users` | Register new user |
+| POST | `/api/auth/users` | Create an account (first admin on an empty instance, otherwise admin-only) |
 | POST | `/api/auth/login` | Login (returns JWT) |
 | GET | `/api/auth/me` | Current user info |
+| GET | `/api/auth/setup-status` | Whether the first-run setup screen is needed, and if a setup token is required |
 
 ### Devices
 | Method | Endpoint | Description |

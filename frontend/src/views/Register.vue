@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, onMounted, onUnmounted, ref, nextTick } from "vue";
+import { useRouter } from "vue-router";
 
 import { Eye, EyeOff, LoaderCircle, Moon, Sun } from "lucide-vue-next";
 
@@ -13,12 +14,19 @@ interface Props {
 }
 
 const props = defineProps<Props>();
+const router = useRouter();
+
+// This screen is first-run setup, not self-registration. It is only reachable
+// while the database has no accounts; afterwards the API refuses the call and
+// the page sends you to sign in.
+const setupTokenRequired = ref(false);
 
 const username = ref("");
 const email = ref("");
 const password = ref("");
 const confirmPassword = ref("");
 const fullName = ref("");
+const setupToken = ref("");
 const showPassword = ref(false);
 const showConfirmPassword = ref(false);
 const isSubmitting = ref(false);
@@ -161,8 +169,24 @@ function typeTitle() {
   }, 120);
 }
 
+async function loadSetupState(): Promise<void> {
+  try {
+    const { data } = await axios.get<{ needs_setup: boolean; token_required: boolean }>(
+      "/api/auth/setup-status",
+      { timeout: 4000 }
+    );
+    setupTokenRequired.value = !!data.token_required;
+    if (!data.needs_setup) {
+      router.replace("/login");
+    }
+  } catch {
+    // Leave the form up: the POST is the authority and reports the reason.
+  }
+}
+
 onMounted(async () => {
   await nextTick();
+  void loadSetupState();
 
   const canvas = canvasRef.value;
   if (canvas) {
@@ -221,6 +245,11 @@ async function handleSubmit(): Promise<void> {
     return;
   }
 
+  if (setupTokenRequired.value && !setupToken.value.trim()) {
+    errorMessage.value = "Enter the setup token printed by the server.";
+    return;
+  }
+
   isSubmitting.value = true;
   try {
     await axios.post("/api/auth/users", {
@@ -228,6 +257,7 @@ async function handleSubmit(): Promise<void> {
       email: candidateEmail || null,
       password: password.value,
       full_name: fullName.value.trim() || null,
+      setup_token: setupToken.value.trim() || null,
     });
 
     const { data } = await axios.post<{ access_token: string; token_type: string }>(
@@ -288,11 +318,37 @@ async function handleSubmit(): Promise<void> {
             />
           </h1>
           <p class="text-xs font-mono np-dim-text">
-            Create account
+            Create the first administrator
           </p>
         </div>
 
+        <p class="mb-5 text-[0.7rem] leading-relaxed np-dim-text">
+          This instance has no accounts yet. The account you create here owns it
+          and can add everyone else from Settings → Users.
+        </p>
+
         <form class="space-y-4" @submit.prevent="handleSubmit">
+          <div v-if="setupTokenRequired" class="np-stagger-item np-stagger-visible">
+            <label
+              for="setup-token"
+              class="block text-xs font-medium mb-2 np-muted-text"
+            >
+              Setup token
+            </label>
+            <input
+              id="setup-token"
+              v-model="setupToken"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 text-sm"
+              placeholder="From the server console or SETUP_TOKEN"
+            />
+            <p class="mt-1.5 text-[0.65rem] leading-relaxed np-dim-text">
+              Required because SETUP_TOKEN is set on this server.
+            </p>
+          </div>
+
           <div
             class="np-stagger-item"
             :class="showField0 ? 'np-stagger-visible' : 'np-stagger-hidden'"
@@ -438,7 +494,7 @@ async function handleSubmit(): Promise<void> {
               :disabled="isSubmitting"
             >
               <LoaderCircle v-if="isSubmitting" class="w-4 h-4 animate-spin" :stroke-width="1.7" />
-              <span>{{ isSubmitting ? "Creating…" : "Create account" }}</span>
+              <span>{{ isSubmitting ? "Creating…" : "Create administrator" }}</span>
             </button>
           </div>
 
@@ -449,7 +505,7 @@ async function handleSubmit(): Promise<void> {
 
         <div class="mt-6 pt-5 border-t border-[var(--np-border-subtle)] text-center">
           <p class="text-xs mb-2 np-dim-text">
-            Already have an account?
+            Already set up?
           </p>
           <button
             type="button"

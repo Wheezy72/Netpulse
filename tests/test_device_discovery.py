@@ -23,6 +23,7 @@ from app.services.device_discovery import (  # noqa: E402
     classify_host,
     hosts_from_arp_pairs,
     hosts_from_scan_data,
+    os_from_ttl,
     run_device_discovery,
 )
 from app.services.oui import (  # noqa: E402
@@ -229,3 +230,65 @@ class TestRunDeviceDiscoveryGuards:
             outcome = await run_device_discovery(None, target="192.0.2.10", persist=False)
         assert outcome.hosts == []
         assert "already in progress" in outcome.warnings[0]
+
+
+class TestOsFromTtl:
+    """TTL is the last unprivileged OS signal, so its rules are pinned."""
+
+    def test_windows_stack_ttl_128(self) -> None:
+        assert os_from_ttl(128) == ("Windows Workstation", "Windows")
+
+    def test_unix_stack_with_public_mac(self) -> None:
+        assert os_from_ttl(64, mac_address="00:1A:2B:3C:4D:5E") == (None, "Linux/Unix")
+
+    def test_unix_stack_with_randomised_mac_reads_as_mobile(self) -> None:
+        # A phone rotates its MAC and answers neither NBNS nor SSDP.
+        assert os_from_ttl(64, mac_address="5A:57:EA:79:BE:81") == (
+            "Mobile device",
+            "Android/Linux",
+        )
+
+    def test_network_gear_ttl_255(self) -> None:
+        assert os_from_ttl(255) == ("Network device", "Embedded")
+
+    def test_unknown_ttl_makes_no_claim(self) -> None:
+        assert os_from_ttl(None) == (None, None)
+
+
+class TestDefaultInterface:
+    """USB Wi-Fi adapters are named wlan0/wlx…, so the name must be resolved."""
+
+    def test_linux_reads_the_interface_from_ip_route(self, monkeypatch) -> None:
+        monkeypatch.setattr("sys.platform", "linux")
+        monkeypatch.setattr(
+            discovery,
+            "_os_output",
+            lambda *_args, **_kwargs: "default via 192.168.1.1 dev wlan0 proto dhcp src 192.168.1.42\n",
+        )
+        assert discovery._interface_from_os() == "wlan0"
+
+    def test_linux_without_a_default_route_returns_none(self, monkeypatch) -> None:
+        monkeypatch.setattr("sys.platform", "linux")
+        monkeypatch.setattr(discovery, "_os_output", lambda *_args, **_kwargs: "")
+        assert discovery._interface_from_os() is None
+
+    def test_macos_reads_the_interface_from_route_get(self, monkeypatch) -> None:
+        monkeypatch.setattr("sys.platform", "darwin")
+        monkeypatch.setattr(
+            discovery,
+            "_os_output",
+            lambda *_args, **_kwargs: (
+                "   route to: default\n"
+                "destination: default\n"
+                "    gateway: 192.168.1.1\n"
+                "  interface: en0\n"
+            ),
+        )
+        assert discovery._interface_from_os() == "en0"
+
+    def test_missing_tooling_is_not_an_error(self, monkeypatch) -> None:
+        # shutil.which -> None inside _os_output means "no ip binary here".
+        import shutil
+
+        monkeypatch.setattr(shutil, "which", lambda _name: None)
+        assert discovery._os_output(["ip", "route"]) == ""

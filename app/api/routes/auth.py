@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import json
 import logging
-import os
 import re
 import secrets
 from datetime import datetime, timedelta
@@ -20,6 +20,7 @@ from app.api.deps import (
     get_current_user,
     get_password_hash,
     optional_current_user,
+    require_admin,
     subject_for_user,
     verify_password,
     security_scheme,
@@ -60,28 +61,34 @@ async def _enforce_rate_limit(
     their Unix epoch, so ZREMRANGEBYSCORE + ZCARD + ZADD run atomically in a
     single pipeline.
 
-    Extracts the real client IP from X-Forwarded-For or X-Real-IP headers to
-    properly handle proxied requests.
+    Proxy headers are only believed when TRUST_PROXY_HEADERS is on. A direct
+    port is otherwise one header away from an unlimited number of buckets.
     """
-    # Extract real client IP, handling proxy headers
     client_ip = request.client.host if request.client else "unknown"
-    if x_forwarded_for := request.headers.get("X-Forwarded-For"):
-        # X-Forwarded-For may contain multiple IPs; use the first (client) one
-        client_ip = x_forwarded_for.split(",")[0].strip()
-    elif x_real_ip := request.headers.get("X-Real-IP"):
-        client_ip = x_real_ip.strip()
+    if settings.trust_proxy_headers:
+        if x_forwarded_for := request.headers.get("X-Forwarded-For"):
+            # The first entry is the original client, written by the proxy.
+            client_ip = x_forwarded_for.split(",")[0].strip() or client_ip
+        elif x_real_ip := request.headers.get("X-Real-IP"):
+            client_ip = x_real_ip.strip() or client_ip
 
     redis_client = get_redis()
     rate_limit_key = f"{key_prefix}{client_ip}"
     current_unix_time = datetime.utcnow().timestamp()
     window_start_time = current_unix_time - window_seconds
 
-    async with redis_client.pipeline(transaction=True) as pipeline:
-        pipeline.zremrangebyscore(rate_limit_key, "-inf", window_start_time)
-        pipeline.zcard(rate_limit_key)
-        pipeline.zadd(rate_limit_key, {str(current_unix_time): current_unix_time})
-        pipeline.expire(rate_limit_key, window_seconds)
-        results = await pipeline.execute()
+    try:
+        async with redis_client.pipeline(transaction=True) as pipeline:
+            pipeline.zremrangebyscore(rate_limit_key, "-inf", window_start_time)
+            pipeline.zcard(rate_limit_key)
+            pipeline.zadd(rate_limit_key, {str(current_unix_time): current_unix_time})
+            pipeline.expire(rate_limit_key, window_seconds)
+            results = await pipeline.execute()
+    except Exception as exc:
+        # Redis is a convenience here, not the authentication source of truth.
+        # A cache hiccup must not turn every sign-in into a 500.
+        logger.warning("Login throttle unavailable, allowing attempt: %s", exc)
+        return
 
     attempt_count_before_this_request = results[1]
     if attempt_count_before_this_request >= max_attempts:
@@ -201,6 +208,13 @@ class CreateUserRequest(BaseModel):
             return None
         return _normalize_email(candidate)
 
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        if len(value or "") < 6:
+            raise ValueError("Password must be at least 6 characters.")
+        return value
+
 
 class UserMeResponse(BaseModel):
     id: int
@@ -318,22 +332,24 @@ async def read_current_user(
     "/users",
     response_model=Dict[str, Any],
     status_code=status.HTTP_201_CREATED,
-    summary="Create a new user (bootstrap / admin use)",
+    summary="Create an account (first-run setup or admin)",
 )
 async def create_user(
     payload: CreateUserRequest,
     db: AsyncSession = Depends(db_session),
     caller: User | None = Depends(optional_current_user),
 ) -> Dict[str, Any]:
-    """Create a new local user.
+    """Create a local account.
 
-    Bootstrapping rules:
-      - If there are no users yet, require a one-time SETUP_TOKEN environment variable
-        to be passed in the payload to authorize the creation of the first ADMIN account.
-        This prevents race conditions and unauthorized admin creation during initial setup.
-      - If at least one user exists and allow_open_signup is False, block
-        open signups entirely; additional users must be created by an admin
-        through a controlled path (e.g. internal tooling or SSO provisioning).
+    There are exactly two ways in:
+
+      * An empty instance. The first account is always the administrator. It
+        may be created from the setup screen; if SETUP_TOKEN is exported, the
+        caller must present it, which keeps an internet-exposed first boot
+        from being claimed by a stranger.
+      * A populated instance. Public sign-up does not exist: the caller must
+        already be an admin, and the account is either a viewer or an admin as
+        that admin chose.
     """
     existing_any = await db.execute(select(User).limit(1))
     first_user = existing_any.scalar_one_or_none()
@@ -350,33 +366,30 @@ async def create_user(
             detail="User with this email or username already exists",
         )
 
-    # First user requires SETUP_TOKEN to prevent unauthorized admin takeover
     if not first_user:
-        setup_token_env = os.environ.get("SETUP_TOKEN", "").strip()
-        if not setup_token_env:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Initial setup requires SETUP_TOKEN environment variable. Contact your administrator.",
-            )
-        if not payload.setup_token or payload.setup_token != setup_token_env:
+        # SETUP_TOKEN is optional. When it is set the first-run screen asks
+        # for it, so a machine reachable from the network cannot be claimed by
+        # whoever opens the port first.
+        setup_token_env = (settings.setup_token or "").strip()
+        if setup_token_env and not (
+            payload.setup_token
+            and secrets.compare_digest(payload.setup_token, setup_token_env)
+        ):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid setup token.",
+                detail="A valid setup token is required to create the first account.",
             )
-
-    if first_user and not settings.allow_open_signup:
+    else:
         # Closed signup: only an admin may add accounts. Without this, anyone
         # who could reach the port could mint a viewer account for themselves.
         if caller is None or caller.role != UserRole.ADMIN:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="User signup is disabled. Ask an administrator to provision access.",
+                detail="Public sign-up is closed. Ask an administrator to add your account.",
             )
 
     # The first account owns the box. After that everyone is a viewer unless
-    # an authenticated admin explicitly asks for admin — and even then only
-    # when open signup is closed, so a self-registered account cannot
-    # promote itself.
+    # the signed-in admin explicitly asks for admin.
     if not first_user:
         assigned_role = UserRole.ADMIN
     elif payload.role and caller is not None and caller.role == UserRole.ADMIN:
@@ -396,12 +409,263 @@ async def create_user(
         full_name=payload.full_name,
         hashed_password=get_password_hash(payload.password),
         role=assigned_role,
+        # An admin hands out the initial password, so it is temporary by
+        # definition. The first account chose its own password and is not
+        # forced through a second screen.
+        force_password_change=first_user is not None,
     )
     db.add(user)
     await db.commit()
     await db.refresh(user)
 
     return {"id": user.id, "email": user.email, "role": user.role.value}
+
+
+class UserSummary(BaseModel):
+    """One account as the admin Users panel shows it.
+
+    Deliberately excludes the password hash and any reset material — the panel
+    needs identity and role, nothing else.
+    """
+
+    id: int
+    username: str
+    email: str | None = None
+    full_name: str | None = None
+    role: str
+    created_at: datetime | None = None
+
+
+@router.get(
+    "/users",
+    response_model=list[UserSummary],
+    summary="List accounts (admin only)",
+)
+async def list_users(
+    db: AsyncSession = Depends(db_session),
+    caller: User = Depends(get_current_user),
+) -> list[UserSummary]:
+    """Every local account, newest last.
+
+    Admin-only: the roster is not secret, but who can see it is a deliberate
+    choice, and it keeps viewer accounts from enumerating colleagues.
+    """
+    if caller.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an administrator can list accounts.",
+        )
+
+    result = await db.execute(select(User).order_by(User.id))
+    return [
+        UserSummary(
+            id=user.id,
+            username=user.username,
+            email=user.email,
+            full_name=user.full_name,
+            role=user.role.value,
+            created_at=user.created_at,
+        )
+        for user in result.scalars().all()
+    ]
+
+
+@router.get(
+    "/setup-status",
+    summary="Whether this instance still needs its first administrator",
+)
+async def setup_status(db: AsyncSession = Depends(db_session)) -> Dict[str, Any]:
+    """Tell the login screen whether to offer first-run setup.
+
+    There is no public sign-up: once an account exists, accounts are added by
+    an admin in Settings. The only open door is an empty instance, which must
+    be able to name its first administrator.
+    """
+    existing = await db.execute(select(User.id).limit(1))
+    needs_setup = existing.scalar_one_or_none() is None
+    return {
+        "needs_setup": needs_setup,
+        "token_required": bool((settings.setup_token or "").strip()),
+    }
+
+
+async def _revoke_user_sessions(user_id: int) -> int:
+    """Drop every cached session belonging to *user_id*, returning the count.
+
+    ``get_current_user`` serves an authenticated user straight from Redis for
+    the token's whole lifetime (30 days with "remember me"), so deleting the
+    row alone would leave that person signed in until the cache expired.
+    Session keys are keyed by token digest, not by user, so the only way to
+    find them is to scan the small ``np:session:*`` namespace.
+    """
+    removed = 0
+    try:
+        redis = get_redis()
+        async for key in redis.scan_iter(match="np:session:*", count=100):
+            try:
+                raw = await redis.get(key)
+                if not raw:
+                    continue
+                data = json.loads(raw)
+            except Exception:
+                continue
+            if int(data.get("id", -1)) == user_id:
+                await redis.delete(key)
+                removed += 1
+    except Exception as exc:  # pragma: no cover - Redis optional
+        logger.warning("Could not revoke cached sessions for user %s: %s", user_id, exc)
+    return removed
+
+
+class UserRoleUpdate(BaseModel):
+    """Payload for moving an existing account between the two roles."""
+
+    role: str
+
+
+@router.patch(
+    "/users/{user_id}",
+    response_model=UserSummary,
+    summary="Change an account's role (admin only)",
+)
+async def update_user_role(
+    user_id: int,
+    payload: UserRoleUpdate,
+    db: AsyncSession = Depends(db_session),
+    caller: User = Depends(require_admin),
+) -> UserSummary:
+    """Promote or demote an existing account.
+
+    Two guards, matching the delete endpoint:
+      * an admin cannot change their own role, so a mis-click cannot leave the
+        person who made it locked out mid-session;
+      * the last remaining admin cannot be demoted.
+
+    A role change clears that account's cached session: the resolved role is
+    held in the Redis session cache (populated at sign-in, valid up to 30 days
+    with "remember me"). Clearing it forces the next request to re-read the
+    role from the database, so the new permissions apply without waiting for
+    the cache to expire.
+    """
+    try:
+        new_role = UserRole(payload.role.strip().lower())
+    except (AttributeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unknown role. Use 'admin' or 'viewer'.",
+        ) from None
+
+    if user_id == caller.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot change your own role. Ask another admin to do it.",
+        )
+
+    target = await db.get(User, user_id)
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No such account.",
+        )
+
+    if target.role != new_role and target.role == UserRole.ADMIN:
+        admins = await db.execute(select(User.id).where(User.role == UserRole.ADMIN))
+        remaining = [row for row in admins.scalars().all() if row != user_id]
+        if not remaining:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This is the only admin account. Promote another account first.",
+            )
+
+    changed = target.role != new_role
+    # Snapshot before commit: the async session expires attributes on commit,
+    # and reading them afterwards would trigger a lazy load outside greenlet
+    # context.
+    summary = UserSummary(
+        id=target.id,
+        username=target.username,
+        email=target.email,
+        full_name=target.full_name,
+        role=new_role.value,
+        created_at=target.created_at,
+    )
+    target.role = new_role
+    await db.commit()
+
+    if changed:
+        revoked = await _revoke_user_sessions(user_id)
+        logger.info(
+            "Admin %s changed %r to %s; %s cached session(s) revoked.",
+            caller.username,
+            target.username,
+            new_role.value,
+            revoked,
+        )
+
+    return summary
+
+
+@router.delete(
+    "/users/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete an account (admin only)",
+)
+async def delete_user(
+    user_id: int,
+    db: AsyncSession = Depends(db_session),
+    caller: User = Depends(require_admin),
+) -> None:
+    """Remove an account, keeping its scan history intact.
+
+    Two guards, both about not locking yourself out:
+      * an admin cannot delete the account they are signed in with;
+      * the last remaining admin cannot be deleted, whatever the session.
+    Scan jobs are detached (``requested_by_user_id`` set to NULL) rather than
+    cascaded, because the audit trail of who scanned what is worth keeping.
+    """
+    if user_id == caller.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot delete the account you are signed in with.",
+        )
+
+    target = await db.get(User, user_id)
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No such account.",
+        )
+
+    if target.role == UserRole.ADMIN:
+        admins = await db.execute(select(User.id).where(User.role == UserRole.ADMIN))
+        remaining = [row for row in admins.scalars().all() if row != user_id]
+        if not remaining:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This is the only admin account. Promote another account first.",
+            )
+
+    from sqlalchemy import update as sa_update
+
+    from app.models.scan_job import ScanJob
+
+    await db.execute(
+        sa_update(ScanJob)
+        .where(ScanJob.requested_by_user_id == user_id)
+        .values(requested_by_user_id=None)
+    )
+    username = target.username
+    await db.delete(target)
+    await db.commit()
+
+    revoked = await _revoke_user_sessions(user_id)
+    logger.info(
+        "Admin %s deleted account %r (id=%s); %s cached session(s) revoked.",
+        caller.username,
+        username,
+        user_id,
+        revoked,
+    )
 
 
 class ForgotPasswordRequest(EmailRequest):

@@ -89,11 +89,16 @@ def _sniff_and_sweep(iface: str | None, duration: int) -> list[tuple[str, str]]:
     """Passively sniff ARP for *duration* seconds, then actively sweep the
     attached subnets so devices that never speak first are still found.
 
+    ``iface=None`` means "whatever carries the default route", which on Linux
+    is where a USB Wi-Fi adapter (``wlan0``/``wlx…``) usually sits.
+
     Returns de-duplicated (ip, mac) pairs.
     """
     from scapy.all import ARP, sniff
 
-    from app.services.device_discovery import arp_sweep
+    from app.services.device_discovery import arp_sweep, default_interface
+
+    iface = iface or default_interface()
 
     observed: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -129,7 +134,9 @@ def _sniff_and_sweep(iface: str | None, duration: int) -> list[tuple[str, str]]:
     return observed
 
 
-async def passive_arp_discovery(db: AsyncSession, iface: str = "eth0", duration: int = 10) -> None:
+async def passive_arp_discovery(
+    db: AsyncSession, iface: str | None = None, duration: int = 10
+) -> None:
     """Passive ARP sniff plus an active sweep of the attached subnets.
 
     Enrichment, classification and persistence are shared with the on-demand

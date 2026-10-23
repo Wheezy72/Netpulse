@@ -76,7 +76,7 @@ install_packages_apt() {
   print_status "Updating package lists..."
   apt-get update -qq
   
-  local packages="python3 python3-venv python3-pip nodejs npm redis-server iputils-ping nmap tcpdump"
+  local packages="python3 python3-venv python3-pip nodejs npm redis-server iputils-ping iproute2 curl openssl nmap tcpdump"
   
   if ! check_postgres_installed; then
     print_status "PostgreSQL not found. Installing system-wide..."
@@ -89,7 +89,7 @@ install_packages_apt() {
 }
 
 install_packages_dnf() {
-  local packages="python3 python3-pip nodejs npm redis nmap tcpdump"
+  local packages="python3 python3-pip nodejs npm redis iproute curl openssl nmap tcpdump"
   
   if ! check_postgres_installed; then
     print_status "PostgreSQL not found. Installing system-wide..."
@@ -106,7 +106,7 @@ install_packages_dnf() {
 }
 
 install_packages_pacman() {
-  local packages="python python-pip nodejs npm redis nmap tcpdump"
+  local packages="python python-pip nodejs npm redis iproute2 curl openssl nmap tcpdump"
   
   if ! check_postgres_installed; then
     print_status "PostgreSQL not found. Installing system-wide..."
@@ -135,6 +135,21 @@ if ! command -v nmap >/dev/null 2>&1; then
 fi
 print_success "nmap present: $(nmap --version | head -n 1)"
 
+# Vite 5 needs Node 18+. The distro package is often much older (Ubuntu 22.04
+# ships Node 12), which otherwise fails later as a cryptic syntax error.
+NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+if [ "${NODE_MAJOR:-0}" -lt 18 ]; then
+  print_error "Node.js ${NODE_MAJOR:-unknown} is too old; the frontend needs Node 18 or newer."
+  print_warning "Install Node 20 (https://nodejs.org/en/download/package-manager) and re-run this script."
+  exit 1
+fi
+print_success "Node.js $(node --version) present"
+
+if ! command -v ip >/dev/null 2>&1; then
+  print_error "iproute2 ('ip') is missing; discovery needs it to read addresses and neighbours."
+  exit 1
+fi
+
 print_status "Ensuring PostgreSQL service is running..."
 if command -v systemctl >/dev/null 2>&1; then
   systemctl enable postgresql || true
@@ -162,19 +177,52 @@ else
   print_warning "On init.d: sudo service postgresql start"
 fi
 
+# Redis backs rate limiting, session revocation and the Celery broker. Without
+# it the API still starts but throttling and background tasks are degraded, so
+# say so here instead of letting the first request log a connection error.
+if command -v redis-cli >/dev/null 2>&1; then
+  for _attempt in 1 2 3 4 5; do
+    if redis-cli -h 127.0.0.1 ping >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+  if redis-cli -h 127.0.0.1 ping >/dev/null 2>&1; then
+    print_success "Redis is answering on 127.0.0.1:6379"
+  else
+    print_warning "Redis is installed but not answering on 127.0.0.1:6379."
+    print_warning "Start it with: sudo systemctl start redis-server (or 'redis' on Fedora/Arch)"
+  fi
+fi
+
 DB_NAME="netpulse"
 DB_USER="netpulse"
 DB_PASS="netpulse"
 
 print_status "Setting up NetPulse database..."
 
-sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1 || \
-  sudo -u postgres psql -c "CREATE ROLE ${DB_USER} LOGIN PASSWORD '${DB_PASS}';" || true
+# psql must run as the postgres OS account (peer auth refuses root). Prefer
+# runuser (util-linux, always present) and fall back to sudo/su, so this works
+# on a minimal Debian/Kali install where sudo may not be installed at all.
+run_as_postgres() {
+  if command -v runuser >/dev/null 2>&1; then
+    runuser -u postgres -- psql "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo -u postgres psql "$@"
+  else
+    # Options must precede the username for POSIX su; %q output is parsed by
+    # /bin/sh, which handles the resulting backslash escapes identically.
+    su -s /bin/sh postgres -c "psql $(printf '%q ' "$@")"
+  fi
+}
 
-sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 || \
-  sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" || true
+run_as_postgres -tc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1 || \
+  run_as_postgres -c "CREATE ROLE ${DB_USER} LOGIN PASSWORD '${DB_PASS}';" || true
 
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" 2>/dev/null || true
+run_as_postgres -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 || \
+  run_as_postgres -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" || true
+
+run_as_postgres -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" 2>/dev/null || true
 
 print_success "Database '${DB_NAME}' configured for user '${DB_USER}'"
 
@@ -191,7 +239,7 @@ POSTGRES_PASSWORD=${DB_PASS}
 
 REDIS_URL=redis://localhost:6379/0
 
-CORS_ALLOW_ORIGINS='["http://localhost:5173","http://localhost:5000"]'
+CORS_ALLOW_ORIGINS='["http://localhost:6969","http://localhost:6970","http://localhost:5173","http://localhost:8000"]'
 
 SECRET_KEY=$(openssl rand -hex 32 2>/dev/null || head -c 64 /dev/urandom | base64 | tr -d '\n' | head -c 64)
 
@@ -235,6 +283,16 @@ else
   print_warning "node_modules exists, skipping npm install"
 fi
 
+# Build the SPA so http://localhost:8000 serves the UI directly. Without this
+# the backend answers "Frontend build not found" and only the Vite dev server
+# on 6969 works, which is an easy trap on a first install.
+print_status "Building frontend..."
+if npm run build; then
+  print_success "Frontend built (frontend/dist) — http://localhost:8000 is ready"
+else
+  print_warning "Frontend build failed; the Vite dev server on port 6969 will still work."
+fi
+
 cd "$ROOT_DIR"
 
 echo ""
@@ -245,10 +303,14 @@ echo ""
 echo -e "  PostgreSQL: ${GREEN}Installed & configured${NC}"
 echo -e "  Database:   ${CYAN}${DB_NAME}${NC} (user: ${DB_USER})"
 echo -e "  Backend:    ${GREEN}Ready${NC} (.venv activated)"
-echo -e "  Frontend:   ${GREEN}Ready${NC} (node_modules installed)"
+echo -e "  Frontend:   ${GREEN}Ready${NC} (node_modules installed, built to frontend/dist)"
+echo ""
+echo "  Raw scans (SYN, OS detection) on Linux need root or CAP_NET_RAW."
+echo "  Either run the stack with sudo, or grant the capability once:"
+echo "    sudo setcap cap_net_raw,cap_net_admin+eip \$(command -v nmap)"
 echo ""
 echo "  Start the stack:"
 echo -e "    ${CYAN}./scripts/run_stack.sh${NC}"
 echo ""
-echo "  Then open: http://localhost:5000"
+echo "  Then open: http://localhost:8000  (or http://localhost:6969 for the dev server)"
 echo ""

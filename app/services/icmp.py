@@ -16,6 +16,9 @@ from dataclasses import dataclass
 
 # Matches "time=1.24 ms" (Linux/macOS) and "time=1ms" / "time<1ms" (Windows).
 _TIME_PATTERN = re.compile(r"[Tt]ime[=<]\s*(\d+(?:\.\d+)?)\s*ms")
+# "TTL=64" (Windows) and "ttl=64" (Linux/macOS) both appear in the reply line.
+# The value is a coarse but real OS-family signal: 64 = Unix-like, 128 = Windows.
+_TTL_PATTERN = re.compile(r"[Tt][Tt][Ll][=:]\s*(\d{1,3})")
 # Linux summary: "3 packets transmitted, 3 received, 0% packet loss"
 # Windows summary: "Packets: Sent = 3, Received = 3, Lost = 0 (0% loss)"
 _LINUX_LOSS_PATTERN = re.compile(r"(\d+(?:\.\d+)?)%")
@@ -31,6 +34,7 @@ class PingOutcome:
     latency_ms: float | None
     packet_loss_pct: float | None
     error: str | None = None
+    ttl: int | None = None
 
 
 def build_ping_argv(host: str, *, count: int = 1, timeout_s: float = 1.0) -> list[str]:
@@ -40,6 +44,18 @@ def build_ping_argv(host: str, *, count: int = 1, timeout_s: float = 1.0) -> lis
         return ["ping", "-n", str(max(1, count)), "-w", str(int(max(0.1, timeout_s) * 1000)), host]
     # POSIX: -c count, -W timeout in seconds (iputils; macOS ignores -W harmlessly).
     return ["ping", "-c", str(max(1, count)), "-W", str(max(1, round(timeout_s))), host]
+
+
+def parse_ping_ttl(text: str) -> int | None:
+    """The reply's TTL, or None when the platform's ping output omits it."""
+    matches = _TTL_PATTERN.findall(text or "")
+    if not matches:
+        return None
+    try:
+        value = int(matches[0])
+    except ValueError:
+        return None
+    return value if 0 < value <= 255 else None
 
 
 def parse_ping_output(text: str) -> tuple[float | None, float | None]:
@@ -94,9 +110,16 @@ async def ping(
 
     text = stdout.decode(errors="replace")
     avg_ms, loss_pct = parse_ping_output(text)
+    ttl = parse_ping_ttl(text)
 
     if process.returncode == 0:
-        return PingOutcome(host=host, reachable=True, latency_ms=avg_ms, packet_loss_pct=loss_pct)
+        return PingOutcome(
+            host=host,
+            reachable=True,
+            latency_ms=avg_ms,
+            packet_loss_pct=loss_pct,
+            ttl=ttl,
+        )
     return PingOutcome(
         host=host,
         reachable=False,

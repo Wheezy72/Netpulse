@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,8 +43,7 @@ class DeviceOut(BaseModel):
     last_seen: Optional[datetime]
     created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ScannedPortOut(BaseModel):
@@ -58,8 +57,7 @@ class ScannedPortOut(BaseModel):
     version: Optional[str] = None
     extra_info: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ScanSummary(BaseModel):
@@ -95,8 +93,7 @@ class DiscoveredHostOut(BaseModel):
     is_gateway: bool = False
     source: str = "arp"
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DiscoveryResponse(BaseModel):

@@ -8,7 +8,7 @@ from typing import List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,8 +59,7 @@ class UptimeTargetResponse(BaseModel):
     last_latency_ms: Optional[float] = None
     consecutive_failures: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UptimeCheckResponse(BaseModel):
@@ -72,8 +71,7 @@ class UptimeCheckResponse(BaseModel):
     status_code: Optional[int] = None
     error_message: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UptimeSummary(BaseModel):

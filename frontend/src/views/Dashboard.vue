@@ -139,9 +139,31 @@ async function loadDevices() {
 const totalDevices = computed(() => devices.value.length);
 const onlineDevices = computed(() => devices.value.filter(isOnline).length);
 const gatewayCount = computed(() => devices.value.filter((d) => d.is_gateway).length);
-const zoneCount = computed(
-  () => new Set(devices.value.map((d) => d.zone).filter(Boolean)).size
-);
+
+// Zones used to count `devices.zone`, which discovery never writes, so the
+// card was mathematically always 0. A zone is a configured network segment;
+// legacy manually assigned device labels are only a fallback.
+interface SegmentRow {
+  id: number;
+  name: string;
+  cidr: string;
+  is_active: boolean;
+}
+const segments = ref<SegmentRow[]>([]);
+
+async function loadSegments(): Promise<void> {
+  try {
+    const { data } = await axios.get<SegmentRow[]>("/api/network-segments");
+    segments.value = data;
+  } catch {
+    segments.value = [];
+  }
+}
+
+const zoneCount = computed(() => {
+  if (segments.value.length) return segments.value.length;
+  return new Set(devices.value.map((d) => d.zone).filter(Boolean)).size;
+});
 const availability = computed(() =>
   totalDevices.value ? Math.round((onlineDevices.value / totalDevices.value) * 100) : 0
 );
@@ -169,7 +191,7 @@ const stats = computed(() => [
     id: "zones",
     label: "Zones",
     value: zoneCount.value,
-    hint: "Distinct segments",
+    hint: "Configured segments",
   },
 ]);
 
@@ -292,7 +314,7 @@ watch(
 onMounted(async () => {
   await nextTick();
   readThemeColors();
-  await loadDevices();
+  await Promise.all([loadDevices(), loadSegments()]);
   void checkPingStatus();
 });
 </script>

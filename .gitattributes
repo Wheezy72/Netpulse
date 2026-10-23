@@ -1,0 +1,11 @@
+# Shell scripts are executed by the kernel on Linux, where CRLF makes the
+# shebang (`#!/usr/bin/env bash\r`) an unknown interpreter. Pin LF regardless
+# of the exporting machine's core.autocrlf, and keep Windows-only scripts CRLF.
+*.sh            text eol=lf
+*Dockerfile     text eol=lf
+*.Dockerfile    text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.service       text eol=lf
+*.bat           text eol=crlf
+*.cmd           text eol=crlf

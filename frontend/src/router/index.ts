@@ -55,7 +55,10 @@ const routes: RouteRecordRaw[] = [
     meta: { guest: true },
   },
   {
-    path: "/register",
+    // First-run setup only. The view redirects to /login once an account
+    // exists, so the old /register URL keeps working as a redirect target.
+    path: "/setup",
+    alias: "/register",
     name: "register",
     component: () => import("../views/Register.vue"),
     meta: { guest: true },

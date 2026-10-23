@@ -7,7 +7,7 @@ from typing import Any, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,8 +47,7 @@ class PcapFileResponse(BaseModel):
     indexed_at: Optional[str]
     index_error: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PcapPacketResponse(BaseModel):
@@ -62,8 +61,7 @@ class PcapPacketResponse(BaseModel):
     protocol: Optional[str]
     length: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PacketQueryResponse(BaseModel):

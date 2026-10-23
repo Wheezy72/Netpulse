@@ -5,7 +5,7 @@
  * Layout: fixed 64px icon rail (desktop) + sticky header with text tabs +
  * scrollable canvas. On mobile the rail collapses into a slide-in drawer.
  */
-import { ref, computed, onMounted, onUnmounted, watch } from "vue";
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from "vue";
 import type { Component } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import axios from "axios";
@@ -30,7 +30,7 @@ import {
   X,
 } from "lucide-vue-next";
 
-import BrandMark from "./components/ui/BrandMark.vue";
+import BrandLogo from "./components/ui/BrandLogo.vue";
 import CommandPalette from "./components/features/CommandPalette.vue";
 import Toast from "./components/ui/Toast.vue";
 
@@ -46,26 +46,14 @@ const ui = useUiStore();
 
 const isNightshade = computed(() => ui.theme === "nightshade");
 
-function toggleTheme() {
-  ui.setTheme(isNightshade.value ? "sysadmin" : "nightshade");
+function toggleTheme(event?: MouseEvent) {
+  // The reveal grows from the button itself, so it reads as a consequence of
+  // the click rather than an unrelated full-page effect.
+  ui.setTheme(
+    isNightshade.value ? "sysadmin" : "nightshade",
+    event ? { x: event.clientX, y: event.clientY } : undefined
+  );
 }
-
-// The new surface sweeps in from the top-right corner instead of snapping.
-// Watching the store rather than the button also catches theme changes made
-// from the command palette or the login screen.
-const themeWipe = ref(0);
-const themeWipeFill = ref("");
-
-watch(
-  () => ui.theme,
-  (next) => {
-    themeWipeFill.value =
-      next === "nightshade"
-        ? "radial-gradient(circle at 28% 72%, rgba(16,185,129,0.28), transparent 58%), #09090b"
-        : "radial-gradient(circle at 28% 72%, rgba(79,70,229,0.20), transparent 58%), #f4f4f5";
-    themeWipe.value += 1;
-  }
-);
 
 const toastRef = ref<InstanceType<typeof Toast> | null>(null);
 const mobileMenuOpen = ref(false);
@@ -142,6 +130,11 @@ function notify(type: "success" | "error" | "warning" | "info", message: string)
   toastRef.value?.show(type, message);
 }
 
+/** Adapter for pages that emit `toast` themselves (Toolbox). */
+function showToast(type: "success" | "error" | "warning" | "info", message: string): void {
+  notify(type, message);
+}
+
 // One icon family for the whole shell. Every glyph is Lucide at stroke-width
 // 1.7 so the rail, the header and the panels all sit at the same optical
 // weight — the previous hand-drawn set mixed 1.7, 1.8 and 2.
@@ -195,16 +188,27 @@ const railActions = [
   { id: "wireshark", label: "Open Wireshark", icon: icons.wireshark },
 ];
 
-const activePanel = ref<"scan" | "terminal" | null>(null);
+const activePanel = ref<"scan" | "sweep" | "terminal" | null>(null);
+const dialogInput = ref<HTMLInputElement | null>(null);
+
+// Land the caret in the only text field a dialog owns. `autofocus` does not
+// fire for content inserted after the initial page load.
+watch(activePanel, async (panel) => {
+  if (!panel) return;
+  await nextTick();
+  dialogInput.value?.focus();
+});
 
 function runRailAction(id: string) {
-  if (id === "scan" || id === "terminal") {
+  if (id === "scan" || id === "terminal" || id === "sweep") {
+    // Everything that needs input opens the same dialog. A sweep used to fire
+    // immediately from the rail with no target and no confirmation.
     activePanel.value = activePanel.value === id ? null : id;
     if (activePanel.value === "terminal") void loadTerminalInfo();
+    if (activePanel.value === "sweep") sweepMessage.value = null;
     return;
   }
   activePanel.value = null;
-  if (id === "sweep") void runSweep();
   if (id === "wireshark") void launchWireshark();
 }
 
@@ -213,11 +217,14 @@ function closePanel() {
 }
 
 // Quick scan -----------------------------------------------------------------
+// Profile ids, not raw commands: the planner decides the scan type from what
+// this machine can actually do (SYN vs connect scan), so a box without Npcap
+// or root still gets a working scan instead of "Failed to open device".
 const scanProfiles = [
-  { label: "Ping sweep — who is alive", command: "nmap -sn -T4" },
-  { label: "Top ports — fast service check", command: "nmap -F -T4" },
-  { label: "Version probe — services + versions", command: "nmap -sV -T4 -F" },
-  { label: "Full TCP — every port", command: "nmap -p- -T4" },
+  { label: "Ping sweep — who is alive", profile: "sweep" },
+  { label: "Top ports — fast service check", profile: "quick" },
+  { label: "Version probe — services + versions", profile: "services" },
+  { label: "Full TCP — every port", profile: "full" },
 ];
 const scanProfile = ref(scanProfiles[0].label);
 const scanTarget = ref("");
@@ -242,7 +249,7 @@ async function runQuickScan() {
     const profile =
       scanProfiles.find((p) => p.label === scanProfile.value) ?? scanProfiles[0];
     const { data } = await axios.post<{ id: string }>("/api/nmap/execute", {
-      command: profile.command,
+      profile: profile.profile,
       target,
       save_results: true,
     });
@@ -257,11 +264,18 @@ async function runQuickScan() {
 
 // Discovery sweep ------------------------------------------------------------
 const { discovering, discover, notice } = useDeviceDiscovery();
+const sweepTarget = ref("");
+const sweepMessage = ref<string | null>(null);
+const sweepKind = ref<"ok" | "warn" | "error" | null>(null);
 
 async function runSweep() {
   if (discovering.value) return;
-  const result = await discover(null);
+  sweepMessage.value = null;
+  sweepKind.value = null;
+  const result = await discover(sweepTarget.value.trim() || null);
   if (notice.value) {
+    sweepMessage.value = notice.value.text;
+    sweepKind.value = notice.value.kind;
     notify(
       notice.value.kind === "ok"
         ? "success"
@@ -270,10 +284,15 @@ async function runSweep() {
           : "error",
       notice.value.text
     );
+  } else if (result) {
+    sweepMessage.value = "Sweep finished.";
+    sweepKind.value = "ok";
   }
-  if (result && route.name !== "devices") {
-    router.push("/devices");
-  }
+}
+
+function goToDevices(): void {
+  closePanel();
+  router.push("/devices");
 }
 
 // Terminal / MobaXterm -------------------------------------------------------
@@ -418,7 +437,7 @@ async function handleForcePasswordChange() {
           :theme="ui.theme"
           @login-success="handleAuthSuccess"
           @register-success="handleAuthSuccess"
-          @switch-to-register="router.push('/register')"
+          @switch-to-register="router.push('/setup')"
           @switch-to-login="router.push('/login')"
           @toggle-theme="ui.setTheme(ui.theme === 'nightshade' ? 'sysadmin' : 'nightshade')"
         />
@@ -500,11 +519,17 @@ async function handleForcePasswordChange() {
         <aside
           class="hidden md:flex fixed left-0 top-0 z-40 h-screen w-16 flex-col items-center border-r border-[var(--np-border-subtle)] bg-[var(--np-surface)]/85 backdrop-blur-xl"
         >
-          <!-- Brand -->
+          <!-- Brand. A link, not decoration: the mark is the fastest way back
+               to the dashboard from anywhere in the app. -->
           <div class="flex h-16 w-full items-center justify-center border-b border-[var(--np-border-subtle)]">
-            <div class="np-brand-bg np-brand-border np-brand-text flex h-9 w-9 items-center justify-center rounded-xl border shadow-lg shadow-[0_0_14px_var(--np-accent-glow)]">
-              <BrandMark :size="20" />
-            </div>
+            <RouterLink
+              to="/dashboard"
+              class="np-brand-bg np-brand-border np-brand-text flex h-9 w-9 items-center justify-center rounded-xl border shadow-lg shadow-[0_0_14px_var(--np-accent-glow)] transition-transform hover:scale-105 active:scale-95"
+              aria-label="NetPulse — go to the dashboard"
+              title="NetPulse — dashboard"
+            >
+              <BrandLogo :size="20" />
+            </RouterLink>
           </div>
 
           <!-- Quick actions, vertically centered: things you fire, not page links -->
@@ -540,25 +565,26 @@ async function handleForcePasswordChange() {
           <div class="pb-4 text-[0.5rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">v0.1</div>
         </aside>
 
-        <!-- Invisible click-catcher so a tap outside closes the panel.
-             It used to paint an opaque surface over the whole viewport, which
-             greyed out the entire app for a small popover — the page behind
-             stays fully visible now. -->
+        <!-- Dimmed backdrop. Quick actions are dialogs now: a floating card
+             pinned to the rail read as part of the page it was covering. -->
         <div
           v-if="activePanel"
-          class="fixed inset-0 z-[45] bg-transparent"
+          class="np-dialog-scrim fixed inset-0 z-[70]"
           @click="closePanel"
         />
 
         <!-- Quick nmap scan -->
         <section
           v-if="activePanel === 'scan'"
-          class="glass-card glass-card--static fixed left-[4.5rem] top-1/2 z-[60] w-[19.5rem] -translate-y-1/2 p-4 max-sm:left-3 max-sm:right-3 max-sm:top-20 max-sm:w-auto max-sm:translate-y-0"
+          class="np-dialog glass-card glass-card--static fixed z-[80] w-[min(26rem,calc(100vw-2rem))] p-5"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="quick-scan-title"
         >
           <header class="flex items-start justify-between gap-2">
             <div>
               <p class="text-[0.55rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Quick scan</p>
-              <h2 class="mt-0.5 text-sm font-bold text-[var(--np-text)]">nmap without leaving the page</h2>
+              <h2 id="quick-scan-title" class="mt-0.5 text-sm font-bold text-[var(--np-text)]">nmap without leaving the page</h2>
             </div>
             <button
               type="button"
@@ -574,6 +600,7 @@ async function handleForcePasswordChange() {
             Target
           </label>
           <input
+            ref="dialogInput"
             v-model="scanTarget"
             type="text"
             placeholder="192.168.1.0/24 or one-host"
@@ -585,7 +612,7 @@ async function handleForcePasswordChange() {
             Profile
           </label>
           <select v-model="scanProfile" class="np-neon-input mt-1 w-full cursor-pointer px-2 py-2 text-xs">
-            <option v-for="p in scanProfiles" :key="p.command" :value="p.label">{{ p.label }}</option>
+            <option v-for="p in scanProfiles" :key="p.profile" :value="p.label">{{ p.label }}</option>
           </select>
 
           <div class="mt-3 flex gap-2">
@@ -611,15 +638,103 @@ async function handleForcePasswordChange() {
           </p>
         </section>
 
+        <!-- Discovery sweep -->
+        <section
+          v-if="activePanel === 'sweep'"
+          class="np-dialog glass-card glass-card--static fixed z-[80] w-[min(28rem,calc(100vw-2rem))] p-5"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="quick-sweep-title"
+        >
+          <header class="flex items-start justify-between gap-2">
+            <div>
+              <p class="text-[0.55rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Discovery</p>
+              <h2 id="quick-sweep-title" class="mt-0.5 text-sm font-bold text-[var(--np-text)]">Sweep the network</h2>
+            </div>
+            <button
+              type="button"
+              class="rounded-md p-1 text-[var(--np-text-dim)] transition-colors hover:text-[var(--np-text)]"
+              aria-label="Close"
+              @click="closePanel"
+            >
+              <X class="h-4 w-4" :stroke-width="1.7" />
+            </button>
+          </header>
+
+          <p class="mt-3 text-xs leading-relaxed text-[var(--np-text-muted)]">
+            Finds hosts that answer and adds them to the inventory. No ports are scanned.
+          </p>
+
+          <label class="mt-4 block text-[0.6rem] font-mono uppercase tracking-wider text-[var(--np-text-dim)]">
+            Target <span class="normal-case tracking-normal opacity-70">(optional)</span>
+          </label>
+          <input
+            ref="dialogInput"
+            v-model="sweepTarget"
+            type="text"
+            placeholder="192.168.1.0/24"
+            class="np-neon-input mt-1 w-full px-3 py-2 font-mono text-xs"
+            @keyup.enter="runSweep"
+          />
+          <p class="mt-1.5 text-[0.65rem] text-[var(--np-text-dim)]">
+            Leave blank to sweep the subnets this machine is attached to.
+          </p>
+
+          <p
+            v-if="sweepMessage"
+            class="mt-3 rounded border px-3 py-2 text-[0.7rem]"
+            :class="{
+              'text-[var(--np-success)]': sweepKind === 'ok',
+              'text-[var(--np-warning)]': sweepKind === 'warn',
+              'text-[var(--np-danger)]': sweepKind === 'error',
+            }"
+            :style="{
+              borderColor:
+                sweepKind === 'ok'
+                  ? 'var(--np-success)'
+                  : sweepKind === 'warn'
+                    ? 'var(--np-warning)'
+                    : 'var(--np-danger)',
+            }"
+          >
+            {{ sweepMessage }}
+          </p>
+
+          <div class="mt-4 flex gap-2">
+            <button
+              type="button"
+              class="np-cyber-btn np-cyber-btn--solid flex-1 py-2 text-[0.65rem] uppercase tracking-wider"
+              :disabled="discovering || !auth.isAdmin"
+              @click="runSweep"
+            >
+              {{ discovering ? "Sweeping…" : "Start sweep" }}
+            </button>
+            <button
+              type="button"
+              class="rounded-xl border border-[var(--np-border-subtle)] px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-wider text-[var(--np-text-muted)] transition-colors hover:text-[var(--np-text)]"
+              @click="goToDevices"
+            >
+              Devices
+            </button>
+          </div>
+
+          <p v-if="!auth.isAdmin" class="mt-2 text-[0.65rem] text-[var(--np-warning)]">
+            Admin access is required to sweep the network.
+          </p>
+        </section>
+
         <!-- Terminal / MobaXterm -->
         <section
           v-if="activePanel === 'terminal'"
-          class="glass-card glass-card--static fixed left-[4.5rem] top-1/2 z-[60] w-[19.5rem] -translate-y-1/2 p-4 max-sm:left-3 max-sm:right-3 max-sm:top-20 max-sm:w-auto max-sm:translate-y-0"
+          class="np-dialog glass-card glass-card--static fixed z-[80] w-[min(26rem,calc(100vw-2rem))] p-5"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="terminal-title"
         >
           <header class="flex items-start justify-between gap-2">
             <div>
               <p class="text-[0.55rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Desktop</p>
-              <h2 class="mt-0.5 text-sm font-bold text-[var(--np-text)]">Open MobaXterm</h2>
+              <h2 id="terminal-title" class="mt-0.5 text-sm font-bold text-[var(--np-text)]">Open MobaXterm</h2>
             </div>
             <button
               type="button"
@@ -674,12 +789,16 @@ async function handleForcePasswordChange() {
           >
             <div class="flex h-16 items-center justify-between gap-3 px-4 md:px-8">
               <!-- Mobile brand -->
-              <div class="flex items-center gap-2 md:hidden">
-                <div class="np-brand-bg np-brand-border np-brand-text flex h-8 w-8 items-center justify-center rounded-lg border">
-                  <BrandMark :size="17" />
-                </div>
+              <RouterLink
+                to="/dashboard"
+                class="flex items-center gap-2 md:hidden"
+                aria-label="NetPulse — go to the dashboard"
+              >
+                <span class="np-brand-bg np-brand-border np-brand-text flex h-8 w-8 items-center justify-center rounded-lg border">
+                  <BrandLogo :size="17" />
+                </span>
                 <span class="text-xs uppercase tracking-widest font-semibold">NetPulse</span>
-              </div>
+              </RouterLink>
 
               <!-- Desktop text tabs with active underline -->
               <nav class="hidden md:flex h-16 items-stretch gap-1 overflow-x-auto">
@@ -733,7 +852,7 @@ async function handleForcePasswordChange() {
 
                 <button
                   type="button"
-                  @click="toggleTheme"
+                  @click="toggleTheme($event)"
                   class="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)]/60 text-[var(--np-text-dim)] transition-all hover:text-[var(--np-text)]"
                   :title="isNightshade ? 'Switch to light' : 'Switch to dark'"
                 >
@@ -849,17 +968,16 @@ async function handleForcePasswordChange() {
           <!-- Canvas -->
           <main class="flex-1 px-4 py-6 md:px-8 md:py-8">
             <div class="mx-auto w-full max-w-[1600px]">
+              <!-- Toolbox is the only page that declares a `toast` event. Binding
+                   it on every routed component made Vue warn about extraneous
+                   listeners for five pages that can never emit one, so the
+                   binding is scoped to that route. -->
               <RouterView v-slot="{ Component }">
                 <component
                   :is="Component"
                   :theme="ui.theme"
                   :is-admin="auth.isAdmin"
-                  @login-success="handleAuthSuccess"
-                  @register-success="handleAuthSuccess"
-                  @switch-to-register="router.push('/register')"
-                  @switch-to-login="router.push('/login')"
-                  @toggle-theme="ui.setTheme(ui.theme === 'nightshade' ? 'sysadmin' : 'nightshade')"
-                  @toast="(type: any, msg: string) => toastRef?.show(type, msg)"
+                  v-on="route.name === 'toolbox' ? { toast: showToast } : {}"
                 />
               </RouterView>
             </div>
@@ -869,14 +987,5 @@ async function handleForcePasswordChange() {
     </template>
 
     <Toast ref="toastRef" :theme="ui.theme" />
-
-    <!-- Theme switch sweep. Decorative only: it is removed on animationend. -->
-    <div
-      v-if="themeWipe"
-      :key="themeWipe"
-      class="np-theme-wipe"
-      :style="{ background: themeWipeFill }"
-      @animationend="themeWipe = 0"
-    />
   </div>
 </template>

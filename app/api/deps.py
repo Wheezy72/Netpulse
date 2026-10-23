@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import datetime, timedelta
 from typing import Annotated, AsyncGenerator, Optional
 
@@ -17,6 +18,8 @@ from app.core.config import settings
 from app.core.redis import get_redis
 from app.db.session import async_session_factory
 from app.models.user import User, UserRole
+
+logger = logging.getLogger("netpulse.audit")
 
 ph = PasswordHasher()
 security_scheme = HTTPBearer(auto_error=True)
@@ -197,11 +200,57 @@ async def get_current_user(
     return user
 
 
+async def record_audit(
+    user_id: int | None,
+    method: str,
+    path: str,
+    ip_address: str | None = None,
+    details: dict | None = None,
+) -> None:
+    """Write an audit row directly to the database.
+
+    This used to be handed to Celery with a bare ``except: pass``. A no-worker
+    install therefore produced no audit trail at all while the code looked as
+    if it did. The write is a single insert, so doing it in-process is cheaper
+    than the broker round-trip it replaced.
+    """
+    from app.models.audit_log import AuditLog
+
+    try:
+        async with async_session_factory() as session:
+            session.add(
+                AuditLog(
+                    user_id=user_id,
+                    method=method,
+                    path=path,
+                    action=f"{method} {path}",
+                    ip_address=ip_address,
+                    details=details or {},
+                )
+            )
+            await session.commit()
+    except Exception as exc:  # never let auditing break the request
+        logger.warning("Could not write audit log for %s %s: %s", method, path, exc)
+
+
 def require_role(*allowed_roles: UserRole):
     """Return a dependency that requires authentication and optionally a specific role."""
 
-    async def _require(user: User = Depends(get_current_user)) -> User:
+    async def _require(
+        user: User = Depends(get_current_user),
+        # Annotated as Request (not `Request | None`) so FastAPI injects it;
+        # the default keeps direct calls such as `dep(user)` in tests working.
+        request: Request = None,  # type: ignore[assignment]
+    ) -> User:
         if allowed_roles and user.role not in allowed_roles:
+            if request is not None:
+                await record_audit(
+                    user.id,
+                    request.method,
+                    request.url.path,
+                    getattr(request.client, "host", None),
+                    {"role": user.role.value, "denied": True},
+                )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Insufficient permissions",
@@ -232,9 +281,10 @@ async def optional_current_user(
 ) -> User | None:
     """Resolve the caller when a token is present, else ``None``.
 
-    Used by account creation: the first account is authorised by SETUP_TOKEN,
-    later ones by an admin's bearer token, and an anonymous request simply
-    resolves to ``None`` so the open-signup gate can refuse it.
+    Used by account creation: the first account is authorised by SETUP_TOKEN
+    (when one is configured), later ones by an admin's bearer token, and an
+    anonymous request resolves to ``None`` so the closed-signup gate can
+    refuse it.
     """
     if credentials is None:
         return None
@@ -262,28 +312,27 @@ async def require_admin(
     user: User = Depends(get_current_user),
 ) -> User:
     if user.role != UserRole.ADMIN:
+        await record_audit(
+            user.id,
+            request.method,
+            request.url.path,
+            getattr(request.client, "host", None),
+            {"role": user.role.value, "denied": True},
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required",
         )
 
-    try:
-        from app.core.celery_app import celery_app
-
-        celery_app.send_task(
-            "app.tasks.write_audit_log",
-            kwargs={
-                "user_id": user.id,
-                "method": request.method,
-                "path": request.url.path,
-                "ip_address": getattr(request.client, "host", None),
-                "details": {
-                    "query": dict(request.query_params),
-                    "path_params": request.scope.get("path_params", {}),
-                },
-            },
-        )
-    except Exception:
-        pass
+    await record_audit(
+        user.id,
+        request.method,
+        request.url.path,
+        getattr(request.client, "host", None),
+        {
+            "query": dict(request.query_params),
+            "path_params": request.scope.get("path_params", {}),
+        },
+    )
 
     return user

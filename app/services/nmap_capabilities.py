@@ -15,10 +15,12 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import struct
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 CAPABILITY_TTL_SECONDS = 300
@@ -230,20 +232,42 @@ def plan_command(
     vuln_scripts: list[str] = []
     installed_vuln = sorted(set(caps.vuln_scripts) & set(VULN_SCRIPT_CATALOG))
 
+    # Without raw sockets nmap cannot craft ARP/ICMP itself: `--unprivileged`
+    # makes it discover hosts with TCP connect() instead, and `-Pn` stops it
+    # from trying (and dying on) a raw ping probe first.
+    unprivileged_args = [] if caps.privileged else ["--unprivileged", "-Pn"]
+
     if canonical == "sweep":
-        argv = ["nmap", "-sn", "-PE", "-PS22,80,443", "-T4", target]
+        # `-Pn` belongs nowhere near `-sn`: it tells nmap every address is up,
+        # which turns a ping sweep into a list of all 256 hosts. `-PE` needs a
+        # raw socket, so it is only offered when raw access actually exists.
+        if caps.privileged:
+            argv = ["nmap", "-sn", "-PE", "-PS22,80,443", "-T4", target]
+        else:
+            argv = ["nmap", "-sn", "-PS22,80,443", "-T4", "--unprivileged", target]
         notes.append("host discovery only")
+        if not caps.privileged:
+            notes.append(
+                "No raw-socket access (Npcap driver stopped or no root): "
+                "discovering via TCP connect instead of ARP/ICMP"
+            )
     elif canonical == "quick":
         argv = ["nmap", scan_flag]
         if ports:
             argv.extend(["-p", ports])
         else:
             argv.append("-F")
-        argv.extend(["--max-retries", "2", "-T4", target])
+        argv.extend(["--max-retries", "2", "-T4", *unprivileged_args, target])
     elif canonical == "services":
-        argv = ["nmap", scan_flag, "-sV", "--version-light", "-F", "-T4", target]
+        argv = [
+            "nmap", scan_flag, "-sV", "--version-light", "-F", "-T4",
+            *unprivileged_args, target,
+        ]
     elif canonical == "full":
-        argv = ["nmap", scan_flag, "-p-", "--min-rate", "1000", "--max-retries", "2", "-T4", target]
+        argv = [
+            "nmap", scan_flag, "-p-", "--min-rate", "1000", "--max-retries", "2",
+            "-T4", *unprivileged_args, target,
+        ]
     else:  # vuln
         argv = ["nmap", scan_flag, "-sV", "-T4"]
         if installed_vuln:
@@ -262,7 +286,7 @@ def plan_command(
             f"Vulnerability script catalog {CATALOG_VERSION}: "
             f"{len(installed_vuln)} of {len(VULN_SCRIPT_CATALOG)} scripts installed"
         )
-        argv.append(target)
+        argv.extend([*unprivileged_args, target])
 
     if not caps.privileged and canonical != "sweep":
         notes.append("No raw-socket privileges, using TCP connect scan")
@@ -290,7 +314,7 @@ def _probe_capabilities() -> NmapCapabilities:
         script_categories=frozenset(_collect_categories(script_files)),
         vuln_scripts=tuple(sorted(installed_scripts & set(VULN_SCRIPT_CATALOG))),
         scripts_dir=str(scripts_dir) if scripts_dir is not None else None,
-        detected_at=datetime.utcnow(),
+        detected_at=datetime.now(timezone.utc),
     )
 
 
@@ -315,22 +339,108 @@ def _read_version(available: bool) -> str | None:
     return match.group(1) if match else None
 
 
+def _npcap_driver_running() -> bool:
+    """True when the Npcap/WinPcap packet driver is actually running.
+
+    Windows grants SYN scans through Npcap rather than EUID 0, but only while
+    its kernel driver is started. A machine can have Npcap *installed* with the
+    driver stopped or disabled, and then every raw scan dies with "dnet: Failed
+    to open device <iface>" — a failure that looks like a Netpulse bug from the
+    UI. Querying the service is the reliable signal; sc.exe is present on every
+    Windows install and needs no elevation to read status.
+    """
+    for service in ("npcap", "npf"):
+        try:
+            completed = subprocess.run(
+                ["sc", "query", service],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue
+        if "RUNNING" in (completed.stdout or ""):
+            return True
+    return False
+
+
+# CAP_NET_RAW in the Linux capability numbering.
+_CAP_NET_RAW = 13
+
+
+def _linux_process_has_cap_net_raw() -> bool:
+    """CAP_NET_RAW bit of this process's effective set, or False.
+
+    Linux grants raw sockets by capability rather than only by UID, so a
+    service account can scan raw without being root.
+    """
+    try:
+        with open("/proc/self/status", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("CapEff:"):
+                    mask = int(line.split(":", 1)[1].strip(), 16)
+                    return bool((mask >> _CAP_NET_RAW) & 1)
+    except (OSError, ValueError):
+        return False
+    return False
+
+
+def _linux_binary_has_cap_net_raw(path: str | None) -> bool:
+    """True when *path* carries CAP_NET_RAW with file capabilities enabled.
+
+    ``sudo setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap`` is the common
+    way to let a non-root install scan raw. Those bits live on the binary and
+    are applied to nmap when it is executed, so reading our own CapEff would
+    wrongly report the box as unprivileged.
+    """
+    getxattr = getattr(os, "getxattr", None)
+    if not path or getxattr is None:
+        return False
+
+    try:
+        raw = getxattr(path, "security.capability")
+    except OSError:
+        return False
+    if len(raw) < 12:
+        return False
+
+    # struct vfs_cap_data: magic (revision | VFS_CAP_FLAGS_EFFECTIVE), then
+    # permitted/inheritable words in host byte order (little-endian here).
+    magic = struct.unpack("<I", raw[:4])[0]
+    if not magic & 0x1:
+        return False
+    if (magic & 0xFF000000) not in (0x02000000, 0x03000000):
+        return False
+
+    permitted_low = struct.unpack("<I", raw[4:8])[0]
+    return bool((permitted_low >> _CAP_NET_RAW) & 1)
+
+
 def _has_raw_socket_privileges() -> bool:
     """True when nmap may open raw sockets.
 
     On Windows Npcap's driver handles raw sockets, so an ordinary user can run
-    SYN scans; elsewhere the process needs EUID 0.
+    SYN scans — provided the driver is running. On Linux it is EUID 0 or
+    CAP_NET_RAW, either on this process or on the nmap binary itself.
     """
     if os.name == "nt":
-        return True
+        return _npcap_driver_running()
 
     geteuid = getattr(os, "geteuid", None)
-    if geteuid is None:
-        return False
-    try:
-        return geteuid() == 0
-    except OSError:
-        return False
+    if geteuid is not None:
+        try:
+            if geteuid() == 0:
+                return True
+        except OSError:
+            pass
+
+    if sys.platform.startswith("linux"):
+        return _linux_process_has_cap_net_raw() or _linux_binary_has_cap_net_raw(
+            shutil.which("nmap")
+        )
+
+    return False
 
 
 def _find_scripts_dir() -> Path | None:

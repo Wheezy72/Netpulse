@@ -38,6 +38,10 @@ class ScanSchedule(BaseModel):
     scan_type: str = "quick"
     segments: list[int] = []
     notify_on_complete: bool = True
+    # Written by app.services.scan_scheduler on each run so the tab can show
+    # that the schedule is actually being read.
+    last_run: Optional[str] = None
+    last_result: Optional[str] = None
 
 
 async def _get_user_settings(db: AsyncSession, user_id: int) -> UserSettings | None:
@@ -224,13 +228,24 @@ async def update_scan_schedule(
     db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> ScanSchedule:
-    """Update scan schedule settings for the current user."""
+    """Update scan schedule settings for the current user.
+
+    The run history written by the scheduler lives in the same JSON blob, so
+    the editable fields are merged over it instead of replacing the whole dict
+    (otherwise saving the tab would erase the proof that it ran).
+    """
+    row = await _get_user_settings(db, current_user.id)
+    existing = dict(row.scan_schedule or {}) if row else {}
+    payload = schedule.model_dump(exclude={"last_run", "last_result"})
+    payload["last_run"] = existing.get("last_run")
+    payload["last_result"] = existing.get("last_result")
+
     await _upsert_user_settings(
         db,
         current_user.id,
-        scan_schedule=schedule.model_dump(),
+        scan_schedule=payload,
     )
-    return schedule
+    return ScanSchedule(**payload)
 
 
 SCAN_FREQUENCIES = [

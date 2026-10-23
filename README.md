@@ -54,6 +54,22 @@ bash scripts/docker_reset.sh
 - Backend API with nmap / Scapy / Zeek / packet capture
 - Frontend ready to go
 
+### First launch: there is no default account
+
+A fresh install has no users at all. The sign-in screen offers **Set up this
+instance**, which creates the first administrator with the credentials you
+choose; that account can then add everyone else from **Settings → Users**.
+There is no public sign-up and no `admin`/`changeme` pair baked in.
+
+- **Exposed beyond localhost?** Export `SETUP_TOKEN` before the first start.
+  The setup screen then requires that token, so a stranger who reaches the port
+  cannot claim the instance.
+- **Scripted installs** can pre-create the administrator instead by setting
+  `BOOTSTRAP_ADMIN_PASSWORD`. That account must choose a new password on its
+  first sign-in, and the setup screen is skipped.
+- Accounts an admin adds are **viewers** unless the admin picks the admin role.
+  Their initial password is temporary and replaced on first sign-in.
+
 **Verify Zeek is available:**
 
 ```bash
@@ -105,6 +121,19 @@ sudo ./scripts/setup_linux.sh
 ./scripts/run_stack.sh
 ```
 
+Notes for Linux:
+
+- **Any interface works.** Discovery reads the interface that carries the
+  default route, so USB Wi-Fi adapters (`wlan0`, `wlx…`) are used as-is; there
+  is no `eth0` to rename or configure.
+- **Root or `CAP_NET_RAW`.** Without either, ARP sweeps fall back to the
+  kernel's neighbour table and nmap uses TCP connect scans. Run the stack with
+  `sudo`, or grant the capability once:
+  `sudo setcap cap_net_raw,cap_net_admin+eip "$(command -v nmap)"`.
+- **Packets belong to Wireshark.** NetPulse does discovery, inventory and
+  scans; for capture, open the interface in Wireshark (its own monitor-mode
+  handling beats anything embedded here).
+
 </details>
 
 <details>
@@ -131,7 +160,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 cd frontend && npm run dev
 ```
 
-Vite binds the first free port from 6969, 6970, 8888 and 9999 and prints it. Celery is only needed for scheduled scans, report generation and the audit log; the API runs without it.
+Vite binds the first free port from 6969, 6970, 8888 and 9999 and prints it. The API runs without Celery: latency sampling, discovery, vulnerability alerts and saved scan schedules all run in-process. A worker is only needed for queued long-running tasks (report generation, script execution); `run_stack.sh` starts one, and `scripts/setup_linux.sh` starts neither beat nor worker twice.
 
 ---
 
@@ -197,7 +226,8 @@ pytest tests/ -v
 
 **Security**
 - Vulnerability scanning
-- Two roles: admin and viewer
+- Two roles: admin and viewer, no public sign-up
+- First-run setup, forced password change for invited accounts
 - Self-service password change and email attachment
 - Rate limiting (Redis-backed)
 

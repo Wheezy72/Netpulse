@@ -67,13 +67,22 @@ services:
       BOOTSTRAP_ADMIN_ENABLED: ${BOOTSTRAP_ADMIN_ENABLED:-true}
       BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@netpulse.local}
-      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-changeme}
+      # Leave empty for a clean first-run setup screen. Set a value only for
+      # scripted installs; it pre-creates the admin, who must change it on first sign-in.
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
       PULSE_GATEWAY_IP: ${PULSE_GATEWAY_IP:-auto}
       PULSE_ISP_IP: ${PULSE_ISP_IP:-8.8.8.8}
       PULSE_CLOUDFLARE_IP: ${PULSE_CLOUDFLARE_IP:-1.1.1.1}
       SCRIPTS_BASE_DIR: /app/scripts
       PCAP_STORAGE_DIR: /app/data/pcaps
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["http://localhost:8000"]}
+
+      # Celery beat (embedded in netpulse-worker) owns every scheduled job in
+      # this stack. The app also runs in-process loops for installs without
+      # Celery; leaving both on duplicated each metric sample and alert email.
+      ENABLE_LATENCY_MONITOR: ${ENABLE_LATENCY_MONITOR:-false}
+      ENABLE_SCHEDULED_TASKS: ${ENABLE_SCHEDULED_TASKS:-false}
     volumes:
       - app_data:/app/data
       # PCAPs land on the host so they can be opened directly in Wireshark

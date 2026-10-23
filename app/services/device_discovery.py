@@ -233,6 +233,36 @@ def hosts_from_arp_pairs(
     return hosts
 
 
+def os_from_ttl(
+    ttl: Optional[int],
+    *,
+    mac_address: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Coarse OS family from an ICMP reply's TTL.
+
+    TTL is a real signal rather than a guess: hosts decrement it from their
+    stack's initial value, and the initial value is effectively fixed per
+    family (64 Unix-like, 128 Windows, 255 network gear). It cannot separate
+    Android from Linux from macOS on its own, so the MAC is used to narrow it:
+    a locally administered (randomised) address on a 64-TTL host is the
+    signature of a phone or tablet, both of which rotate their MAC per network
+    and neither of which answers NBNS.
+
+    Returns ``(device_type, os)`` with ``(None, None)`` when TTL is unknown.
+    """
+    if ttl is None:
+        return None, None
+
+    randomised = is_locally_administered(mac_address)
+    if ttl <= 64:
+        if randomised:
+            return "Mobile device", "Android/Linux"
+        return None, "Linux/Unix"
+    if ttl <= 128:
+        return "Windows Workstation", "Windows"
+    return "Network device", "Embedded"
+
+
 def _gateway_from_os_commands() -> Optional[str]:
     """Read the default gateway straight from the OS when scapy is absent.
 
@@ -321,37 +351,212 @@ def detect_gateway_ips() -> set[str]:
     return gateway_ips
 
 
-def local_subnets(iface: Optional[str] = None) -> Tuple[List[str], Optional[str]]:
-    """Directly attached subnets worth sweeping.
+def _os_output(cmd: list[str], timeout: float = 8.0) -> str:
+    """stdout of *cmd*, or an empty string when the tool is missing/fails.
 
-    Returns ``(subnets, resolved_iface)``. Requires scapy; without it there is
-    no portable way to read the routing table across Linux/macOS/Windows, so
-    callers should then fall back to an explicit target.
+    Every caller passes fixed literals, so nothing user-controlled ever
+    reaches a command line. Missing tools are common on minimal installs and
+    must degrade to "unknown", never to an exception.
+    """
+    import shutil
+    import subprocess
+
+    try:
+        if not shutil.which(cmd[0]):
+            return ""
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, shell=False, timeout=timeout
+        )
+    except Exception:
+        return ""
+    return proc.stdout or ""
+
+
+def _interface_from_os() -> Optional[str]:
+    """Default-route interface name from the OS, without scapy or root.
+
+    Linux answers with ``ip route show default`` and macOS with ``route -n get
+    default``. This is what makes a USB Wi-Fi adapter work: its name is
+    ``wlx0013ef...`` or ``wlan0``, never the ``eth0`` that used to be assumed,
+    and scapy cannot report it while the capture driver is not running.
+    """
+    import sys
+
+    if sys.platform.startswith("linux"):
+        for line in _os_output(["ip", "route", "show", "default"]).splitlines():
+            parts = line.split()
+            if "dev" in parts:
+                index = parts.index("dev")
+                if index + 1 < len(parts):
+                    return parts[index + 1]
+        return None
+
+    if sys.platform.startswith("darwin"):
+        for line in _os_output(["route", "-n", "get", "default"]).splitlines():
+            key, _, value = line.partition(":")
+            if key.strip() == "interface" and value.strip():
+                return value.strip()
+        return None
+
+    return None
+
+
+def default_interface() -> Optional[str]:
+    """Name of the interface carrying the default route, or ``None``.
+
+    scapy is preferred because on Windows its name is the one ``sniff`` wants
+    (the Npcap device name); on Linux/macOS the kernel's own answer is used as
+    a fallback so discovery works without packet-capture privileges.
     """
     try:
         from scapy.all import conf
-        from scapy.utils import ltoa
     except Exception:
-        return [], None
+        return _interface_from_os()
 
     try:
-        resolved_iface = iface or conf.route.route("0.0.0.0")[0] or conf.iface
+        return conf.route.route("0.0.0.0")[0] or conf.iface or _interface_from_os()
     except Exception:
-        return [], None
+        return _interface_from_os()
 
-    candidates: List[str] = []
-    for net, mask, gateway, route_iface, _addr, _metric in conf.route.routes:
-        if route_iface != resolved_iface or gateway != "0.0.0.0":
+
+def _primary_local_address() -> Optional[str]:
+    """The source address the kernel would use to reach the outside world.
+
+    A UDP ``connect()`` sends no packet; it only asks the routing table, so it
+    works without any packet-capture driver.
+    """
+    for probe in ("1.1.1.1", "8.8.8.8"):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.connect((probe, 53))
+            address = sock.getsockname()[0]
+        except OSError:
             continue
+        finally:
+            sock.close()
+        if address and not address.startswith("127."):
+            return address
+    return None
+
+
+def _subnet_for_address(address: str) -> Optional[str]:
+    """``address/prefix`` for the interface that owns *address*, via OS tools.
+
+    Every argument is a fixed literal and nothing user-controlled reaches the
+    command line. This is the fallback used when scapy cannot enumerate
+    interfaces (typically: packet-capture driver stopped), which previously
+    left discovery reporting "could not determine local subnets".
+    """
+    import ipaddress
+    import sys
+
+    _run = _os_output
+
+    def _cidr(netmask: str) -> Optional[str]:
+        try:
+            network = ipaddress.ip_network(
+                f"{address}/{netmask}", strict=False
+            )
+        except ValueError:
+            return None
+        return str(network)
+
+    try:
+        if sys.platform.startswith("win"):
+            lines = _run(["ipconfig"]).splitlines()
+            for index, line in enumerate(lines):
+                if address not in line or "IPv4" not in line:
+                    continue
+                # ipconfig prints "Subnet Mask . . . : 255.255.255.0" a couple
+                # of lines below the address, inside the same adapter block.
+                for follow in lines[index + 1: index + 5]:
+                    if "Subnet Mask" in follow or "Subnet mask" in follow:
+                        mask = follow.split(":", 1)[-1].strip()
+                        return _cidr(mask)
+                return None
+            return None
+
+        if sys.platform.startswith("linux"):
+            for line in _run(["ip", "-o", "-4", "addr", "show"]).splitlines():
+                for token in line.split():
+                    if token.startswith(f"{address}/"):
+                        return _cidr(token.split("/", 1)[1])
+            return None
+
+        if sys.platform.startswith("darwin"):
+            lines = _run(["ifconfig"]).splitlines()
+            for index, line in enumerate(lines):
+                if f"inet {address} " not in line:
+                    continue
+                for token_index, token in enumerate(line.split()):
+                    if token == "netmask":
+                        raw = line.split()[token_index + 1]
+                        try:
+                            mask = ipaddress.IPv4Address(int(raw, 16))
+                        except ValueError:
+                            return None
+                        return _cidr(str(mask))
+            return None
+    except Exception:
+        return None
+
+    return None
+
+
+def local_subnets(iface: Optional[str] = None) -> Tuple[List[str], Optional[str]]:
+    """Directly attached subnets worth sweeping.
+
+    Returns ``(subnets, resolved_iface)``. scapy is preferred because it reads
+    the routing table directly, but it cannot enumerate interfaces while the
+    packet-capture driver is stopped — so the OS's own tooling answers instead
+    (``ipconfig`` / ``ip`` / ``ifconfig``). Discovery therefore still knows
+    which subnet to sweep on a box without Npcap or root.
+    """
+
+    def _compute(net, mask) -> Optional[str]:
         if mask in (0, 0xFFFFFFFF):
-            continue
-        network = ltoa(net)
+            return None
+        network = "%d.%d.%d.%d" % (
+            (net >> 24) & 0xFF,
+            (net >> 16) & 0xFF,
+            (net >> 8) & 0xFF,
+            net & 0xFF,
+        )
         if network.startswith(("127.", "224.", "240.", "255.")):
-            continue
+            return None
         prefix = bin(mask & 0xFFFFFFFF).count("1")
-        candidates.append(f"{network}/{prefix}")
+        return f"{network}/{prefix}"
 
-    return subnets_to_sweep(candidates), resolved_iface
+    try:
+        from scapy.all import conf
+    except Exception:
+        conf = None  # type: ignore[assignment]
+
+    if conf is not None:
+        try:
+            resolved_iface = iface or conf.route.route("0.0.0.0")[0] or conf.iface
+        except Exception:
+            resolved_iface = iface
+
+        if resolved_iface:
+            candidates: List[str] = []
+            for net, mask, gateway, route_iface, _addr, _metric in conf.route.routes:
+                if route_iface != resolved_iface or gateway != "0.0.0.0":
+                    continue
+                cidr = _compute(net, mask)
+                if cidr:
+                    candidates.append(cidr)
+            if candidates:
+                return subnets_to_sweep(candidates), resolved_iface
+
+    # --- OS fallback -----------------------------------------------------
+    address = _primary_local_address()
+    if not address:
+        return [], None
+    cidr = _subnet_for_address(address)
+    if not cidr:
+        return [], None
+    return subnets_to_sweep([cidr]), iface or _interface_from_os()
 
 
 async def _reverse_dns(ip_address: str, timeout: float = REVERSE_DNS_TIMEOUT) -> Optional[str]:
@@ -458,6 +663,13 @@ async def enrich_hosts(
             hint_type, hint_os = fingerprint.labels_for_hints(hints)
             host.device_type = host.device_type or hint_type
             host.os = host.os or hint_os
+
+        # Still nothing? The host's own ICMP reply carries a TTL, and that is
+        # the last free signal before we admit we don't know.
+        if probe and (not host.device_type or not host.os):
+            ttl_type, ttl_os = await _classify_by_ttl(host)
+            host.device_type = host.device_type or ttl_type
+            host.os = host.os or ttl_os
         return host
 
     return list(await asyncio.gather(*(_enrich(host) for host in hosts)))
@@ -491,12 +703,167 @@ def arp_sweep(
     return pairs
 
 
+def _ping_command(address: str) -> List[str]:
+    """The platform's one-shot ping argv for *address* (fixed literals only)."""
+    import sys
+
+    if sys.platform.startswith("win"):
+        return ["ping", "-n", "1", "-w", "600", address]
+    if sys.platform.startswith("darwin"):
+        return ["ping", "-c", "1", "-W", "600", address]
+    return ["ping", "-c", "1", "-W", "1", address]
+
+
+def _ping_replies(completed: Any) -> bool:
+    """True when ping's output shows a reply (TTL present, command succeeded)."""
+    output = f"{getattr(completed, 'stdout', '') or ''}"
+    if getattr(completed, "returncode", 1) != 0:
+        return False
+    lowered = output.lower()
+    return "ttl=" in lowered or "bytes from" in lowered
+
+
+def _icmp_sweep_sync(target: str, concurrency: int = 64) -> List[str]:
+    """Best-effort ICMP sweep using the OS ``ping`` binary.
+
+    ping needs no special privileges and no packet-capture driver, which is
+    precisely the situation where nmap's connect() sweep misses phones and
+    other hosts that close the common ports. Every probe is a separate argv
+    with a validated address — nothing user-supplied reaches a shell.
+    """
+    import ipaddress
+    import subprocess
+    from concurrent.futures import ThreadPoolExecutor
+
+    try:
+        network = ipaddress.ip_network(target, strict=False)
+    except ValueError:
+        return []
+
+    hosts = [str(host) for host in network.hosts()]
+    # A /24 is cheap; refuse to spawn thousands of ping processes.
+    if len(hosts) > 1024:
+        return []
+
+    def _probe(address: str) -> Optional[str]:
+        try:
+            completed = subprocess.run(
+                _ping_command(address),
+                capture_output=True,
+                text=True,
+                shell=False,
+                timeout=5,
+            )
+        except Exception:
+            return None
+        return address if _ping_replies(completed) else None
+
+    alive: List[str] = []
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        for result in pool.map(_probe, hosts):
+            if result:
+                alive.append(result)
+    return alive
+
+
+def arp_table_pairs(within: Optional[str] = None) -> List[Tuple[str, str]]:
+    """``(ip, mac)`` pairs from the operating system's neighbour table.
+
+    Reading the table needs no privileges and no packet-capture driver — the
+    kernel already did the ARP exchange. That makes it the only way to recover
+    MAC addresses when a raw sweep is unavailable, and it is why a machine
+    whose Npcap driver is stopped can still list real devices rather than an
+    empty inventory.
+    """
+    import ipaddress
+    import re
+    import sys
+
+    mac_re = re.compile(r"^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$", re.IGNORECASE)
+    # normalize_mac strips separators, so compare in that form.
+    useless_macs = {"000000000000", "FFFFFFFFFFFF"}
+
+    _run = _os_output
+
+    pairs: List[Tuple[str, str]] = []
+
+    if sys.platform.startswith("win"):
+        for line in _run(["arp", "-a"]).splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            ip_candidate, mac_candidate = parts[0], parts[1]
+            if mac_re.match(mac_candidate):
+                pairs.append((ip_candidate, mac_candidate))
+    elif sys.platform.startswith("linux"):
+        for line in _run(["ip", "neigh", "show"]).splitlines():
+            parts = line.split()
+            if "lladdr" not in parts or not parts:
+                continue
+            if "FAILED" in parts or "INCOMPLETE" in parts:
+                continue
+            index = parts.index("lladdr")
+            if index + 1 >= len(parts):
+                continue
+            mac_candidate = parts[index + 1]
+            if mac_re.match(mac_candidate):
+                pairs.append((parts[0], mac_candidate))
+    else:
+        # macOS / BSD: "? (192.168.1.1) at 8c:44:bb:7:6c:10 on en0 [ethernet]"
+        for line in _run(["arp", "-an"]).splitlines():
+            fields = line.replace("(", " ").replace(")", " ").split()
+            if "at" not in fields:
+                continue
+            index = fields.index("at")
+            if index + 1 >= len(fields) or len(fields) < 2:
+                continue
+            mac_candidate = fields[index + 1]
+            if mac_re.match(mac_candidate):
+                pairs.append((fields[1], mac_candidate))
+
+    network = None
+    if within:
+        try:
+            network = ipaddress.ip_network(within, strict=False)
+        except ValueError:
+            network = None
+
+    cleaned: List[Tuple[str, str]] = []
+    seen: set[str] = set()
+    for ip_candidate, mac_candidate in pairs:
+        try:
+            parsed = ipaddress.ip_address(ip_candidate)
+        except ValueError:
+            continue
+        if parsed.is_multicast or parsed.is_unspecified or parsed.is_loopback:
+            continue
+        if network is not None and parsed not in network:
+            continue
+        normalized = normalize_mac(mac_candidate)
+        if not normalized or normalized in useless_macs:
+            continue
+        if ip_candidate in seen:
+            continue
+        seen.add(ip_candidate)
+        cleaned.append((ip_candidate, normalized))
+
+    return cleaned
+
+
 def _nmap_sweep_sync(target: str, host_timeout: int) -> Dict[str, Any]:
     """Blocking ``nmap -sn`` sweep, returned in python-nmap's scan shape."""
     import nmap  # python-nmap
 
+    from app.services.nmap_capabilities import detect_capabilities
+
+    # Without raw sockets plain `-sn` dies on "Failed to open device"; the
+    # unprivileged mode discovers hosts with connect() instead.
+    unprivileged = "" if detect_capabilities().privileged else " --unprivileged"
     scanner = nmap.PortScanner()
-    scanner.scan(hosts=target, arguments=f"-sn -T4 --host-timeout {int(host_timeout)}s")
+    scanner.scan(
+        hosts=target,
+        arguments=f"-sn -T4 --host-timeout {int(host_timeout)}s{unprivileged}",
+    )
 
     scan_data: Dict[str, Any] = {}
     for host in scanner.all_hosts():
@@ -556,7 +923,66 @@ async def sweep_target(
             except Exception as exc:
                 outcome.warnings.append(f"nmap sweep failed: {exc}")
 
+        # nmap's unprivileged mode can only connect() to ports, so a phone that
+        # closes 80/443 looks dead. OS ping sends real ICMP without privileges
+        # and catches exactly those hosts.
+        try:
+            alive = await asyncio.to_thread(_icmp_sweep_sync, target)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("ICMP sweep of %s failed: %s", target, exc)
+            alive = []
+        if alive:
+            outcome.methods.append("icmp")
+            known = {host.ip_address for host in discovered}
+            for ip_address in alive:
+                if ip_address not in known:
+                    discovered.append(
+                        DiscoveredHost(ip_address=ip_address, source="icmp")
+                    )
+                    known.add(ip_address)
+
+    # The kernel's neighbour table is free and privilege-free: use it to attach
+    # MACs the connect sweep cannot see, and to surface hosts that answered
+    # ARP recently but not ICMP (phones frequently block the latter).
+    try:
+        table_pairs = await asyncio.to_thread(arp_table_pairs, target)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Neighbour table read failed for %s: %s", target, exc)
+        table_pairs = []
+
+    if table_pairs:
+        by_ip = {host.ip_address: host for host in discovered}
+        added = 0
+        for ip_address, mac in table_pairs:
+            existing = by_ip.get(ip_address)
+            if existing is not None:
+                if not existing.mac_address:
+                    existing.mac_address = mac
+                    existing.vendor = existing.vendor or lookup_vendor(mac)
+                continue
+            fresh = hosts_from_arp_pairs([(ip_address, mac)])[0]
+            fresh.source = "arp-table"
+            discovered.append(fresh)
+            by_ip[ip_address] = fresh
+            added += 1
+        if added or outcome.methods:
+            outcome.methods.append("arp-table")
+
     return discovered
+
+
+async def _classify_by_ttl(host: DiscoveredHost) -> Tuple[Optional[str], Optional[str]]:
+    """Ping the host once and classify it from the reply's TTL.
+
+    Failures are silent by design: a host that cannot be pinged simply keeps
+    whatever the hostname/OUI rules already decided.
+    """
+    from app.services.icmp import ping
+
+    outcome = await ping(host.ip_address, count=1, timeout_s=1.0)
+    if not outcome.reachable or outcome.ttl is None:
+        return None, None
+    return os_from_ttl(outcome.ttl, mac_address=host.mac_address)
 
 
 async def upsert_discovered_hosts(

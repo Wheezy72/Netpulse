@@ -166,8 +166,9 @@
   --np-card-shadow-hover: 0 18px 40px rgba(9, 9, 11, 0.12);
   /* Light canvas stays in the indigo family. Emerald here was the last
      visible bleed of the dark theme's accent into light mode. */
-  --np-canvas-glow: radial-gradient(1100px 560px at 10% -10%, rgba(79, 70, 229, 0.05), transparent 60%),
-                    radial-gradient(900px 500px at 100% 0%, rgba(15, 23, 42, 0.04), transparent 55%);
+  --np-canvas-glow: radial-gradient(1100px 560px at 10% -10%, rgba(79, 70, 229, 0.09), transparent 62%),
+                    radial-gradient(900px 500px at 100% 0%, rgba(15, 23, 42, 0.06), transparent 58%),
+                    radial-gradient(760px 420px at 70% 115%, rgba(79, 70, 229, 0.05), transparent 60%);
 
   --np-gradient-start: rgba(15, 23, 42, 0.08);
   --np-gradient-mid: rgba(15, 23, 42, 0.04);
@@ -202,37 +203,39 @@ html, body {
 }
 
 /* ============================================
-   THEME SWITCH — diagonal wipe
+   THEME SWITCH — circular reveal
 
-   Switching theme sweeps the new surface in from the top-right corner down to
-   the bottom-left, the direction a page actually turns. The overlay is an
-   oversized square rotated -45deg that travels along its own x axis, so it
-   covers the viewport exactly once and leaves in the same direction.
+   The store drives document.startViewTransition and animates the new root's
+   clip-path from the clicked control. These rules only remove the API's
+   default cross-fade so the circle is the single, clean transition; the
+   browser without the API falls back to a short fade.
    ============================================ */
-.np-theme-wipe {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  width: 300vmax;
-  height: 300vmax;
-  margin-top: -150vmax;
-  margin-left: -150vmax;
-  z-index: 200;
-  pointer-events: none;
-  will-change: transform;
-  transform: rotate(-45deg) translate3d(150vmax, 0, 0);
-  animation: np-theme-wipe-sweep 700ms cubic-bezier(0.65, 0, 0.35, 1) forwards;
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
 }
 
-@keyframes np-theme-wipe-sweep {
+::view-transition-new(root) {
+  will-change: clip-path;
+}
+
+html.np-theme-fallback body {
+  animation: np-theme-fade 280ms ease-out;
+}
+
+@keyframes np-theme-fade {
+  from {
+    opacity: 0.82;
+  }
   to {
-    transform: rotate(-45deg) translate3d(-150vmax, 0, 0);
+    opacity: 1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .np-theme-wipe {
-    display: none;
+  html.np-theme-fallback body {
+    animation: none;
   }
 }
 
@@ -288,8 +291,84 @@ textarea {
   box-shadow: var(--np-card-shadow);
 }
 
+/* ============================================
+   DIALOG — quick scan, sweep and terminal
+
+   These actions used to be small cards pinned beside the rail, floating on
+   top of whatever page was open. They share one centred surface now, with a
+   dimmed backdrop so the page behind is clearly out of scope.
+   ============================================ */
+.np-dialog-scrim {
+  background: color-mix(in srgb, #09090b 58%, transparent);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: np-dialog-scrim-in 180ms ease-out;
+}
+
+body.theme-sysadmin .np-dialog-scrim {
+  background: color-mix(in srgb, #0f172a 34%, transparent);
+}
+
+.np-dialog {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  border-radius: 18px;
+  border: 1px solid var(--np-border);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+  animation: np-dialog-in 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+@keyframes np-dialog-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes np-dialog-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .np-dialog,
+  .np-dialog-scrim {
+    animation: none;
+  }
+}
+
+/* The canvas glows drift very slowly in both themes. Dark mode always read as
+   "alive" because its accent is bright against near-black; light mode looked
+   flat because the same glows sat still and faint. Motion (not louder colour)
+   is what makes both themes feel occupied, so the light tokens only get a
+   small opacity bump and share the same 90s drift. */
 .canvas-glow {
   background-image: var(--np-canvas-glow);
+  background-size: 180% 180%;
+  background-position: 0% 0%;
+  animation: np-canvas-drift 90s ease-in-out infinite alternate;
+}
+
+@keyframes np-canvas-drift {
+  from {
+    background-position: 0% 0%;
+  }
+  to {
+    background-position: 100% 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-glow {
+    animation: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

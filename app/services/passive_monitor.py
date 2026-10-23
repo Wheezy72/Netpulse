@@ -99,7 +99,20 @@ async def run_passive_monitor(
     stop_event: asyncio.Event | None = None,
     anomaly_callback: Callable[[DiscoveryEvent], Awaitable[None]] | None = None,
 ) -> None:
-    interface = iface or settings.passive_monitor_iface
+    """Sniff ARP/DHCP until *stop_event* is set.
+
+    An explicit interface wins, then ``PASSIVE_MONITOR_IFACE``, then whatever
+    carries the default route — never a hard-coded ``eth0``, which does not
+    exist on a USB Wi-Fi setup.
+    """
+    from app.services.device_discovery import default_interface
+
+    interface = iface or settings.passive_monitor_iface or default_interface()
+    if not interface:
+        logger.warning(
+            "Passive monitor disabled: no network interface with a default route was found."
+        )
+        return
 
     def _sniff() -> list[Packet]:
         packets: list[Packet] = []
@@ -117,7 +130,19 @@ async def run_passive_monitor(
         return packets
 
     while stop_event is None or not stop_event.is_set():
-        packets = await asyncio.to_thread(_sniff)
+        try:
+            packets = await asyncio.to_thread(_sniff)
+        except Exception as exc:
+            # A wrong adapter name, a stopped packet driver or missing
+            # CAP_NET_RAW/CAP_NET_ADMIN used to kill this task with an
+            # unretrieved exception. Warn once per attempt and keep trying.
+            logger.warning(
+                "Passive monitor cannot sniff %s: %s (retrying in 60s)",
+                interface,
+                exc,
+            )
+            await asyncio.sleep(60)
+            continue
         for packet in packets:
             await on_packet(packet, anomaly_callback=anomaly_callback)
 

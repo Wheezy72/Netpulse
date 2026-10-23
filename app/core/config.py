@@ -203,7 +203,10 @@ class Settings(BaseSettings):
 
     # Packet capture storage
     pcap_storage_dir: str = "/tmp/pcaps"
-    passive_monitor_iface: str = "eth0"
+    # Empty means "the interface carrying the default route", resolved at run
+    # time. A literal "eth0" is wrong on most laptops and on every USB Wi-Fi
+    # adapter (wlan0 / wlx…), where capture would otherwise fail silently.
+    passive_monitor_iface: str = ""
     enable_passive_monitor: bool = False
 
     # Pulse latency sampling runs in-process so the monitor works without a
@@ -229,19 +232,27 @@ class Settings(BaseSettings):
     signing_key: str = Field(default="CHANGE_ME_IN_PRODUCTION", validation_alias="SECRET_KEY")
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
-    # Anyone who can reach the port could otherwise mint themselves an
-    # account. Signup is now closed after the first (SETUP_TOKEN) account;
-    # admins add people through POST /api/auth/users. Set this true only if
-    # you deliberately want self-registration on a trusted network.
-    allow_open_signup: bool = False
+    # Only believe X-Forwarded-For / X-Real-IP when a proxy actually sets them.
+    # Off by default: a client that reaches the port directly could otherwise
+    # rotate the header and bypass the login throttle.
+    trust_proxy_headers: bool = False
+    # Public sign-up does not exist. An empty instance can create its first
+    # administrator (optionally guarded by SETUP_TOKEN); after that, admins add
+    # people through POST /api/auth/users. A non-empty BOOTSTRAP_ADMIN_PASSWORD
+    # pre-creates that first admin for scripted installs.
 
-    # Development bootstrap admin (only used in non-production when enabled).
-    # The admin credential comes from BOOTSTRAP_ADMIN_PASSWORD.
+    # Development bootstrap admin. On an empty database this account is created
+    # only when BOOTSTRAP_ADMIN_PASSWORD is actually set; without it the first
+    # launch goes through the setup screen instead of a default credential.
     bootstrap_admin_enabled: bool = True
     bootstrap_admin_username: str = "admin"
     bootstrap_admin_email: str = "admin@netpulse.local"
     bootstrap_admin_pass: str | None = Field(default=None, validation_alias="BOOTSTRAP_ADMIN_PASSWORD")
     bootstrap_admin_full_name: str = "NetPulse Admin"
+    # Optional guard on the first-run setup screen. Without it, the first
+    # request to an empty instance names the administrator; with it, that
+    # request must also present this token.
+    setup_token: str | None = Field(default=None, validation_alias="SETUP_TOKEN")
 
     # Alerting / notifications (email only). env: SMTP_PASSWORD
     enable_email_alerts: bool = False
@@ -270,8 +281,19 @@ class Settings(BaseSettings):
     health_alert_threshold: float = 40.0
 
     # CORS configuration
+    # The SPA served by this app is same-origin, so CORS is only needed for
+    # the Vite dev server and for a split deployment. The wildcard that used
+    # to apply in development was rejected by browsers anyway because
+    # credentials are enabled.
     cors_allow_origins: Any = Field(
-        default_factory=lambda: ["http://localhost:5000", "http://localhost:5173"]
+        default_factory=lambda: [
+            "http://localhost:6969",
+            "http://localhost:6970",
+            "http://127.0.0.1:6969",
+            "http://127.0.0.1:6970",
+            "http://localhost:5173",
+            "http://localhost:8000",
+        ]
     )
 
     @field_validator("cors_allow_origins", mode="before")
