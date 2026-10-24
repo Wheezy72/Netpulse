@@ -990,8 +990,14 @@ async def upsert_discovered_hosts(
     hosts: Sequence[DiscoveredHost],
     *,
     now: Optional[datetime] = None,
+    network_id: Optional[int] = None,
 ) -> Tuple[int, int]:
     """Insert new devices and refresh known ones. Returns ``(created, updated)``.
+
+    ``network_id`` scopes the whole merge to one network. Home networks reuse
+    the same addresses, so without it the ``192.168.1.10`` of one house would
+    overwrite the other house's row. Rows that predate networks (NULL) are
+    adopted by the first sweep that matches them.
 
     Merge policy:
       * ``last_seen`` is always refreshed.
@@ -1014,7 +1020,7 @@ async def upsert_discovered_hosts(
       * ``is_gateway`` latches true.
     """
     # Imported here so the module stays importable without SQLAlchemy.
-    from sqlalchemy import select, update as sa_update
+    from sqlalchemy import or_, select, update as sa_update
 
     from app.models.device import Device
     from app.models.script_job import ScriptJob
@@ -1023,7 +1029,12 @@ async def upsert_discovered_hosts(
     created = 0
     updated = 0
 
-    result = await db.execute(select(Device))
+    stmt = select(Device)
+    if network_id is not None:
+        stmt = stmt.where(
+            or_(Device.network_id == network_id, Device.network_id.is_(None))
+        )
+    result = await db.execute(stmt)
     rows: List[Device] = list(result.scalars().all())
     by_ip = {row.ip_address: row for row in rows}
     observed_ips = {host.ip_address for host in hosts}
@@ -1073,6 +1084,7 @@ async def upsert_discovered_hosts(
         if device is None:
             device = Device(
                 ip_address=host.ip_address,
+                network_id=network_id,
                 mac_address=host.mac_address,
                 hostname=host.hostname,
                 vendor=host.vendor,
@@ -1088,6 +1100,9 @@ async def upsert_discovered_hosts(
             continue
 
         claimed.add(device.id)
+        if network_id is not None and device.network_id is None:
+            # Pre-network row: the sweep that sees it claims it.
+            device.network_id = network_id
         if device.ip_address != host.ip_address:
             # The device moved (or rotated). Carry the row to its current
             # address instead of duplicating it. Drop the by_ip entry that
@@ -1317,6 +1332,12 @@ async def run_device_discovery(
         outcome.methods = list(dict.fromkeys(outcome.methods))
 
         if persist and enriched:
-            outcome.created, outcome.updated = await upsert_discovered_hosts(db, enriched)
+            from app.services.network_identity import current_network_id
+
+            outcome.created, outcome.updated = await upsert_discovered_hosts(
+                db,
+                enriched,
+                network_id=await current_network_id(db),
+            )
 
     return outcome

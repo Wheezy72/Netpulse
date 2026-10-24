@@ -258,6 +258,10 @@ class Settings(BaseSettings):
     enable_email_alerts: bool = False
     smtp_host: str | None = None
     smtp_port: int = 587
+    # auto = 465 uses implicit TLS, everything else tries STARTTLS and falls
+    # back to plaintext when the relay does not offer it. Override with
+    # SMTP_SECURITY=ssl|starttls|none for a server that insists.
+    smtp_security: str = "auto"
     smtp_username: str | None = None
     smtp_pass: str | None = Field(default=None, validation_alias="SMTP_PASSWORD")
     alert_email_from: str | None = None

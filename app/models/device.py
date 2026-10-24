@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -11,10 +11,20 @@ from app.db.base import Base
 
 class Device(Base):
     __tablename__ = "devices"
+    # An address is only unique *inside* one network: five homes can all run
+    # 192.168.1.10, and each row belongs to the network it was seen on.
+    __table_args__ = (
+        UniqueConstraint("network_id", "ip_address", name="uq_devices_network_ip"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     hostname: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    ip_address: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    ip_address: Mapped[str] = mapped_column(String(64), index=True)
+    network_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("networks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     mac_address: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     device_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     os: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)

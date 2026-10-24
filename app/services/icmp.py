@@ -12,6 +12,7 @@ one place instead of being re-derived per endpoint.
 import asyncio
 import os
 import re
+import subprocess
 from dataclasses import dataclass
 
 # Matches "time=1.24 ms" (Linux/macOS) and "time=1ms" / "time<1ms" (Windows).
@@ -74,6 +75,21 @@ def parse_ping_output(text: str) -> tuple[float | None, float | None]:
     return avg_ms, loss_pct
 
 
+def _run_ping(argv: list[str], timeout_s: float) -> tuple[int, str]:
+    """Run the ping binary to completion and return (exit code, output).
+
+    Blocking on purpose: callers await it through ``asyncio.to_thread``, which
+    works on every event loop (see the note in :func:`ping`).
+    """
+    completed = subprocess.run(
+        argv,
+        capture_output=True,
+        timeout=timeout_s,
+        check=False,
+    )
+    return completed.returncode, completed.stdout.decode(errors="replace")
+
+
 async def ping(
     host: str,
     *,
@@ -90,29 +106,25 @@ async def ping(
         return PingOutcome(host=host, reachable=False, latency_ms=None, packet_loss_pct=None, error="Empty host")
 
     argv = build_ping_argv(host, count=count, timeout_s=timeout_s)
+    # Run ping through a worker thread instead of asyncio's subprocess API.
+    # uvicorn --reload on Windows installs a SelectorEventLoop, which cannot
+    # spawn subprocesses at all: create_subprocess_exec raised a bare
+    # NotImplementedError, so every discovery sweep died on the ICMP probe.
     try:
-        process = await asyncio.create_subprocess_exec(
-            *argv,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        returncode, text = await asyncio.to_thread(
+            _run_ping, argv, max(timeout_s * count + 2.0, 5.0)
         )
+    except subprocess.TimeoutExpired:
+        return PingOutcome(host=host, reachable=False, latency_ms=None, packet_loss_pct=None, error="Ping timed out")
     except OSError as exc:
         return PingOutcome(host=host, reachable=False, latency_ms=None, packet_loss_pct=None, error=str(exc))
-
-    try:
-        stdout, _stderr = await asyncio.wait_for(process.communicate(), timeout=max(timeout_s * count + 2.0, 5.0))
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
-        return PingOutcome(host=host, reachable=False, latency_ms=None, packet_loss_pct=None, error="Ping timed out")
     except Exception as exc:  # Defensive: gather() over many hosts must survive.
         return PingOutcome(host=host, reachable=False, latency_ms=None, packet_loss_pct=None, error=str(exc))
 
-    text = stdout.decode(errors="replace")
     avg_ms, loss_pct = parse_ping_output(text)
     ttl = parse_ping_ttl(text)
 
-    if process.returncode == 0:
+    if returncode == 0:
         return PingOutcome(
             host=host,
             reachable=True,

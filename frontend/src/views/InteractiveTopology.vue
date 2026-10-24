@@ -17,6 +17,7 @@ import { useRoute } from "vue-router";
 import { Cctv, Cpu, Laptop, LoaderCircle, Lock, Monitor, Printer, RefreshCw, Router, Server, Smartphone, Wifi, Waypoints } from "lucide-vue-next";
 
 import { resolveOui } from "../utils/oui";
+import { getStoredToken } from "../utils/token";
 
 const props = defineProps<{
   theme: "nightshade" | "sysadmin";
@@ -93,6 +94,23 @@ const deviceDetailError = ref<string | null>(null);
 
 const zones = ref<string[]>([]);
 const selectedZone = ref<string>("all");
+
+// Each network keeps its own inventory, so the map is drawn for one network
+// at a time — the one this machine is attached to unless another is picked.
+type NetworkRow = { id: number; name: string; cidr: string; is_current: boolean };
+const networks = ref<NetworkRow[]>([]);
+const selectedNetwork = ref<string>("all");
+
+async function loadNetworks(): Promise<void> {
+  try {
+    const { data } = await axios.get<NetworkRow[]>("/api/networks");
+    networks.value = data;
+    const current = data.find((n) => n.is_current);
+    if (current && selectedNetwork.value === "all") {
+      selectedNetwork.value = String(current.id);
+    }
+  } catch {}
+}
 
 type DeviceNodeData = { device: TopologyNode };
 
@@ -366,7 +384,7 @@ async function connectSsh() {
     return;
   }
 
-  const token = window.localStorage.getItem("np-token") || "";
+  const token = getStoredToken();
   const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || window.location.origin;
   const wsBase = apiBase.replace(/^http/, "ws");
   // Only the target address goes in the URL. The token, username and
@@ -539,6 +557,9 @@ async function loadTopology(background = false): Promise<void> {
     if (selectedZone.value !== "all") {
       params.zone = selectedZone.value;
     }
+    if (selectedNetwork.value !== "all") {
+      params.network_id = selectedNetwork.value;
+    }
 
     const { data } = await axios.get<{ nodes: TopologyNode[]; edges: TopologyEdge[] }>("/api/devices/topology", { params });
 
@@ -671,8 +692,10 @@ function handleResize() {
 }
 
 onMounted(() => {
-  loadZones().then(() => {
-    loadTopology();
+  void loadNetworks().then(() => {
+    loadZones().then(() => {
+      loadTopology();
+    });
   });
   // The map used to render whatever the inventory held at mount time and
   // never look again — it read as "cached" on a live network. Quietly
@@ -712,6 +735,18 @@ onBeforeUnmount(() => {
           placeholder="Find device…"
           class="w-36 sm:w-48 rounded-xl border border-[var(--np-border-subtle)] bg-[var(--np-input-bg)] px-3 py-2 text-xs font-mono text-[var(--np-text)] focus:outline-none focus:ring-1 focus:ring-[var(--np-accent)]"
         />
+        <select
+          v-if="networks.length > 1"
+          v-model="selectedNetwork"
+          @change="loadTopology"
+          title="Each network keeps its own inventory"
+          class="rounded-xl border border-[var(--np-border-subtle)] bg-[var(--np-input-bg)] px-3 py-2 text-xs font-mono text-[var(--np-text)] focus:outline-none focus:ring-1 focus:ring-[var(--np-accent)]"
+        >
+          <option value="all">All networks</option>
+          <option v-for="n in networks" :key="n.id" :value="String(n.id)">
+            {{ n.name }}{{ n.is_current ? " (current)" : "" }}
+          </option>
+        </select>
         <select
           v-model="selectedZone"
           @change="loadTopology"

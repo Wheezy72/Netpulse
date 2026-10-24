@@ -5,6 +5,7 @@ import ipaddress
 import logging
 import re
 import shutil
+import subprocess
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -244,24 +245,30 @@ async def arp_fix(
     arping_path = shutil.which("arping")
     if arping_path:
         try:
-            proc = await asyncio.create_subprocess_exec(
-                arping_path,
-                "-c",
-                "3",
-                "-S",
-                request.target_ip,
-                request.target_ip,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            # subprocess.run in a worker thread: asyncio's subprocess API is
+            # unavailable on the SelectorEventLoop uvicorn --reload uses on
+            # Windows, where the call raised a bare NotImplementedError.
+            completed = await asyncio.to_thread(
+                subprocess.run,
+                [
+                    arping_path,
+                    "-c",
+                    "3",
+                    "-S",
+                    request.target_ip,
+                    request.target_ip,
+                ],
+                capture_output=True,
+                timeout=10,
+                check=False,
             )
-            stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
             return {
                 "status": "arp_fix_sent",
                 "target_ip": request.target_ip,
                 "correct_mac": request.correct_mac,
-                "output": stdout.decode(errors="replace"),
+                "output": completed.stdout.decode(errors="replace"),
             }
-        except asyncio.TimeoutError:
+        except subprocess.TimeoutExpired:
             return {
                 "status": "arp_fix_timeout",
                 "target_ip": request.target_ip,

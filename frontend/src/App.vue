@@ -178,6 +178,13 @@ function navigateTo(id: string) {
   mobileMenuOpen.value = false;
 }
 
+// The drawer closes first so the dialog a rail action may open is not stacked
+// behind the menu overlay.
+function runRailActionFromDrawer(id: string) {
+  mobileMenuOpen.value = false;
+  runRailAction(id);
+}
+
 // ---------------------------------------------------------------------------
 // Rail quick actions — things you *fire*, not places you go.
 // ---------------------------------------------------------------------------
@@ -190,6 +197,18 @@ const railActions = [
 
 const activePanel = ref<"scan" | "sweep" | "terminal" | null>(null);
 const dialogInput = ref<HTMLInputElement | null>(null);
+
+// MobaXterm and Wireshark are launched on the machine running the backend, not
+// in the browser, so a phone can only ask for them — it can never show them.
+// The UI says where they open instead of appearing to do nothing.
+const isMobile = ref(false);
+let mobileQuery: MediaQueryList | null = null;
+
+function syncIsMobile(event?: MediaQueryListEvent): void {
+  isMobile.value = event ? event.matches : (mobileQuery?.matches ?? false);
+}
+
+const hostLabel = computed(() => window.location.hostname || "the NetPulse host");
 
 // Land the caret in the only text field a dialog owns. `autofocus` does not
 // fire for content inserted after the initial page load.
@@ -328,13 +347,17 @@ async function launchWireshark() {
     if (!data.available) {
       notify(
         "warning",
-        data.note || "Wireshark is not installed on this machine."
+        data.note || `Wireshark is not installed on ${hostLabel.value}.`
       );
-      if (data.download_url) window.open(data.download_url, "_blank", "noopener");
+      // Installing Wireshark on a phone is not a thing: offer the download only
+      // where it can actually be used, which is the machine running NetPulse.
+      if (data.download_url && !isMobile.value) {
+        window.open(data.download_url, "_blank", "noopener");
+      }
       return;
     }
     await axios.post("/api/tools/wireshark/open", { index: 0 });
-    notify("success", "Wireshark opened.");
+    notify("success", `Wireshark opened on ${hostLabel.value}.`);
   } catch (e: any) {
     notify(
       "error",
@@ -351,7 +374,7 @@ async function openTerminal(index: number) {
     const { data } = await axios.post<{ name: string }>("/api/tools/terminal/open", {
       index,
     });
-    notify("success", `${data.name} opened.`);
+    notify("success", `${data.name} opened on ${hostLabel.value}.`);
     activePanel.value = null;
   } catch (e: any) {
     notify("error", e?.response?.data?.detail || "Could not open the terminal.");
@@ -381,10 +404,18 @@ async function handleAuthSuccess(arg: string | { token: string; rememberMe?: boo
 }
 
 onMounted(async () => {
+  mobileQuery = window.matchMedia("(max-width: 767px)");
+  syncIsMobile();
+  mobileQuery.addEventListener("change", syncIsMobile);
+
   if (window.innerWidth < 768) {
     ui.sidebarExpanded = false;
     localStorage.setItem("np-sidebar-expanded", "false");
   }
+});
+
+onUnmounted(() => {
+  mobileQuery?.removeEventListener("change", syncIsMobile);
 });
 
 const forceNewPassword = ref("");
@@ -762,14 +793,15 @@ async function handleForcePasswordChange() {
                 <span class="np-accent-text font-mono text-[0.6rem]">Open</span>
               </button>
               <p class="mt-1 text-[0.6rem] text-[var(--np-text-dim)]">
-                Found on this machine — nothing is executed unless you click it.
+                Found on {{ hostLabel }} — it opens there, not in this browser.
+                Nothing is executed unless you click it.
               </p>
             </div>
 
             <div v-else class="mt-3">
               <p class="text-xs text-[var(--np-text-muted)]">{{ termInfo.note }}</p>
               <a
-                v-if="termInfo.download_url"
+                v-if="termInfo.download_url && !isMobile"
                 :href="termInfo.download_url"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -777,6 +809,10 @@ async function handleForcePasswordChange() {
               >
                 Download MobaXterm
               </a>
+              <p v-if="isMobile" class="mt-2 text-[0.65rem] leading-relaxed text-[var(--np-text-dim)]">
+                MobaXterm is a desktop terminal — install it on {{ hostLabel }} to
+                use this button. On a phone, use the devices page to inspect hosts.
+              </p>
             </div>
           </template>
         </section>
@@ -948,6 +984,30 @@ async function handleForcePasswordChange() {
                   {{ item.label }}
                 </button>
               </nav>
+
+              <!-- Run-it actions, the same four the desktop rail offers. A scan
+                   or a sweep works from a phone because the backend does the
+                   work; MobaXterm and Wireshark only ever open on the host, so
+                   the caption says that instead of failing silently. -->
+              <div class="flex flex-col gap-1">
+                <span class="px-3 pb-1 text-[0.55rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">
+                  Actions
+                </span>
+                <button
+                  v-for="item in railActions"
+                  :key="item.id"
+                  type="button"
+                  @click="runRailActionFromDrawer(item.id)"
+                  class="flex w-full items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 text-left text-xs font-semibold text-[var(--np-text-muted)] transition-colors hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)]"
+                >
+                  <component :is="item.icon" class="h-4 w-4 shrink-0" :stroke-width="1.7" />
+                  {{ item.label }}
+                </button>
+                <p class="px-3 pt-1 text-[0.6rem] leading-relaxed text-[var(--np-text-dim)]">
+                  Scans and sweeps run on {{ hostLabel }}. MobaXterm and Wireshark
+                  open on that machine too — this phone has nothing to open.
+                </p>
+              </div>
 
               <div class="mt-auto flex flex-col gap-3 border-t border-[var(--np-border-subtle)] pt-4">
                 <div class="px-1">

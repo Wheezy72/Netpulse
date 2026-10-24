@@ -988,6 +988,46 @@ tbody tr:hover {
 }
 
 /* ============================================
+   LOG VIEWER ROWS
+   ============================================ */
+/* Rows are keyed by their server id, so a refresh appends one node instead of
+   redrawing the list. The highlight is a one-shot wash on the way in, which is
+   what makes an appended line readable without the whole panel blinking. */
+.np-log-row {
+  animation: np-log-row-in 180ms ease-out;
+}
+.np-log-row--new {
+  animation: np-log-row-highlight 2.4s ease-out;
+}
+@keyframes np-log-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes np-log-row-highlight {
+  0% {
+    background-color: var(--np-accent-soft);
+  }
+  60% {
+    background-color: var(--np-accent-soft);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .np-log-row,
+  .np-log-row--new {
+    animation: none;
+  }
+}
+
+/* ============================================
    THEME-AWARE INFO CARDS (SEGMENTS, BACKUPS)
    ============================================ */
 .np-info-card {

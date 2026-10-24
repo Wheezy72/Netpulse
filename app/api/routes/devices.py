@@ -40,6 +40,7 @@ class DeviceOut(BaseModel):
     vendor: Optional[str] = None
     is_gateway: bool
     zone: Optional[str]
+    network_id: Optional[int] = None
     last_seen: Optional[datetime]
     created_at: Optional[datetime] = None
 
@@ -128,6 +129,7 @@ class TopologyNode(BaseModel):
     device_type: Optional[str]
     is_gateway: bool
     zone: Optional[str]
+    network_id: Optional[int] = None
     vulnerability_severity: Optional[str]
     vulnerability_count: int
     last_seen: Optional[datetime]
@@ -191,11 +193,16 @@ class DeviceDetail(BaseModel):
 async def list_devices(
     db: AsyncSession = Depends(db_session),
     zone: Optional[str] = Query(None, description="Filter devices by zone label"),
+    network_id: Optional[int] = Query(
+        None, description="Only devices seen on this network (see /api/networks)"
+    ),
 ) -> List[DeviceOut]:
-    """Return discovered devices, optionally filtered by zone."""
+    """Return discovered devices, optionally filtered by network and zone."""
     stmt = select(Device)
     if zone:
         stmt = stmt.where(Device.zone == zone)
+    if network_id is not None:
+        stmt = stmt.where(Device.network_id == network_id)
     result = await db.execute(stmt)
     devices = result.scalars().all()
     return [DeviceOut.from_orm(d) for d in devices]
@@ -270,11 +277,14 @@ async def list_zones(db: AsyncSession = Depends(db_session)) -> ZoneListResponse
 async def get_topology(
     db: AsyncSession = Depends(db_session),
     zone: Optional[str] = Query(None, description="Filter topology by zone label"),
+    network_id: Optional[int] = Query(None, description="Only this network's devices"),
 ) -> TopologyResponse:
     """Return a minimal topology view for the Eye panel's graph."""
     stmt = select(Device)
     if zone:
         stmt = stmt.where(Device.zone == zone)
+    if network_id is not None:
+        stmt = stmt.where(Device.network_id == network_id)
     result = await db.execute(stmt)
     devices = result.scalars().all()
 
@@ -321,6 +331,7 @@ async def get_topology(
                 device_type=d.device_type,
                 is_gateway=d.is_gateway,
                 zone=d.zone,
+                network_id=d.network_id,
                 vulnerability_severity=max_sev.value if max_sev else None,
                 vulnerability_count=vuln_count,
                 last_seen=d.last_seen,

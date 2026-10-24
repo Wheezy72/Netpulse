@@ -4,6 +4,7 @@ from app.models.device_baseline import DeviceBaseline
 from app.models.device_port import DevicePort
 from app.models.enforcement_action import EnforcementAction
 from app.models.metric import Metric
+from app.models.network import Network
 from app.models.network_segment import NetworkSegment
 from app.models.security_telemetry import SecurityTelemetry
 from app.models.packet_capture import PacketCapture, PacketCaptureStatus, PacketHeader
@@ -23,6 +24,7 @@ __all__ = [
     "DevicePort",
     "EnforcementAction",
     "Metric",
+    "Network",
     "NetworkSegment",
     "SecurityTelemetry",
     "PacketCapture",

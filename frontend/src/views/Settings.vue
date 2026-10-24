@@ -70,6 +70,56 @@ const isAdmin = computed(() => !!props.isAdmin);
 
 const activeSettingsTab = ref<SettingsTab>("account");
 
+// Remembered networks: every address space this install has been plugged into.
+// Home networks reuse the same 192.168.x addresses, so devices are stored per
+// network and named here — otherwise five houses look like one inventory.
+interface RememberedNetwork {
+  id: number;
+  name: string;
+  cidr: string;
+  gateway_ip: string | null;
+  gateway_mac: string | null;
+  device_count: number;
+  is_current: boolean;
+}
+const rememberedNetworks = ref<RememberedNetwork[]>([]);
+const networksLoading = ref(false);
+const networksError = ref<string | null>(null);
+const renamingNetworkId = ref<number | null>(null);
+const networkNameDraft = ref("");
+
+async function loadRememberedNetworks(): Promise<void> {
+  networksLoading.value = true;
+  networksError.value = null;
+  try {
+    const { data } = await axios.get<RememberedNetwork[]>("/api/networks");
+    rememberedNetworks.value = data;
+  } catch {
+    networksError.value = "Failed to load networks.";
+    rememberedNetworks.value = [];
+  } finally {
+    networksLoading.value = false;
+  }
+}
+
+function startRenamingNetwork(network: RememberedNetwork): void {
+  renamingNetworkId.value = network.id;
+  networkNameDraft.value = network.name;
+}
+
+async function saveNetworkName(network: RememberedNetwork): Promise<void> {
+  if (!isAdmin.value) return;
+  const name = networkNameDraft.value.trim();
+  if (!name) return;
+  try {
+    await axios.patch(`/api/networks/${network.id}`, { name });
+    renamingNetworkId.value = null;
+    await loadRememberedNetworks();
+  } catch (e: any) {
+    networksError.value = e.response?.data?.detail || "Failed to rename network.";
+  }
+}
+
 // Network
 const segments = ref<NetworkSegment[]>([]);
 const segmentsLoading = ref(false);
@@ -388,6 +438,7 @@ async function restoreBackup(): Promise<void> {
 
 onMounted(async () => {
   await Promise.all([
+    loadRememberedNetworks(),
     loadNetworkSegments(),
     loadNotificationSettings(),
     loadScanSchedule(),
@@ -526,8 +577,70 @@ onMounted(async () => {
     </section>
 
     <!-- Network -->
-    <section v-else-if="activeSettingsTab === 'network'" class="np-panel p-4 space-y-4">
-      <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
+    <section v-else-if="activeSettingsTab === 'network'" class="np-panel p-4 space-y-5">
+      <!-- Networks this install has been attached to. Distinct from segments:
+           a segment is a subnet you choose to scan, a network is a place the
+           machine actually sat, detected from its gateway. -->
+      <div class="np-settings-section space-y-3">
+        <p class="np-settings-section-title">Remembered networks</p>
+        <p class="text-[0.7rem] text-[var(--np-text-dim)] font-semibold">
+          Detected from the subnet and the router's MAC address. Name them so you can tell
+          five homes that all use 192.168.1.x apart.
+        </p>
+
+        <p v-if="networksLoading" class="text-[0.75rem] text-[var(--np-text-dim)] font-semibold">Loading...</p>
+        <p v-else-if="networksError" class="text-[0.75rem] text-rose-400">{{ networksError }}</p>
+        <p v-else-if="rememberedNetworks.length === 0" class="text-[0.75rem] text-[var(--np-text-dim)] font-semibold">
+          No network recorded yet — run a discovery sweep, or open this page while attached to one.
+        </p>
+
+        <div v-else class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div
+            v-for="net in rememberedNetworks"
+            :key="net.id"
+            class="border-l-2 border-[var(--np-border-subtle)] pl-3"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="flex items-center gap-2">
+                  <h4 class="np-info-card-title truncate">{{ net.name }}</h4>
+                  <span
+                    v-if="net.is_current"
+                    class="rounded px-1.5 py-0.5 text-[0.6rem] uppercase tracking-wide border border-emerald-500/35 bg-emerald-500/15 text-emerald-400"
+                  >Current</span>
+                </div>
+                <p class="np-info-card-value mt-1">{{ net.cidr || 'unknown subnet' }}</p>
+                <p class="np-info-card-text mt-1">
+                  {{ net.device_count }} device{{ net.device_count === 1 ? '' : 's' }}
+                  <span v-if="net.gateway_ip"> · gateway {{ net.gateway_ip }}</span>
+                </p>
+                <p v-if="net.gateway_mac" class="np-info-card-text font-mono">{{ net.gateway_mac }}</p>
+              </div>
+            </div>
+
+            <div v-if="renamingNetworkId === net.id" class="mt-2 flex gap-2">
+              <input
+                v-model="networkNameDraft"
+                class="np-neon-input rounded px-2 py-1 text-[0.75rem] w-full"
+                placeholder="e.g. Mum's house"
+                @keyup.enter="saveNetworkName(net)"
+              />
+              <button type="button" class="np-cyber-btn rounded px-2 py-1 text-[0.7rem]" @click="saveNetworkName(net)">Save</button>
+              <button type="button" class="rounded px-2 py-1 text-[0.7rem] border border-[var(--np-border-subtle)] text-[var(--np-text-dim)]" @click="renamingNetworkId = null">Cancel</button>
+            </div>
+            <button
+              v-else-if="isAdmin"
+              type="button"
+              class="mt-2 rounded px-2 py-1 text-[0.7rem] border border-[var(--np-border-subtle)] text-[var(--np-text-dim)] hover:text-[var(--np-text)] transition-colors"
+              @click="startRenamingNetwork(net)"
+            >
+              Rename
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <header class="np-panel-header -mx-4 mb-2 px-4 border-t border-[var(--np-border-subtle)] pt-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Network Segments</span>
           <span class="text-[0.7rem] text-[var(--np-text-dim)] font-semibold">Subnets for scheduled scanning.</span>

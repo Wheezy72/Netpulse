@@ -2,6 +2,7 @@
 import axios from "axios";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import LiveTerminal from "../components/features/LiveTerminal.vue";
+import { getStoredToken } from "../utils/token";
 
 type Theme = "nightshade" | "sysadmin";
 
@@ -93,7 +94,7 @@ function getWsBase(): string {
 const terminalTitle = computed(() => (currentScanId.value ? `Scan ${currentScanId.value}` : "Toolbox Output Console"));
 const terminalStreamUrl = computed(() => {
   if (!currentScanId.value) return null;
-  const token = localStorage.getItem("np-token");
+  const token = getStoredToken();
   if (!token) return null;
   return `${getWsBase()}/api/ws/scans/${currentScanId.value}?token=${encodeURIComponent(token)}`;
 });

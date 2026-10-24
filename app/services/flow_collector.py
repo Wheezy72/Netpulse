@@ -123,7 +123,14 @@ class NetFlowProtocol(asyncio.DatagramProtocol):
         return f"{(ip_int >> 24) & 0xff}.{(ip_int >> 16) & 0xff}.{(ip_int >> 8) & 0xff}.{ip_int & 0xff}"
 
     async def get_device_id(self, session, ip: str) -> int | None:
-        result = await session.execute(select(Device.id).where(Device.ip_address == ip))
+        # An address can exist in several remembered networks, so pick the one
+        # seen most recently instead of raising on multiple matches.
+        result = await session.execute(
+            select(Device.id)
+            .where(Device.ip_address == ip)
+            .order_by(Device.last_seen.desc())
+            .limit(1)
+        )
         return result.scalar_one_or_none()
 
     async def upsert_device_last_seen(self, session, ip: str):
@@ -131,17 +138,30 @@ class NetFlowProtocol(asyncio.DatagramProtocol):
         if ip.startswith("0.") or ip.startswith("127.") or ip == "255.255.255.255":
             return
 
-        result = await session.execute(select(Device).where(Device.ip_address == ip))
+        from sqlalchemy import or_
+
+        from app.services.network_identity import current_network_id
+
+        network_id = await current_network_id(session)
+        stmt = select(Device).where(Device.ip_address == ip)
+        if network_id is not None:
+            stmt = stmt.where(
+                or_(Device.network_id == network_id, Device.network_id.is_(None))
+            )
+        result = await session.execute(stmt.limit(1))
         device = result.scalar_one_or_none()
         if device is None:
             # Discovered a new node passively via NetFlow!
             device = Device(
                 ip_address=ip,
+                network_id=network_id,
                 last_seen=datetime.utcnow(),
                 device_type="host" # Default guess
             )
             session.add(device)
         else:
+            if network_id is not None and device.network_id is None:
+                device.network_id = network_id
             device.last_seen = datetime.utcnow()
 
 

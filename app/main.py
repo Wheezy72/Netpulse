@@ -42,12 +42,63 @@ from app.db.session import engine, async_session_factory
 from app.services.passive_monitor import run_passive_monitor
 from app.services.logging_service import setup_logging
 from app.api.deps import get_password_hash
+from app.models.device import Device
 from app.models.user import User, UserRole
 
 import app.models  # noqa: F401 – ensure all models are registered with SQLAlchemy
 
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+
+
+# Networks arrived after the first release. ``create_all`` only creates
+# missing *tables*, never columns or indexes on existing ones, so an install
+# that predates this feature would otherwise boot and then fail every device
+# query with `column devices.network_id does not exist`. These statements are
+# idempotent and match migrations/20261025_add_networks.sql.
+_NETWORK_SCHEMA_STATEMENTS = (
+    """CREATE TABLE IF NOT EXISTS networks (
+        id SERIAL PRIMARY KEY,
+        key VARCHAR(128) NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        cidr VARCHAR(50) NOT NULL DEFAULT '',
+        gateway_ip VARCHAR(64),
+        gateway_mac VARCHAR(32),
+        interface VARCHAR(64),
+        first_seen TIMESTAMPTZ DEFAULT now(),
+        last_seen TIMESTAMPTZ DEFAULT now()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_networks_key ON networks (key)",
+    "ALTER TABLE devices ADD COLUMN IF NOT EXISTS network_id INTEGER "
+    "REFERENCES networks(id) ON DELETE SET NULL",
+    # An address is only unique inside one network now.
+    "DROP INDEX IF EXISTS ix_devices_ip_address",
+    "CREATE INDEX IF NOT EXISTS ix_devices_ip_address ON devices (ip_address)",
+    "CREATE INDEX IF NOT EXISTS ix_devices_network_id ON devices (network_id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_devices_network_ip "
+    "ON devices (network_id, ip_address)",
+)
+
+
+def _database_is_missing(exc: BaseException) -> bool:
+    """True when PostgreSQL says the target database itself does not exist.
+
+    That is a configuration problem, not a server that is still starting up:
+    retrying cannot fix it, so the boot fails immediately with instructions
+    instead of ten attempts and a traceback through SQLAlchemy internals.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        # SQLSTATE 3D000 = invalid_catalog_name (missing database).
+        if getattr(current, "sqlstate", None) == "3D000":
+            return True
+        message = str(current).lower()
+        if "does not exist" in message and "database" in message:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -111,6 +162,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
 
+            # 1b. Bring forward schema additions that create_all cannot make:
+            #     new columns and indexes on tables that already exist.
+            if engine.dialect.name == "postgresql":
+                try:
+                    from sqlalchemy import text
+
+                    async with engine.begin() as conn:
+                        for statement in _NETWORK_SCHEMA_STATEMENTS:
+                            await conn.execute(text(statement))
+                except Exception as exc:
+                    logger.warning(
+                        "Could not update the network schema (%s). Apply "
+                        "migrations/20261025_add_networks.sql by hand.",
+                        exc,
+                    )
+
             # 2. TimescaleDB is optional. Only Postgres can carry the
             #    extension, and a plain Postgres install or a restricted user
             #    is a normal configuration, not an error worth a full SQL
@@ -131,6 +198,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             break
         except Exception as e:
             await engine.dispose()  # Dispose pool to prevent PendingRollbackError on subsequent retry attempts
+            if _database_is_missing(e):
+                logger.critical(
+                    "PostgreSQL database %r does not exist on %s:%s. Create it "
+                    "(sudo -u postgres createdb -O %s %s) or re-run "
+                    "./scripts/setup_linux.sh, then start NetPulse again.",
+                    settings.postgres_db,
+                    settings.postgres_host,
+                    settings.postgres_port,
+                    settings.postgres_user,
+                    settings.postgres_db,
+                )
+                raise RuntimeError(
+                    f"Database {settings.postgres_db!r} does not exist on "
+                    f"{settings.postgres_host}:{settings.postgres_port}. Create it with: "
+                    f"sudo -u postgres createdb -O {settings.postgres_user} "
+                    f"{settings.postgres_db}"
+                ) from e
             if attempt == max_retries:
                 logger.critical(f"Failed to connect to database after {max_retries} attempts: {e}")
                 raise
@@ -154,6 +238,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 )
                 session.add(bootstrap_user)
                 await session.commit()  # type: ignore
+
+    # Devices discovered before networks existed carry no network_id. Adopt them
+    # into the network this machine is on, otherwise an upgraded install would
+    # show an empty inventory until every device happened to be swept again.
+    try:
+        from sqlalchemy import update
+
+        from app.services.network_identity import resolve_current_network
+
+        async with async_session_factory() as session:  # type: ignore
+            current_network = await resolve_current_network(session)
+            if current_network is not None:
+                adopted = await session.execute(
+                    update(Device)
+                    .where(Device.network_id.is_(None))
+                    .values(network_id=current_network.id)
+                )
+                if adopted.rowcount:
+                    await session.commit()
+                    logger.info(
+                        "Assigned %s pre-network device(s) to '%s'.",
+                        adopted.rowcount,
+                        current_network.name,
+                    )
+    except Exception as exc:
+        logger.warning("Could not assign pre-network devices: %s", exc)
     passive_monitor_task: asyncio.Task[None] | None = None
     peer_discovery_task: asyncio.Task[None] | None = None
     flow_collector_task: asyncio.Task[None] | None = None
@@ -256,7 +366,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:  # keep the loop alive
-                    log.warning("Discovery sweep failed: %s", exc)
+                    # An exception with an empty message used to log
+                    # "Discovery sweep failed: " and say nothing at all.
+                    log.warning(
+                        "Discovery sweep failed: %s",
+                        str(exc) or type(exc).__name__,
+                    )
 
             # Wall clock, not the loop's monotonic clock: monotonic time starts
             # at zero when the process starts, so a daily reminder would not

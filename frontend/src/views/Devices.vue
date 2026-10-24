@@ -95,6 +95,32 @@ type DeviceDetail = {
 const devices = ref<DeviceRow[]>([]);
 const zones = ref<string[]>([]);
 const selectedZone = ref<string | null>(null);
+
+// Networks are the address spaces this install has been plugged into. Home
+// networks reuse the same 192.168.x addresses, so the list is scoped to one
+// network at a time and defaults to the one the machine is on right now.
+type NetworkRow = {
+  id: number;
+  name: string;
+  cidr: string;
+  device_count: number;
+  is_current: boolean;
+};
+const networks = ref<NetworkRow[]>([]);
+const selectedNetwork = ref<number | null>(null);
+
+async function loadNetworks(): Promise<void> {
+  try {
+    const { data } = await axios.get<NetworkRow[]>("/api/networks");
+    networks.value = data;
+    const current = data.find((n) => n.is_current);
+    if (selectedNetwork.value === null && current) {
+      selectedNetwork.value = current.id;
+    }
+  } catch {
+    // non-fatal: the list still works unscoped
+  }
+}
 const search = ref("");
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -222,6 +248,9 @@ async function loadDevices(): Promise<void> {
     const params: Record<string, string> = {};
     if (selectedZone.value) {
       params.zone = selectedZone.value;
+    }
+    if (selectedNetwork.value !== null) {
+      params.network_id = String(selectedNetwork.value);
     }
     const { data } = await axios.get<DeviceRow[]>("/api/devices", { params });
     devices.value = data;
@@ -372,6 +401,7 @@ async function attemptKick(ip: string): Promise<void> {
 
 
 onMounted(async () => {
+  await loadNetworks();
   await Promise.all([loadZones(), loadDevices(), loadBlockedDevices()]);
   // Close context menu on global click
   document.addEventListener("click", closeContextMenu);
@@ -511,6 +541,16 @@ onMounted(async () => {
             class="np-neon-input w-full pl-8 pr-3 py-1.5 text-xs"
           />
         </div>
+        <select
+          v-if="networks.length > 1"
+          v-model="selectedNetwork"
+          class="np-neon-input px-3 py-1.5 text-xs"
+          title="Devices are kept per network; pick which one to show"
+        >
+          <option v-for="n in networks" :key="n.id" :value="n.id">
+            {{ n.name }}{{ n.is_current ? " (current)" : "" }}
+          </option>
+        </select>
         <select
           v-model="selectedZone"
           class="np-neon-input px-3 py-1.5 text-xs"

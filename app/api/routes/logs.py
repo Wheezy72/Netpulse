@@ -27,6 +27,11 @@ async def get_logs(
     search: Optional[str] = Query(None, description="Search in message/module"),
     limit: int = Query(100, ge=1, le=500, description="Number of logs to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
+    since_seq: Optional[int] = Query(
+        None,
+        ge=0,
+        description="Only return entries newer than this id (incremental refresh)",
+    ),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Get recent application logs with optional filtering."""
@@ -36,6 +41,7 @@ async def get_logs(
         search=search,
         limit=limit,
         offset=offset,
+        since_seq=since_seq,
     )
 
     return {

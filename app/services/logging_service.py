@@ -42,9 +42,14 @@ class LogEntry:
     function: Optional[str] = None
     line: Optional[int] = None
     extra: dict[str, Any] = field(default_factory=dict)
+    # Monotonic id, assigned when the record is stored. The viewer uses it as a
+    # row key and as the "everything after this" cursor, so a refresh appends
+    # new lines instead of redrawing the whole list.
+    seq: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "seq": self.seq,
             "timestamp": self.timestamp,
             "level": self.level,
             "logger": self.logger,
@@ -116,9 +121,11 @@ class MemoryLogHandler(logging.Handler):
     def __init__(self, max_entries: int = MAX_MEMORY_LOGS):
         super().__init__()
         self.logs: Deque[LogEntry] = deque(maxlen=max_entries)
+        self._seq = 0
         self.addFilter(NoiseFilter())
 
     def emit(self, record: logging.LogRecord) -> None:
+        self._seq += 1
         entry = LogEntry(
             timestamp=datetime.utcnow().isoformat() + "Z",
             level=record.levelname.lower(),
@@ -128,6 +135,7 @@ class MemoryLogHandler(logging.Handler):
             function=record.funcName,
             line=record.lineno,
             extra=getattr(record, "extra_data", {}),
+            seq=self._seq,
         )
         self.logs.append(entry)
 
@@ -138,8 +146,14 @@ class MemoryLogHandler(logging.Handler):
         search: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
+        since_seq: Optional[int] = None,
     ) -> list[LogEntry]:
         filtered = list(self.logs)
+
+        # Only entries newer than the caller's cursor: that is what turns a
+        # polling refresh into an append instead of a full redraw.
+        if since_seq is not None:
+            filtered = [log for log in filtered if log.seq > since_seq]
 
         if level:
             level_lower = level.lower()
@@ -233,11 +247,23 @@ def setup_logging(
         error_handler.setFormatter(json_formatter)
         root_logger.addHandler(error_handler)
 
-    for logger_name in ["uvicorn", "uvicorn.access", "uvicorn.error"]:
+    # Uvicorn's own loggers must not double up with the root handler: every
+    # line used to print twice (once through uvicorn, once through root), which
+    # is half of why the console was hard to read. ``propagate = False`` fixes
+    # that. Access logs stay out of the console entirely -- one line per HTTP
+    # request buried every real message, and the request trail is still
+    # available to whoever wants it with --verbose / uvicorn's own options.
+    for logger_name in ("uvicorn", "uvicorn.error"):
         uvicorn_logger = logging.getLogger(logger_name)
         uvicorn_logger.handlers = []
+        uvicorn_logger.propagate = False
         uvicorn_logger.addHandler(console_handler)
         uvicorn_logger.addHandler(memory_handler)
+
+    access_logger = logging.getLogger("uvicorn.access")
+    access_logger.handlers = []
+    access_logger.propagate = False
+    access_logger.addHandler(memory_handler)
 
 
 def get_logger(name: str) -> logging.Logger:

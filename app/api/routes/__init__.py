@@ -12,6 +12,7 @@ from app.api.routes import (
     logs,
     metrics,
     network_segments,
+    networks,
     nmap,
     packets,
     pcaps,
@@ -41,6 +42,7 @@ api_router.include_router(captures.router, prefix="/captures", tags=["captures"]
 api_router.include_router(pcaps.router, prefix="/pcaps", tags=["pcaps"])
 api_router.include_router(packets.router, prefix="/packets", tags=["packets"])
 api_router.include_router(network_segments.router, prefix="/network-segments", tags=["network-segments"])
+api_router.include_router(networks.router, prefix="/networks", tags=["networks"])
 api_router.include_router(playbooks.router, prefix="/playbooks", tags=["playbooks"])
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
 api_router.include_router(logs.router, prefix="/logs", tags=["logs"])

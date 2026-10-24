@@ -92,8 +92,15 @@ POSTGRES_DB=netpulse
 # Redis or Memurai: rate limiting and session cache
 REDIS_URL=redis://localhost:6379/0
 
-# Optional email alerts
-ENABLE_EMAIL_ALERTS=false
+# Email alerts: all three of host/from/to are required
+ENABLE_EMAIL_ALERTS=true
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_SECURITY=auto          # 465 => implicit TLS; else STARTTLS, plain fallback
+SMTP_USERNAME=you@example.com
+SMTP_PASSWORD=
+ALERT_EMAIL_FROM=netpulse@example.com
+ALERT_EMAIL_TO=you@example.com
 
 # Optional AI assistant
 # OPENAI_API_KEY=your-key-here
@@ -102,12 +109,53 @@ ENABLE_EMAIL_ALERTS=false
 
 </details>
 
+**Email alerts** are sent by the backend when `ENABLE_EMAIL_ALERTS=true` and
+`SMTP_HOST`, `ALERT_EMAIL_FROM` and `ALERT_EMAIL_TO` are all set — for new
+HIGH/CRITICAL vulnerabilities, device-health drops and scan completions.
+
+- `SMTP_SECURITY=auto` uses implicit TLS on port 465 and STARTTLS elsewhere,
+  falling back to plaintext for a local relay; force `ssl`, `starttls` or
+  `none` for a server that insists.
+- Every attempt writes one line to `logs/api.log`: either
+  `Email alert sent to …` (with host, port and security mode) or
+  `Email alert not sent (host:port, security=…): <reason>` — so a wrong
+  password or a blocked port 25 says so instead of failing silently.
+- A failed send never breaks the request or the alert loop, and the
+  vulnerability stays unmarked so the next tick retries it.
+- The switches in **Settings → Notifications** are stored per user; the sender
+  reads only `.env` today.
+
 **Upgrades:** Non-destructive database upgrades are SQL files in `migrations/`. Apply them to an existing database when updating, for example:
 
 ```bash
 python scripts/apply_email_nullable.py   # users.email becomes nullable
 psql "$DATABASE_URL" -f migrations/20261020_users_role_admin_viewer.sql
 ```
+
+The `networks` table and `devices.network_id` (see below) are added at startup
+when they are missing, so that upgrade needs no extra step;
+`migrations/20261025_add_networks.sql` is the same change for scripted upgrades.
+
+---
+
+## Networks
+
+One install is often carried between networks that reuse the same addresses —
+five homes behind `192.168.1.0/24` with the router at `192.168.1.1`. A device
+inventory keyed by IP alone cannot tell those apart, so NetPulse identifies the
+network it is attached to from the subnet **plus the gateway's MAC address**
+(which differs per router) and keeps one inventory per network.
+
+- Devices are stored per network, so the `192.168.1.10` of one house never
+  overwrites another house's row.
+- **Settings → Network → Remembered networks** lists what has been detected and
+  lets you rename each one ("Mum's house", "Office VLAN 20").
+- The devices table, the topology map and the dashboard follow the network you
+  are on; a network switcher appears as soon as more than one is remembered.
+
+If the gateway MAC cannot be read (no root, no ARP entry) only the subnet is
+used — two networks that also share a subnet then look identical, which is the
+one case where the name is the only thing that tells them apart.
 
 ---
 
@@ -120,6 +168,15 @@ psql "$DATABASE_URL" -f migrations/20261020_users_role_admin_viewer.sql
 sudo ./scripts/setup_linux.sh
 ./scripts/run_stack.sh
 ```
+
+`run_stack.sh` starts PostgreSQL and Redis when they are not running yet and
+creates the `netpulse` database if a previous setup missed it, so a second
+manual `systemctl start …` is never needed before launching.
+
+Output stays on one terminal: every line is prefixed with the service that
+produced it (`[api]`, `[worker]`, `[ui]`) and the full text of each service is
+kept in `logs/api.log`, `logs/worker.log` and `logs/ui.log`. `--verbose` keeps
+per-request access logs, `--no-frontend` / `--no-worker` skip a service.
 
 Notes for Linux:
 

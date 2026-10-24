@@ -2,6 +2,8 @@ import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import axios from "axios";
 
+import { getStoredToken } from "../utils/token";
+
 /** Two roles: admin acts, viewer observes. */
 type Role = "admin" | "viewer";
 
@@ -19,9 +21,7 @@ interface CurrentUser {
 export const useAuthStore = defineStore("auth", () => {
   // Prefer a long-lived token from localStorage; fall back to a session-only
   // token stored in sessionStorage (used when "Remember me" is unchecked).
-  const token = ref<string | null>(
-    localStorage.getItem("np-token") ?? sessionStorage.getItem("np-token")
-  );
+  const token = ref<string | null>(getStoredToken() || null);
   const user = ref<CurrentUser | null>(null);
 
   const isAuthenticated = computed(() => !!token.value);
@@ -52,14 +52,22 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
-  async function loadUser() {
-    if (!token.value) return;
+  /**
+   * Resolve the signed-in account from the stored token.
+   *
+   * Returns false when the token was rejected (expired or revoked) and it has
+   * been cleared — the router uses that to explain why sign-in is being asked
+   * for again instead of silently bouncing to the form.
+   */
+  async function loadUser(): Promise<boolean> {
+    if (!token.value) return false;
     try {
       const { data } = await axios.get<CurrentUser>("/api/auth/me");
       user.value = data;
+      return true;
     } catch {
-      // Token may be expired – clear it.
       setToken(null);
+      return false;
     }
   }
 

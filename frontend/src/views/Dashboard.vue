@@ -123,11 +123,35 @@ function labelFor(row: PingResultRow): string {
   return row.hostname || row.ip_address;
 }
 
+// The overview speaks about one network: the one this machine is attached to.
+// Counting every remembered network would mix five homes' inventories into one
+// number, which is exactly what the network records exist to prevent.
+interface NetworkRow {
+  id: number;
+  name: string;
+  cidr: string;
+  is_current: boolean;
+}
+const currentNetwork = ref<NetworkRow | null>(null);
+
+async function loadCurrentNetwork(): Promise<void> {
+  try {
+    const { data } = await axios.get<NetworkRow[]>("/api/networks");
+    currentNetwork.value = data.find((n) => n.is_current) ?? null;
+  } catch {
+    currentNetwork.value = null;
+  }
+}
+
 async function loadDevices() {
   loading.value = true;
   error.value = null;
   try {
-    const { data } = await axios.get<DeviceRow[]>("/api/devices");
+    const params: Record<string, string> = {};
+    if (currentNetwork.value) {
+      params.network_id = String(currentNetwork.value.id);
+    }
+    const { data } = await axios.get<DeviceRow[]>("/api/devices", { params });
     devices.value = data;
   } catch {
     error.value = "Could not load the device inventory.";
@@ -314,6 +338,7 @@ watch(
 onMounted(async () => {
   await nextTick();
   readThemeColors();
+  await loadCurrentNetwork();
   await Promise.all([loadDevices(), loadSegments()]);
   void checkPingStatus();
 });
@@ -444,6 +469,10 @@ onMounted(async () => {
           {{ totalDevices === 0
             ? "Run a sweep to see what is on this network."
             : "Availability is based on device sightings collected in the last ten minutes." }}
+          <span v-if="currentNetwork">
+            Watching <strong class="text-[var(--np-text)]">{{ currentNetwork.name }}</strong>
+            ({{ currentNetwork.cidr }}) — other networks keep their own inventory.
+          </span>
         </p>
         <div class="mt-4 flex flex-wrap gap-2">
           <button

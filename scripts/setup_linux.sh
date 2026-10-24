@@ -72,6 +72,17 @@ check_postgres_running() {
   return 1
 }
 
+# `postgresql.service` is a oneshot unit on Debian/Kali, so systemd reports it
+# as active once it has been started even while the postmaster is still coming
+# up. A real readiness probe is what the CREATE statements below need.
+postgres_accepting_connections() {
+  if command -v pg_isready >/dev/null 2>&1; then
+    pg_isready -q >/dev/null 2>&1
+  else
+    check_postgres_running
+  fi
+}
+
 install_packages_apt() {
   print_status "Updating package lists..."
   apt-get update -qq
@@ -152,29 +163,47 @@ fi
 
 print_status "Ensuring PostgreSQL service is running..."
 if command -v systemctl >/dev/null 2>&1; then
-  systemctl enable postgresql || true
-  systemctl start postgresql || true
-  
-  if [ "$PKG_MGR" != "apt" ] || command -v redis-server >/dev/null 2>&1; then
-    systemctl enable redis redis-server 2>/dev/null || true
-    systemctl start redis redis-server 2>/dev/null || true
+  systemctl enable postgresql 2>/dev/null || true
+  systemctl start postgresql 2>/dev/null || true
+
+  # Debian/Kali ship the unit as redis-server.service, Fedora/Arch as
+  # redis.service. Naming both units in one command makes systemctl fail the
+  # whole call as soon as one of them is missing, which silently left fresh
+  # installs with no Redis at all, so each unit is handled on its own.
+  for _redis_unit in redis-server redis; do
+    if systemctl cat "${_redis_unit}.service" >/dev/null 2>&1; then
+      systemctl enable "${_redis_unit}.service" 2>/dev/null || true
+      systemctl start "${_redis_unit}.service" 2>/dev/null || true
+      break
+    fi
+  done
+fi
+
+if ! postgres_accepting_connections; then
+  print_warning "PostgreSQL isn't answering yet. Attempting to start..."
+  systemctl start postgresql 2>/dev/null || service postgresql start || true
+fi
+
+# Wait for the server to accept connections before creating anything. The
+# CREATE statements below used to run against a server that was still coming
+# up, fail, and be swallowed by `|| true` -- the install then finished with no
+# database and the backend died at boot with
+# `database "netpulse" does not exist`.
+_postgres_ready=false
+for _attempt in $(seq 1 30); do
+  if postgres_accepting_connections; then
+    _postgres_ready=true
+    break
   fi
-fi
+  sleep 1
+done
 
-sleep 2
-
-if ! check_postgres_running; then
-  print_warning "PostgreSQL doesn't seem to be running. Attempting to start..."
-  systemctl start postgresql || service postgresql start || true
-  sleep 2
-fi
-
-if check_postgres_running; then
+if [ "$_postgres_ready" = true ]; then
   print_success "PostgreSQL is running!"
 else
-  print_error "Could not start PostgreSQL. Please start it manually."
-  print_warning "On systemd: sudo systemctl start postgresql"
-  print_warning "On init.d: sudo service postgresql start"
+  print_error "PostgreSQL is not answering, so the NetPulse database cannot be created."
+  print_warning "Start it (sudo systemctl start postgresql), then re-run this script."
+  exit 1
 fi
 
 # Redis backs rate limiting, session revocation and the Celery broker. Without
@@ -216,13 +245,33 @@ run_as_postgres() {
   fi
 }
 
-run_as_postgres -tc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1 || \
-  run_as_postgres -c "CREATE ROLE ${DB_USER} LOGIN PASSWORD '${DB_PASS}';" || true
+# Every step is checked instead of ending in `|| true`: swallowing a failed
+# CREATE used to print "Database configured" while nothing had been created.
+if ! run_as_postgres -tc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" 2>/dev/null | grep -q 1; then
+  if ! run_as_postgres -c "CREATE ROLE ${DB_USER} LOGIN PASSWORD '${DB_PASS}';"; then
+    print_error "Could not create the '${DB_USER}' PostgreSQL role."
+    print_warning "Check that the server is running, then re-run this script."
+    exit 1
+  fi
+fi
 
-run_as_postgres -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 || \
-  run_as_postgres -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" || true
+if ! run_as_postgres -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" 2>/dev/null | grep -q 1; then
+  if ! run_as_postgres -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};"; then
+    print_error "Could not create the '${DB_NAME}' database."
+    print_warning "Check that the server is running, then re-run this script."
+    exit 1
+  fi
+fi
 
 run_as_postgres -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" 2>/dev/null || true
+
+# Verify rather than assume -- this is the check whose silent failure left
+# fresh installs without a database.
+if ! run_as_postgres -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" 2>/dev/null | grep -q 1; then
+  print_error "Database '${DB_NAME}' still does not exist after creation; aborting."
+  print_warning "Create it by hand: sudo -u postgres createdb -O ${DB_USER} ${DB_NAME}"
+  exit 1
+fi
 
 print_success "Database '${DB_NAME}' configured for user '${DB_USER}'"
 
@@ -243,10 +292,13 @@ CORS_ALLOW_ORIGINS='["http://localhost:6969","http://localhost:6970","http://loc
 
 SECRET_KEY=$(openssl rand -hex 32 2>/dev/null || head -c 64 /dev/urandom | base64 | tr -d '\n' | head -c 64)
 
-# Email Alerts
+# Email Alerts (see README: SMTP_HOST, ALERT_EMAIL_FROM and ALERT_EMAIL_TO
+# are all required. SMTP_SECURITY=auto picks implicit TLS on 465 and STARTTLS
+# everywhere else, falling back to plaintext for a local relay.)
 ENABLE_EMAIL_ALERTS=false
 SMTP_HOST=
 SMTP_PORT=587
+SMTP_SECURITY=auto
 SMTP_USERNAME=
 SMTP_PASSWORD=
 ALERT_EMAIL_FROM=

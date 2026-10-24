@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from "axios";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 import { Eye, EyeOff, LoaderCircle } from "lucide-vue-next";
 
@@ -15,6 +15,7 @@ interface Props {
 
 const props = defineProps<Props>();
 const router = useRouter();
+const route = useRoute();
 
 const isNightshade = computed(() => props.theme === "nightshade");
 
@@ -34,8 +35,10 @@ const errorMessage = ref<string | null>(null);
 // machine is told before the first sign-in attempt fails.
 const serverReachable = ref<boolean | null>(null);
 // Public sign-up does not exist. Only an empty instance shows the setup link,
-// and it disappears as soon as the first administrator exists.
-const needsSetup = ref(false);
+// and it disappears as soon as the first administrator exists. null means the
+// question could not be answered yet (server unreachable), which is different
+// from a confirmed "an account already exists" and must not claim one does.
+const needsSetup = ref<boolean | null>(null);
 const showContent = ref(false);
 
 const typedTitle = ref("");
@@ -172,7 +175,10 @@ async function checkSetup(): Promise<void> {
     });
     needsSetup.value = !!data.needs_setup;
   } catch {
-    needsSetup.value = false;
+    // Unknown, not "no": a failed probe used to render "Accounts are created by
+    // an administrator", which told first-run users their account already
+    // existed. The status line below already reports the unreachable server.
+    needsSetup.value = null;
   }
 }
 
@@ -181,6 +187,9 @@ async function checkServer(): Promise<void> {
   try {
     await axios.get("/api/health/live", { timeout: 4000 });
     serverReachable.value = true;
+    // The setup probe may have timed out while the API was still warming up;
+    // ask once more now that it answers.
+    if (needsSetup.value === null) void checkSetup();
   } catch {
     serverReachable.value = false;
   }
@@ -188,6 +197,12 @@ async function checkServer(): Promise<void> {
 
 onMounted(async () => {
   await nextTick();
+
+  // Arriving here because a token expired is different from a wrong password:
+  // say so, otherwise the redirect looks like the app forgot the account.
+  if (route.query.expired === "1") {
+    errorMessage.value = "Your session expired — sign in again.";
+  }
 
   void checkServer();
   void checkSetup();
@@ -369,7 +384,7 @@ async function handleSubmit(): Promise<void> {
         </form>
 
         <div class="mt-6 pt-5 border-t border-[var(--np-border-subtle)] text-center">
-          <template v-if="needsSetup">
+          <template v-if="needsSetup === true">
             <p class="mb-2 text-xs text-[var(--np-text-dim)]">
               No administrator exists yet.
             </p>
@@ -381,7 +396,8 @@ async function handleSubmit(): Promise<void> {
               Set up this instance
             </button>
           </template>
-          <p v-else class="text-xs text-[var(--np-text-dim)]">
+          <!-- Only a confirmed answer may claim an account exists. -->
+          <p v-else-if="needsSetup === false" class="text-xs text-[var(--np-text-dim)]">
             Accounts are created by an administrator in Settings → Users.
           </p>
         </div>

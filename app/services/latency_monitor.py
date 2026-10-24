@@ -13,6 +13,7 @@ This module:
 import asyncio
 import os
 import statistics
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable, List
@@ -51,13 +52,19 @@ async def _ping_target(target: str, count: int = 15, timeout: int = 1) -> PingRe
     else:
         argv = ["ping", "-c", str(count), "-W", str(timeout), target]
 
+    # subprocess.run in a thread, not asyncio's subprocess API: uvicorn
+    # --reload on Windows serves on a SelectorEventLoop, where
+    # create_subprocess_exec raises NotImplementedError and every sample
+    # looked like 100% packet loss.
     try:
-        process = await asyncio.create_subprocess_exec(
-            *argv,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            argv,
+            capture_output=True,
+            timeout=max(count * (max(1, timeout) + 1), 15),
+            check=False,
         )
-        stdout_b, _stderr_b = await process.communicate()
+        stdout_b = completed.stdout
     except Exception:
         return PingResult(target=target, latencies_ms=[], packet_loss_pct=100.0)
 

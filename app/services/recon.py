@@ -159,5 +159,7 @@ async def passive_arp_discovery(
     if not pairs:
         return
 
+    from app.services.network_identity import current_network_id
+
     hosts = await enrich_hosts(hosts_from_arp_pairs(pairs))
-    await upsert_discovered_hosts(db, hosts)
+    await upsert_discovered_hosts(db, hosts, network_id=await current_network_id(db))
