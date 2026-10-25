@@ -226,6 +226,30 @@ class TestUpsertDiscoveredHosts:
         assert len(rows) == 1
         assert rows[0].ip_address == "10.0.0.100"
 
+    async def test_folds_a_macless_twin_even_when_it_answered(self, db_session) -> None:
+        """Both addresses reply, only one can be identified by MAC.
+
+        That is what the router-side ARP table shows when a machine holds two
+        addresses: the topology should still draw one node, not two.
+        """
+        from sqlalchemy import select
+
+        from app.models.device import Device
+
+        db_session.add(Device(ip_address="10.0.0.102", hostname="Immortan"))
+        await db_session.flush()
+
+        await upsert_discovered_hosts(
+            db_session,
+            [
+                DiscoveredHost(ip_address="10.0.0.100", mac_address="123A1FAA7FEB", hostname="Immortan"),
+                DiscoveredHost(ip_address="10.0.0.102", hostname="Immortan"),
+            ],
+        )
+
+        rows = (await db_session.execute(select(Device))).scalars().all()
+        assert [row.ip_address for row in rows] == ["10.0.0.100"]
+
     async def test_one_sweep_does_not_add_a_macless_twin(self, db_session) -> None:
         """Same sweep, two answers from one machine: one address has the MAC."""
         from sqlalchemy import select

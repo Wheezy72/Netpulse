@@ -1239,6 +1239,53 @@ async def upsert_discovered_hosts(
         )
         await db.delete(row)
 
+    # --- fold MAC-less twins into the row that has an address --------------
+    # A device reached through a path that cannot read ARP (another L2
+    # segment, a stale neighbour entry, a hotspot client) is recorded without
+    # a MAC. When exactly one *identified* row carries the same unique
+    # hostname, that row is the device and the MAC-less row is a second view
+    # of it — the "two Immortans" in the topology. Rows that merely share a
+    # generic name with each other are left alone.
+    # Both the rows that existed before this sweep and the ones it just added
+    # can be the identified twin, so consider the whole set.
+    every_row: List[Device] = list(rows) + [row for row in pending if row not in rows]
+    identified_by_name: Dict[str, List[Device]] = {}
+    for row in every_row:
+        name = (row.hostname or "").strip().lower()
+        if name and row.mac_address:
+            identified_by_name.setdefault(name, []).append(row)
+
+    for row in every_row:
+        if row.mac_address:
+            continue
+        name = (row.hostname or "").strip().lower()
+        if not name:
+            continue
+        twins = identified_by_name.get(name, [])
+        if len(twins) != 1 or twins[0] is row:
+            continue
+
+        twin = twins[0]
+        twin.hostname = twin.hostname or row.hostname
+        twin.vendor = twin.vendor or row.vendor
+        twin.device_type = twin.device_type or row.device_type
+        twin.os = twin.os or row.os
+
+        await db.execute(
+            sa_update(ScriptJob)
+            .where(ScriptJob.device_id == row.id)
+            .values(device_id=None)
+        )
+        logger.info(
+            "Folding MAC-less row #%s %s (hostname=%r) into identified row #%s %s.",
+            row.id,
+            row.ip_address,
+            row.hostname,
+            twin.id,
+            twin.ip_address,
+        )
+        await db.delete(row)
+
     await db.commit()
     return created, updated
 
