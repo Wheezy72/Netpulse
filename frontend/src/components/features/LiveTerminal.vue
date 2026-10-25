@@ -9,6 +9,8 @@ const props = defineProps<{
   title: string;
   streamUrl: string | null;
   theme: "nightshade" | "sysadmin";
+  /** Sent as the WebSocket subprotocol so it stays out of URLs and logs. */
+  token?: string | null;
 }>();
 
 const container = ref<HTMLDivElement | null>(null);
@@ -112,7 +114,11 @@ function connect(url: string): void {
   disposeSocket();
 
   try {
-    ws = new WebSocket(url);
+    // "bearer.<jwt>" rides in the subprotocol list; the query string would put
+    // the token into every access log along the way.
+    ws = props.token
+      ? new WebSocket(url, [`bearer.${props.token}`])
+      : new WebSocket(url);
   } catch (e) {
     term.writeln(`\n[error] Failed to open WebSocket: ${String(e)}\n`);
     return;
@@ -154,6 +160,17 @@ watch(
 
     clear();
     connect(next);
+  }
+);
+
+// A re-issued token (after a refresh) has to reconnect: the old socket still
+// carries the old credential.
+watch(
+  () => props.token,
+  (next, previous) => {
+    if (!term || next === previous || !props.streamUrl) return;
+    disposeSocket();
+    connect(props.streamUrl);
   }
 );
 

@@ -33,6 +33,37 @@ logger = logging.getLogger("netpulse.auth")
 
 router = APIRouter()
 
+# Fallback window for the login throttle, used only while Redis is down.
+# Per-process and bounded: it must never be the reason a sign-in fails.
+_LOCAL_ATTEMPT_LIMIT = 200
+_local_attempts: dict[str, list[float]] = {}
+
+
+def _local_attempt_count(key: str, now: float, window_seconds: int) -> int:
+    """Sliding window in process memory: how many attempts came before this one.
+
+    Keeps the brute-force ceiling alive during a Redis outage instead of
+    silently removing it, which is what the previous fail-open path did.
+    """
+    cutoff = now - window_seconds
+    attempts = [stamp for stamp in _local_attempts.get(key, []) if stamp > cutoff]
+    count_before = len(attempts)
+    attempts.append(now)
+    _local_attempts[key] = attempts[-_LOCAL_ATTEMPT_LIMIT:]
+
+    if len(_local_attempts) > 2048:
+        # Opportunistic sweep so many failing addresses cannot grow the map
+        # without bound in a long-running process.
+        for stale_key in [k for k, v in _local_attempts.items() if not v or v[-1] <= cutoff]:
+            _local_attempts.pop(stale_key, None)
+    return count_before
+
+
+# Password floor for accounts and password changes. Six characters was the
+# shortest that let a demo through; on a box that the whole LAN can reach it is
+# guessable in an afternoon.
+MIN_PASSWORD_LENGTH = 12
+
 _RATE_LIMIT_KEY_PREFIX = "np:login_attempts:"
 _RATE_LIMIT_MAX_ATTEMPTS = 5
 _RATE_LIMIT_WINDOW_SECONDS = 300
@@ -84,13 +115,17 @@ async def _enforce_rate_limit(
             pipeline.zadd(rate_limit_key, {str(current_unix_time): current_unix_time})
             pipeline.expire(rate_limit_key, window_seconds)
             results = await pipeline.execute()
+        attempt_count_before_this_request = results[1]
     except Exception as exc:
-        # Redis is a convenience here, not the authentication source of truth.
-        # A cache hiccup must not turn every sign-in into a 500.
-        logger.warning("Login throttle unavailable, allowing attempt: %s", exc)
-        return
+        # Redis is a cache, not the source of truth: a hiccup must not turn a
+        # sign-in into a 500. Falling back to an in-process window keeps the
+        # brute-force ceiling in place while Redis is unavailable, instead of
+        # silently disabling it.
+        logger.warning("Login throttle unavailable, using local window: %s", exc)
+        attempt_count_before_this_request = _local_attempt_count(
+            rate_limit_key, current_unix_time, window_seconds
+        )
 
-    attempt_count_before_this_request = results[1]
     if attempt_count_before_this_request >= max_attempts:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -211,8 +246,8 @@ class CreateUserRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, value: str) -> str:
-        if len(value or "") < 6:
-            raise ValueError("Password must be at least 6 characters.")
+        if len(value or "") < MIN_PASSWORD_LENGTH:
+            raise ValueError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters.")
         return value
 
 
@@ -700,10 +735,10 @@ async def update_password(
             detail="User not found",
         )
 
-    if len(payload.new_password) < 6:
+    if len(payload.new_password) < MIN_PASSWORD_LENGTH:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="New password must be at least 6 characters.",
+            detail=f"New password must be at least {MIN_PASSWORD_LENGTH} characters.",
         )
 
     db_user.hashed_password = get_password_hash(payload.new_password)
@@ -743,7 +778,7 @@ async def forgot_password(
     # accounts exist or which one is missing an address.
     if user is None or user.auth_provider != "local" or not user.email:
         # Return generic message to prevent user enumeration
-        return {"message": "If an account with that email exists, a reset link has been generated."}
+        return {"message": "If an account with that email exists, a reset code has been issued."}
 
     token = secrets.token_urlsafe(32)
     import hashlib
@@ -756,7 +791,7 @@ async def forgot_password(
     # Log the plaintext token to the console so the administrator can copy-paste it
     logger.warning("PASSWORD RESET REQUESTED FOR %s. RESET TOKEN: %s", user.email, token)
 
-    return {"message": "If an account with that email exists, a reset link has been generated."}
+    return {"message": "If an account with that email exists, a reset code has been issued."}
 
 
 @router.post(
@@ -768,10 +803,10 @@ async def reset_password(
     payload: ResetPasswordRequest,
     db: AsyncSession = Depends(db_session),
 ) -> Dict[str, str]:
-    if len(payload.new_password) < 6:
+    if len(payload.new_password) < MIN_PASSWORD_LENGTH:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password must be at least 6 characters.",
+            detail=f"Password must be at least {MIN_PASSWORD_LENGTH} characters.",
         )
 
     import hashlib

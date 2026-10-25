@@ -154,7 +154,7 @@ async function loadLogs(options: { incremental?: boolean } = {}): Promise<void> 
 }
 
 async function clearLogs(): Promise<void> {
-  if (!confirm("Clear the in-memory log buffer? Log files on disk are kept.")) return;
+  if (!confirm("Clear the live log view? Files on disk are kept.")) return;
   try {
     await axios.delete("/api/logs");
     cursor.value = 0;
@@ -405,7 +405,7 @@ onUnmounted(() => {
         <div class="flex flex-col">
           <span class="np-panel-title">Logs</span>
           <span class="text-[0.7rem] text-[var(--np-text-dim)]/50">
-            Live application output — new lines are appended, not redrawn.
+            Application output, live.
           </span>
         </div>
         <div class="flex items-center gap-2">
@@ -472,7 +472,7 @@ onUnmounted(() => {
           "
           @click="showSystemErrors = !showSystemErrors"
         >
-          {{ showSystemErrors ? "Hiding nothing" : "Errors hidden" }}
+          {{ showSystemErrors ? "Hide errors" : "Show errors" }}
         </button>
       </div>
 
@@ -599,7 +599,7 @@ onUnmounted(() => {
         <div class="flex flex-col">
           <span class="np-panel-title">Syslog</span>
           <span class="text-[0.7rem] text-[var(--np-text-dim)]/50">
-            UDP listener on port {{ syslogStatus.port }} — what the network appliances send.
+            UDP listener on port {{ syslogStatus.port }}.
           </span>
         </div>
         <div class="flex items-center gap-2">
@@ -703,7 +703,7 @@ onUnmounted(() => {
           class="p-10 text-center text-xs"
           style="color: var(--np-text-dim)"
         >
-          Nothing received yet. Point an appliance's syslog output at this host.
+          Nothing received yet.
         </p>
         <table v-else class="w-full text-left text-xs tabular-nums">
           <thead>

@@ -12,12 +12,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, require_admin
+from app.core.paths import BACKUP_DIR as BACKUP_DIR_PATH
+from app.core.paths import ensure_dir
 from app.models.user import User
 
 router = APIRouter()
 
-BACKUP_DIR = Path("data/backups")
-BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+BACKUP_DIR = ensure_dir(BACKUP_DIR_PATH)
 
 EXPORTABLE_TABLES = ["devices", "uptime_targets", "network_segments"]
 FILENAME_PATTERN = "netpulse_backup_"

@@ -379,7 +379,7 @@ async function connectSsh() {
   await nextTick();
 
   if (!terminalContainer.value) {
-    sshError.value = "Terminal container UI is not initialized.";
+    sshError.value = "The console is not ready. Reload the page and try again.";
     sshConnecting.value = false;
     return;
   }
@@ -392,13 +392,15 @@ async function connectSsh() {
   // a proxy log or browser history.
   const wsUrl = `${wsBase}/api/ws/ssh?ip=${encodeURIComponent(selectedNode.value.ip_address)}`;
 
+  let socket: WebSocket;
   try {
-    ws = new WebSocket(wsUrl);
+    socket = new WebSocket(wsUrl);
   } catch (err: any) {
     sshError.value = `Failed to open socket: ${err.message || err}`;
     sshConnecting.value = false;
     return;
   }
+  ws = socket;
 
   term = new Terminal({
     convertEol: true,
@@ -417,10 +419,10 @@ async function connectSsh() {
   fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
 
-  ws.onopen = () => {
+  socket.onopen = () => {
     // First frame is always the handshake; the server closes with 4400 if it
     // arrives as anything else.
-    ws.send(
+    socket.send(
       JSON.stringify({
         type: "auth",
         token,
@@ -437,24 +439,26 @@ async function connectSsh() {
       fitAddon?.fit();
       term.focus();
       
-      ws?.send(JSON.stringify({
-        type: "resize",
-        cols: term.cols,
-        rows: term.rows
-      }));
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          type: "resize",
+          cols: term.cols,
+          rows: term.rows
+        }));
+      }
     }
   };
 
-  ws.onmessage = (event) => {
+  socket.onmessage = (event) => {
     term?.write(event.data);
   };
 
-  ws.onerror = () => {
+  socket.onerror = () => {
     sshError.value = "WebSocket connection failed.";
     disconnectSsh();
   };
 
-  ws.onclose = (event) => {
+  socket.onclose = (event) => {
     if (event.code !== 1000 && !sshError.value) {
       sshError.value = `SSH Session Disconnected: ${event.reason || 'Code ' + event.code}`;
     }
@@ -724,7 +728,7 @@ onBeforeUnmount(() => {
         <p class="text-[0.6rem] font-mono uppercase tracking-[0.35em] text-[var(--np-text-dim)]">Network map</p>
         <h1 class="mt-1 text-2xl font-bold tracking-tight text-[var(--np-text)]">Interactive topology</h1>
         <p class="mt-1 text-xs text-[var(--np-text-muted)]">
-          Radial map of discovered hosts — the uplink sits at the core, infrastructure and endpoints orbit around it.
+          Discovered hosts, drawn from the uplink outwards.
         </p>
       </div>
 
@@ -738,7 +742,7 @@ onBeforeUnmount(() => {
         <select
           v-if="networks.length > 1"
           v-model="selectedNetwork"
-          @change="loadTopology"
+          @change="loadTopology()"
           title="Each network keeps its own inventory"
           class="rounded-xl border border-[var(--np-border-subtle)] bg-[var(--np-input-bg)] px-3 py-2 text-xs font-mono text-[var(--np-text)] focus:outline-none focus:ring-1 focus:ring-[var(--np-accent)]"
         >
@@ -749,14 +753,14 @@ onBeforeUnmount(() => {
         </select>
         <select
           v-model="selectedZone"
-          @change="loadTopology"
+          @change="loadTopology()"
           class="rounded-xl border border-[var(--np-border-subtle)] bg-[var(--np-input-bg)] px-3 py-2 text-xs font-mono text-[var(--np-text)] focus:outline-none focus:ring-1 focus:ring-[var(--np-accent)]"
         >
           <option value="all">All zones</option>
           <option v-for="z in zones" :key="z" :value="z">{{ z }}</option>
         </select>
         <button
-          @click="loadTopology"
+          @click="loadTopology()"
           class="flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)]/60 text-[var(--np-text-dim)] transition-all hover:border-[var(--np-accent-border)] hover:text-[var(--np-accent)]"
           title="Refresh network layout"
         >
@@ -1123,7 +1127,7 @@ onBeforeUnmount(() => {
                   </button>
                 </div>
                 <div v-if="configs.length === 0" class="text-xs font-mono py-8 text-[var(--np-text-dim)] text-center">
-                  No configuration backups found. Run the "backup_switch.py" script in the Toolbox to gather configuration files.
+                  No configuration backups found. Run the switch backup script in the Toolbox to collect configuration files.
                 </div>
               </div>
 
@@ -1159,7 +1163,7 @@ onBeforeUnmount(() => {
             Select a node to inspect
           </span>
           <p class="mt-2 max-w-[16rem] text-xs leading-relaxed text-[var(--np-text-muted)]">
-            Click any orb on the map to open its inventory record, vulnerability list and console.
+            Click a node to open its record, vulnerabilities and console.
           </p>
         </div>
       </div>

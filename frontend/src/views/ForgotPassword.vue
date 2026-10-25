@@ -191,18 +191,24 @@ async function handleEmailSubmit(): Promise<void> {
     errorMessage.value = "Enter your email address.";
     return;
   }
+  // Catch a mistyped address here rather than letting the API answer 422 with
+  // a generic "Validation error".
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(forgotEmail.value.trim())) {
+    errorMessage.value = "That email address does not look right.";
+    return;
+  }
 
   isSubmitting.value = true;
   try {
     const { data } = await axios.post<{ message: string }>("/api/auth/forgot-password", {
       email: forgotEmail.value,
     });
-    successMessage.value = data.message + " Check the server console for the reset token.";
+    successMessage.value = data.message;
     step.value = "token";
   } catch (error) {
     errorMessage.value = describeRequestError(
       error,
-      "Could not send a reset token. Check your email and try again."
+      "Could not send a reset code. Check the address and try again."
     );
   } finally {
     isSubmitting.value = false;
@@ -214,11 +220,11 @@ async function handleResetSubmit(): Promise<void> {
   successMessage.value = null;
 
   if (!resetToken.value.trim()) {
-    errorMessage.value = "Paste the reset token from the server console.";
+    errorMessage.value = "Enter the reset code.";
     return;
   }
-  if (newPassword.value.length < 6) {
-    errorMessage.value = "Password must be at least 6 characters.";
+  if (newPassword.value.length < 12) {
+    errorMessage.value = "Password must be at least 12 characters.";
     return;
   }
   if (newPassword.value !== confirmPassword.value) {
@@ -237,7 +243,7 @@ async function handleResetSubmit(): Promise<void> {
       emit("switch-to-login");
     }, 2000);
   } catch (error) {
-    errorMessage.value = describeRequestError(error, "Reset failed. Check your token and try again.");
+    errorMessage.value = describeRequestError(error, "Reset failed. Check the code and try again.");
   } finally {
     isSubmitting.value = false;
   }
@@ -283,7 +289,7 @@ async function handleResetSubmit(): Promise<void> {
         <!-- Step 1: Email -->
         <form v-if="step === 'email'" class="space-y-5" @submit.prevent="handleEmailSubmit">
           <p class="text-xs" :class="isNightshade ? 'text-gray-400' : 'text-[var(--np-text-dim)]'">
-            Enter your account email. A one-time reset token will be printed to the server console.
+            Enter your account email. A one-time reset code is issued for the account.
           </p>
 
           <div>
@@ -308,7 +314,7 @@ async function handleResetSubmit(): Promise<void> {
             :disabled="isSubmitting"
           >
               <LoaderCircle v-if="isSubmitting" class="w-4 h-4 animate-spin" :stroke-width="1.7" />
-            <span>{{ isSubmitting ? "Sending…" : "Send Reset Token" }}</span>
+            <span>{{ isSubmitting ? "Sending…" : "Send Reset Code" }}</span>
           </button>
 
           <p v-if="errorMessage" class="text-center text-sm text-red-400">{{ errorMessage }}</p>
@@ -320,7 +326,7 @@ async function handleResetSubmit(): Promise<void> {
             {{ successMessage }}
           </p>
           <p class="text-xs" :class="isNightshade ? 'text-gray-400' : 'text-[var(--np-text-dim)]'">
-            Paste the token from the server console below and choose a new password.
+            Ask an administrator for the reset code, then choose a new password.
           </p>
 
           <div>
@@ -328,14 +334,14 @@ async function handleResetSubmit(): Promise<void> {
               class="block text-xs uppercase tracking-wider mb-2 font-mono"
               :class="isNightshade ? 'text-gray-400' : 'text-[var(--np-text-dim)]'"
             >
-              Reset Token
+              Reset code
             </label>
             <input
               v-model="resetToken"
               type="text"
               autocomplete="off"
               class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 text-sm"
-              placeholder="Paste token here"
+              placeholder="Reset code"
             />
           </div>
 
@@ -405,9 +411,6 @@ async function handleResetSubmit(): Promise<void> {
           </button>
 
           <p v-if="errorMessage" class="text-center text-sm text-red-400">{{ errorMessage }}</p>
-          <p v-if="successMessage && step === 'token'" class="text-center text-sm text-[var(--np-accent)]">
-            {{ successMessage }}
-          </p>
         </form>
 
         <!-- Back to login -->

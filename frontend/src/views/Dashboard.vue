@@ -113,7 +113,7 @@ async function checkPingStatus() {
     pingResults.value = data.results;
     pingSummary.value = data.summary;
   } catch {
-    pingError.value = "The ping check could not run. Is the backend reachable?";
+    pingError.value = "The ping check could not run. Is the server reachable?";
   } finally {
     pingChecking.value = false;
   }
@@ -468,10 +468,12 @@ onMounted(async () => {
         <p class="mt-1 max-w-xl text-xs text-[var(--np-text-muted)]">
           {{ totalDevices === 0
             ? "Run a sweep to see what is on this network."
-            : "Availability is based on device sightings collected in the last ten minutes." }}
+            : "Availability follows device sightings from the last ten minutes." }}
           <span v-if="currentNetwork">
-            Watching <strong class="text-[var(--np-text)]">{{ currentNetwork.name }}</strong>
-            ({{ currentNetwork.cidr }}) — other networks keep their own inventory.
+            <strong class="text-[var(--np-text)]">{{ currentNetwork.name }}</strong>
+            <template v-if="currentNetwork.name !== currentNetwork.cidr">
+              ({{ currentNetwork.cidr }})
+            </template>
           </span>
         </p>
         <div class="mt-4 flex flex-wrap gap-2">

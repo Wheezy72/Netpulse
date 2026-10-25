@@ -12,6 +12,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_user, require_admin
+from app.core.paths import SCANS_DIR as SCANS_DIR_PATH
+from app.core.paths import ensure_dir
 from app.db.session import async_session_factory
 from app.models.scan_job import ScanJob, ScanJobStatus
 from app.models.user import User
@@ -28,8 +30,7 @@ from app.services.scan_policy import is_restricted_target, validate_target
 
 router = APIRouter()
 
-SCANS_DIR = Path("data/scans")
-SCANS_DIR.mkdir(parents=True, exist_ok=True)
+SCANS_DIR = ensure_dir(SCANS_DIR_PATH)
 
 # A conservative allowlist for user-provided nmap flags.
 ALLOWED_NMAP_FLAGS: set[str] = {

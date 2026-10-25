@@ -152,11 +152,6 @@ async def send_system_alert(
     *,
     event_type: str | None = None,
     channel: str | None = None,
-    device_name: str | None = None,
-    device_ip: str | None = None,
-    device_mac: str | None = None,
-    segment_name: str | None = None,
-    severity: str | None = None,
 ) -> bool:
     """
     Send a generic system alert via email.
@@ -173,8 +168,6 @@ async def send_system_alert(
     channel:
         Optional channel hint. "none" suppresses the alert entirely; any other
         value (including legacy values) results in the email alert.
-    device_name, device_ip, device_mac, segment_name, severity:
-        Optional device/context values kept for call-site compatibility.
 
     Returns whether an email actually went out.
     """
@@ -219,11 +212,6 @@ async def process_vulnerability_alerts(db: AsyncSession) -> None:
             subject,
             body,
             event_type="vuln",
-            device_name=device.hostname or device.ip_address,
-            device_ip=device.ip_address,
-            device_mac=device.mac_address,
-            segment_name=device.zone or "Default",
-            severity=vuln.severity.value.upper() if vuln.severity else None,
         )
 
         # Marked as alerted when emailing is off (so turning it on later does

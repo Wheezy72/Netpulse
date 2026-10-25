@@ -101,6 +101,31 @@ def _database_is_missing(exc: BaseException) -> bool:
     return False
 
 
+# The SPA loads only its own bundle, Google Fonts, and its own API/sockets.
+# 'unsafe-inline' for styles is required: Vue binds style attributes and xterm
+# writes inline styles into the DOM. No 'unsafe-eval' — nothing in the build
+# needs it, and leaving it out is the point of sending a policy at all.
+_CSP = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src 'self' https://fonts.gstatic.com data:; "
+    "img-src 'self' data: blob:; "
+    "connect-src 'self' ws: wss:; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    "frame-ancestors 'self'"
+)
+
+
+def _describe(exc: BaseException) -> str:
+    """Exception text that is never empty: ``NotImplementedError`` alone is a
+    dead end when the type is the only clue."""
+    message = str(exc).strip()
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Add security headers to all responses."""
 
@@ -112,6 +137,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+
+        # Only the document needs a policy; API payloads are not a browsing
+        # context, and attaching it to downloads does nothing.
+        content_type = response.headers.get("content-type", "")
+        if not request.url.path.startswith("/api") and "text/html" in content_type:
+            response.headers["Content-Security-Policy"] = _CSP
 
         if request.url.path.startswith("/api"):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
@@ -287,7 +318,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # keep the loop alive
-                logging.getLogger("app.main").warning("Latency monitor tick failed: %s", exc)
+                logging.getLogger("app.main").warning("Latency monitor tick failed: %s", _describe(exc))
             await asyncio.sleep(10)
 
     # Vulnerability alerts every 5 minutes; the scan reminder once a day.
@@ -330,7 +361,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # keep the loop alive
-                log.warning("Vulnerability alert tick failed: %s", exc)
+                log.warning("Vulnerability alert tick failed: %s", _describe(exc))
 
             # Schedules saved in Settings → Scheduler. This is the reader the
             # tab was missing; without it the toggle did nothing at all.
@@ -342,7 +373,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # keep the loop alive
-                log.warning("Scheduled scan tick failed: %s", exc)
+                log.warning("Scheduled scan tick failed: %s", _describe(exc))
 
             # Background discovery keeps last_seen honest, retires stale twins
             # and picks up phones that joined since the last pass. It holds the
@@ -367,11 +398,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     raise
                 except Exception as exc:  # keep the loop alive
                     # An exception with an empty message used to log
-                    # "Discovery sweep failed: " and say nothing at all.
-                    log.warning(
-                        "Discovery sweep failed: %s",
-                        str(exc) or type(exc).__name__,
-                    )
+                    # "Discovery sweep failed: " and say nothing at all, which
+                    # cost an afternoon once. Name the type, and keep the
+                    # traceback available for -v runs.
+                    log.warning("Discovery sweep failed: %s", _describe(exc))
+                    log.debug("Discovery sweep traceback", exc_info=True)
 
             # Wall clock, not the loop's monotonic clock: monotonic time starts
             # at zero when the process starts, so a daily reminder would not
@@ -392,7 +423,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    log.warning("Scan reminder failed: %s", exc)
+                    log.warning("Scan reminder failed: %s", _describe(exc))
                 else:
                     log.info("Daily scan-reminder alert sent.")
 

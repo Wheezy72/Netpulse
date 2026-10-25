@@ -8,11 +8,12 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.paths import SCANS_DIR as SCANS_DIR_PATH
+from app.core.paths import ensure_dir
 from app.models.scan_job import ScanJob, ScanJobStatus
 from app.services.nmap_capabilities import NMAP_INSTALL_HINT
 
-SCANS_DIR = Path("data/scans")
-SCANS_DIR.mkdir(parents=True, exist_ok=True)
+SCANS_DIR = ensure_dir(SCANS_DIR_PATH)
 
 
 def _artifact_path_for_scan(scan_id: str) -> Path:

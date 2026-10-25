@@ -1,377 +1,529 @@
-# NetPulse Enterprise - Developer Guide
+# NetPulse Developer Guide
 
-This guide covers setup, development, and deployment of NetPulse Enterprise — a self-hosted network monitoring console (NOC/SOC) for home labs and enterprise teams.
+Everything needed to run NetPulse on a workstation: install, configure, develop,
+test and ship. For the short version see [../README.md](../README.md).
 
----
-
-## Architecture Overview
-
-| Layer | Technology | Details |
-|-------|-----------|---------|
-| **Backend** | FastAPI (Python 3.11+) | Async REST API, SQLAlchemy ORM |
-| **Frontend** | Vue 3 + TypeScript + Vite | Tailwind CSS, ECharts, Cytoscape.js |
-| **Database** | PostgreSQL 16 (TimescaleDB image) | Primary data store |
-| **Auth** | JWT + Argon2id | RBAC (admin/viewer), Redis session cache |
-| **Background** | Celery Worker (embedded beat) | Latency monitoring, uptime checks (Redis broker) |
-| **AI (optional)** | OpenAI / Anthropic / Google | Chatbot, device analysis, smart command builder |
-
----
-
-## Prerequisites
-
-### All Platforms
-- Python 3.11+
-- Node.js 20+
-- PostgreSQL 14+
-- Nmap (for network scanning)
-
-### Linux
-- `tcpdump` and `iputils-ping` for packet capture and connectivity testing
-- Root/sudo for nmap raw socket scanning
-
-### Windows
-- Administrator access for Nmap installation
-- WSL2 recommended for full feature support
+- [1. What NetPulse is](#1-what-netpulse-is)
+- [2. Architecture](#2-architecture)
+- [3. Requirements](#3-requirements)
+- [4. Setup](#4-setup)
+- [5. `.env` reference](#5-env-reference)
+- [6. Email / SMTP alerts](#6-email--smtp-alerts)
+- [7. First run, accounts and roles](#7-first-run-accounts-and-roles)
+- [8. Project layout](#8-project-layout)
+- [9. Development loop](#9-development-loop)
+- [10. Database and migrations](#10-database-and-migrations)
+- [11. API map](#11-api-map)
+- [12. Data written to disk](#12-data-written-to-disk)
+- [13. Cross-platform notes](#13-cross-platform-notes)
+- [14. Troubleshooting](#14-troubleshooting)
 
 ---
 
-## Project Structure
+## 1. What NetPulse is
 
-```
-Netpulse/
-├── app/                        # FastAPI backend
-│   ├── api/
-│   │   ├── routes/             # Route modules
-│   │   │   ├── auth.py         # Authentication (login, register, me)
-│   │   │   ├── devices.py      # Device inventory CRUD
-│   │   │   ├── uptime.py       # Uptime monitoring endpoints
-│   │   │   ├── scripts.py      # Script execution + WebSocket
-│   │   │   ├── chatbot.py      # AI chatbot
-│   │   │   ├── scanning.py     # Scan profiles and history
-│   │   │   └── ...
-│   │   └── deps.py             # Dependency injection (DB, auth)
-│   ├── core/
-│   │   └── config.py           # Settings (env vars, defaults)
-│   ├── db/
-│   │   ├── base.py             # SQLAlchemy Base
-│   │   └── session.py          # Async engine + session factory
-│   ├── models/                 # SQLAlchemy models
-│   │   ├── user.py
-│   │   ├── device.py
-│   │   ├── uptime.py           # UptimeTarget + UptimeCheck
-│   │   └── ...
-│   ├── services/
-│   │   └── latency_monitor.py  # Background latency check logic
-│   └── main.py                 # App entry + lifespan (schema init only)
-├── frontend/                   # Vue 3 frontend
-│   ├── src/
-│   │   ├── assets/styles.css   # Theme system (Nightshade + SysAdmin)
-│   │   ├── components/         # PulsePanel, TopologyPanel, ChatBot, Toast
-│   │   ├── views/              # Dashboard, Devices, Scanning, Uptime, Logs, Settings
-│   │   ├── App.vue             # Root with sidebar navigation
-│   │   └── main.ts             # Vue app entry
-│   ├── vite.config.ts
-│   └── package.json
-├── scripts/                    # Automation scripts
-│   └── prebuilt/               # Pre-built scan/network scripts
-├── Dockerfile                  # Multi-stage production build
-├── docker-compose.yml          # Single-command deployment
-├── .dockerignore
-└── requirements.txt            # Python dependencies
-```
+A self-hosted network operations console. It discovers the hosts on the network
+the machine is attached to, keeps an inventory per network, scans them with nmap,
+streams logs and metrics to a Vue frontend, and can run prepared automation
+scripts against switches and relays. There is no public sign-up, no telemetry
+and no cloud dependency.
 
 ---
 
-## Quick Start (Local Development)
+## 2. Architecture
 
-### Step 1: Database Setup
+| Layer | Technology | Notes |
+|---|---|---|
+| API | FastAPI + Pydantic v2 + SQLAlchemy 2 (async) | `app/main.py` mounts every router under `/api` |
+| Database | PostgreSQL 13+ via `asyncpg` | Tables are created at startup from the SQLAlchemy metadata; `migrations/` holds the SQL for existing databases |
+| Cache / broker | Redis 7 (Memurai on Windows) | Login throttling, token revocation, Celery broker |
+| Background work | In-process asyncio loops + optional Celery worker | Latency sampling, discovery sweep reminders and vulnerability alerts run inside the API process; Celery is only needed for queued report/script jobs |
+| Discovery / scanning | nmap, Scapy, ARP, SNMP, SSH (paramiko/netmiko) | nmap is required; everything else degrades gracefully |
+| Frontend | Vue 3 + TypeScript + Vite + Tailwind | Served by the API from `frontend/dist`, or by Vite in development |
+| Auth | JWT (HS256) + Argon2id | Two roles only: `admin` and `viewer` |
+
+Request flow: browser → Vue SPA → `/api/...` (same origin in production; Vite
+proxies `/api` to `127.0.0.1:8000` in development) → routers → services → PostgreSQL.
+
+---
+
+## 3. Requirements
+
+| Component | Why |
+|---|---|
+| Python 3.11+ | Backend |
+| Node.js 20+ | Frontend build |
+| PostgreSQL 13+ | Inventory, scans, users, metrics |
+| Redis 7+ or Memurai | Throttling, sessions, Celery |
+| nmap | Discovery, port scans, vulnerability scripts |
+
+Optional: `tcpdump`/`npcap` for packet capture, `zeek` for PCAP summaries (both
+installed in the Docker images).
+
+---
+
+## 4. Setup
+
+Pick one path. Docker is the least surprising; the per-OS scripts install the
+same services natively and then build the frontend.
+
+### 4.1 Docker (all platforms)
 
 ```bash
-# Create PostgreSQL database
-psql -U postgres -c "CREATE USER netpulse WITH PASSWORD 'netpulse';"
-psql -U postgres -c "CREATE DATABASE netpulse OWNER netpulse;"
+git clone <repo-url> && cd netpulse
+cp .env.example .env      # edit SECRET_KEY before exposing the port
+docker compose up -d --build
+# http://localhost:8000
 ```
 
-### Step 2: Backend Setup
+Services: `db` (PostgreSQL, host port 5432), `redis` (6379), `app` (8000),
+`celery_worker` (queued jobs). The app container gets `NET_RAW`/`NET_ADMIN`, so
+discovery and SYN scans work without extra flags.
+
+Wipe and start over:
 
 ```bash
-cd Netpulse
+docker compose down -v && docker compose up -d --build   # or: bash scripts/docker_reset.sh
+```
 
-# Create virtual environment
+### 4.2 Linux (bare metal)
+
+```bash
+sudo ./scripts/setup_linux.sh     # apt / dnf / pacman: python, node, nmap, postgres, redis
+./scripts/run_stack.sh
+```
+
+`setup_linux.sh` creates the `netpulse` role and database, writes `.env` with a
+random `SECRET_KEY`, creates `.venv`, installs `requirements.txt`, and builds
+`frontend/dist`.
+
+`run_stack.sh` starts PostgreSQL and Redis if they are down, creates the database
+if a previous run missed it, and then hands the terminal to `scripts/stack.py`,
+which runs the API, the Celery worker and the Vite dev server in one window with
+`[api]` / `[worker]` / `[ui]` prefixes. Flags: `--verbose`, `--no-frontend`,
+`--no-worker`.
+
+Raw sockets: run the stack with `sudo`, or grant the capability once:
+
+```bash
+sudo setcap cap_net_raw,cap_net_admin+eip "$(command -v nmap)"
+```
+
+### 4.3 macOS (bare metal)
+
+```bash
+brew install --cask docker      # (skip if you use 4.1)
+./scripts/setup_macos.sh        # Homebrew: python@3.12, node, nmap, postgresql@16, redis
+./scripts/run_stack.sh
+```
+
+`setup_macos.sh` starts `postgresql@16` and `redis` through `brew services`,
+creates the role/database, writes `.env`, builds the venv and the frontend.
+`psql` from the keg-only PostgreSQL formula is put on `PATH` inside the script;
+add `export PATH="$(brew --prefix postgresql@16)/bin:$PATH"` to `~/.zshrc` if you
+want it in your own shells.
+
+macOS needs `sudo` for raw capture: `sudo .venv/bin/python scripts/stack.py`.
+
+### 4.4 Windows (bare metal)
+
+```cmd
+scripts\windows_setup.bat
+scripts\windows_run_stack.bat
+```
+
+- PostgreSQL and Memurai (Redis) must be installed first; the setup script
+  verifies nmap and creates the database.
+- Run the launcher from an **Administrator** prompt: ARP sweeps and SYN/OS
+  detection need raw socket access. Without it NetPulse falls back to the ARP
+  table and TCP connect scans.
+- Use PowerShell or `cmd`; Git Bash works for the Python commands but not for
+  the `.bat` launchers.
+
+### 4.5 Manual (any OS)
+
+Two terminals from the repository root. PostgreSQL and Redis must already run.
+
+```bash
 python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-# .venv\Scripts\activate   # Windows
-
-# Install dependencies
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+cp .env.example .env               # edit SECRET_KEY, POSTGRES_*, SMTP if used
 
-# Set environment variables
-export DATABASE_URL="postgresql+asyncpg://netpulse:netpulse@localhost:5432/netpulse"
-export SECRET_KEY="your-secure-random-key"
-export PULSE_GATEWAY_IP="192.168.1.1"
-export PULSE_ISP_IP="8.8.8.8"
-export PULSE_CLOUDFLARE_IP="1.1.1.1"
+# terminal 1 — API (also serves the built SPA)
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-# Start backend
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+# terminal 2 — frontend dev server
+cd frontend && npm install && npm run dev
 ```
 
-### Step 3: Frontend Setup
-
-```bash
-cd Netpulse/frontend
-
-# Install dependencies
-npm install
-
-# Start dev server (port 5000)
-npm run dev
-```
-
-### Step 4: Access the App
-
-1. Open http://localhost:5000
-2. Register an admin account (first user becomes admin)
-3. Configure network segments in Settings > Network
-4. Start monitoring
+Vite binds the first free port among **6969, 6970, 8888, 9999** and proxies
+`/api` (including WebSockets) to `127.0.0.1:8000`. In production the API serves
+`frontend/dist` itself, so `npm run build` is enough and no separate web server
+is required.
 
 ---
 
-## Themes
+## 5. `.env` reference
 
-NetPulse ships with two distinct visual themes:
+`.env` sits in the repository root and is read by `app/core/config.py`. Every
+key is optional except the database ones; unknown keys are ignored, so an old
+file keeps working after an upgrade.
 
-### Nightshade
-- Refined teal (#14b8a6) + violet (#a78bfa) accent palette
-- Glass-morphism panels with backdrop blur
-- Smooth micro-interactions and subtle particle animations
-- JetBrains Mono / Orbitron font pairing
-- Dark space background (#030712)
+### Core
 
-### SysAdmin
-- Navy background (#0a0f1a) with warm gold (#f59e0b) accents
-- Clean professional design, no animations
-- Inter font for readability
-- Elevated surface cards (#111827 → #1f2937)
+| Variable | Default | Purpose |
+|---|---|---|
+| `SECRET_KEY` | `CHANGE_ME_IN_PRODUCTION` | JWT signing key. Generate with `openssl rand -hex 32`. Changing it signs everyone out. |
+| `ENVIRONMENT` | `development` | Free-form label; `production` tightens nothing by itself. |
+| `CORS_ALLOW_ORIGINS` | Vite + API origins | JSON list or comma-separated. Only needed for the dev server or a split deployment. |
 
-Themes use CSS custom properties (`--np-accent-primary`, `--np-border`, `--np-surface`, etc.) ensuring complete separation with no color bleeding.
+### Database
 
----
+| Variable | Default | Purpose |
+|---|---|---|
+| `DATABASE_URL` | — | Full URL; wins over the `POSTGRES_*` keys. `postgresql://` is rewritten to `postgresql+asyncpg://`. |
+| `POSTGRES_HOST` | `db` | Use `localhost` for a bare-metal install (the `db` default is the Compose service name). |
+| `POSTGRES_PORT` | `5432` | |
+| `POSTGRES_DB` | `netpulse` | |
+| `POSTGRES_USER` | `netpulse` | |
+| `POSTGRES_PASSWORD` | — | Required in practice. |
+| `REDIS_URL` | `redis://redis:6379/0` | Use `redis://localhost:6379/0` outside Docker. |
 
-## Key Features
+### Monitoring and scanning
 
-### Dashboard
-- PulsePanel: Real-time internet health (latency, jitter, packet loss via ECharts)
-- TopologyPanel: Network graph visualization (Cytoscape.js)
-- Background latency monitoring every 15 seconds
+| Variable | Default | Purpose |
+|---|---|---|
+| `PULSE_GATEWAY_IP` | `auto` | Gateway for latency sampling; `auto` detects it. |
+| `PULSE_ISP_IP` | `8.8.8.8` | Internet latency target. |
+| `PULSE_CLOUDFLARE_IP` | `1.1.1.1` | Second internet target. |
+| `RESTRICTED_VLAN_CIDRS` | `[]` | CIDRs that must never receive active scans (JSON list). Passive discovery still works there. |
+| `ALLOWED_DHCP_SERVER_MACS` | — | Comma-separated MACs considered legitimate DHCP servers. |
+| `ENABLE_LATENCY_MONITOR` | `true` | In-process latency sampling loop. |
+| `ENABLE_SCHEDULED_TASKS` | `true` | In-process vuln alerts and the daily scan reminder. |
 
-### Devices & Uptime (Tabbed View)
-- **Inventory tab**: Device table with zone filtering, search, device detail panel, device analysis
-- **Uptime Monitor tab**: Scheduled ping/HTTP checks, status badges (UP/DOWN/DEGRADED), latency tracking, check history, manual check trigger
+### Packet capture
 
-### Scanning
-- Tabs: Presets (10 nmap scan types), Scan Profiles, Custom commands, History
-- Smart Command Builder for nmap
-- Real-time WebSocket output streaming
+| Variable | Default | Purpose |
+|---|---|---|
+| `PCAP_STORAGE_DIR` | `<temp>/netpulse-pcaps` | Where `.pcap` files are written (`/app/data/pcaps` in Docker). |
+| `PASSIVE_MONITOR_IFACE` | `""` | Empty = the interface carrying the default route. |
+| `ENABLE_PASSIVE_MONITOR` | `false` | Start the passive sniffer at boot. |
 
-### Logs (Silent Log Viewer)
-- Shows only network activity (DEBUG/INFO/WARNING) by default
-- ERROR/CRITICAL logs hidden — toggle to reveal, click to expand
-- Search and level filtering
+### SSH console
 
-### Syslog receiver
-An on-demand UDP collector for device logs, not a full syslog daemon.
+| Variable | Default | Purpose |
+|---|---|---|
+| `SSH_TRUST_ON_FIRST_USE` | `true` | Pin unknown host keys on first use. `false` refuses unknown hosts. |
+| `SSH_CONNECT_TIMEOUT` | `10` | Seconds. |
+| `MAX_SSH_SESSIONS_PER_USER` | `4` | |
+| `SSH_KNOWN_HOSTS_FILE` | `<repo>/data/known_hosts.json` | Pinned keys; delete a host's entry to re-trust it. |
 
-1. An admin starts it with `POST /api/syslog/start` (or the Logs page control). A UDP
-   listener binds `0.0.0.0:1514`, so port 1514 rather than 514: no root needed and no
-   collision with the host's own syslog daemon.
-2. Point network devices at `udp/<netpulse-host>:1514` (switches, routers, Linux rsyslog).
-3. Each datagram's `<PRI>` header is decoded into facility and severity; the timestamp,
-   hostname and message body are extracted when present (RFC 3164 style).
-4. Parsed events are stored in `syslog_events` (`timestamp`, `source_ip`, `facility`,
-   `severity`, `hostname`, `message`).
-5. `GET /api/syslog/messages` returns them paginated with severity, source and text
-   filters; `GET /status` reports running state and count; `DELETE /messages` clears.
+### First run and accounts
 
-Limits: UDP only (no TCP/TLS, so no delivery guarantee and no encryption), no RFC 5424
-structured data, no per-source rate limiting, and the listener state is process-local, so
-a backend restart means it must be started again.
+| Variable | Default | Purpose |
+|---|---|---|
+| `SETUP_TOKEN` | — | When set, the first-run setup screen requires this token. Set it whenever the port is reachable from outside the machine. |
+| `BOOTSTRAP_ADMIN_USERNAME` | `admin` | Used only by the bootstrap path. |
+| `BOOTSTRAP_ADMIN_PASSWORD` | — | Pre-creates the first administrator for scripted installs; they must change it at first sign-in. |
+| `BOOTSTRAP_ADMIN_EMAIL` | `admin@netpulse.local` | |
+| `TRUST_PROXY_HEADERS` | `false` | Honour `X-Forwarded-For`; only enable behind a proxy you control. |
 
-### Settings
-- Tabbed interface: General, Account, Alerts, Network, Scheduler, Backup
-- Account: attach or change your own email (password recovery needs one) and change your password
-- Email is the only alert channel; WhatsApp and AbuseIPDB were removed
+### Email alerts
 
-### AI Chatbot
-- Floating chat drawer with built-in knowledge base
-- External provider support (OpenAI, configurable)
-- File upload analysis (.pcap, .log, .json, .csv)
+See [section 6](#6-email--smtp-alerts): `ENABLE_EMAIL_ALERTS`, `SMTP_HOST`,
+`SMTP_PORT`, `SMTP_SECURITY`, `SMTP_USERNAME`, `SMTP_PASSWORD`,
+`ALERT_EMAIL_FROM`, `ALERT_EMAIL_TO`.
 
----
+### Automation and switch access
 
-## Background Tasks
+| Variable | Default | Purpose |
+|---|---|---|
+| `SCRIPTS_BASE_DIR` | `<repo>/scripts` | Script root (`/app/scripts` in Docker). |
+| `SWITCH_MGMT_HOST` / `_USER` / `_PORT` | — / — / `22` | Default switch for isolation playbooks. |
+| `SWITCH_MGMT_PASSWORD` | — | SSH password. |
+| `SWITCH_MGMT_ENABLE_SECRET` | — | Cisco enable secret. |
+| `SWITCH_MGMT_DEVICE_TYPE` | `cisco_ios` | Netmiko device type. |
+| `ROGUE_DHCP_KILLSWITCH_ENABLED` | `false` | Allow the rogue-DHCP script to shut a port. |
+| `ROGUE_DHCP_SWITCH_HOST` / `_USER` / `_PASSWORD` / `_TYPE` | — | Target for that script. |
 
-NetPulse runs recurring monitoring work via **Celery Beat + Celery workers** (with Redis as broker/backend).
-The FastAPI web process does **not** run long-lived asyncio loops.
+### AI assistant (optional)
 
-| Task | Schedule | Description |
-|------|----------|-------------|
-| Latency Monitor | every 10 seconds | Pings gateway, ISP, and Cloudflare IPs |
-| Uptime Monitor | every 10 seconds (per-target interval enforced) | Checks active uptime targets (ping or HTTP) |
-
-If you run the web server without `celery_worker` + `celery_beat`, dashboards will load but periodic metrics/uptime updates will not run.
-
----
-
-## API Reference
-
-### Authentication
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/auth/users` | Create an account (first admin on an empty instance, otherwise admin-only) |
-| POST | `/api/auth/login` | Login (returns JWT) |
-| GET | `/api/auth/me` | Current user info |
-| GET | `/api/auth/setup-status` | Whether the first-run setup screen is needed, and if a setup token is required |
-
-### Devices
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/devices` | List devices (filter by zone) |
-| GET | `/api/devices/{id}/detail` | Device detail with vulns, scripts, metrics |
-| GET | `/api/devices/zones` | List zones |
-
-### Uptime Monitoring
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/uptime` | Summary (all targets + counts) |
-| POST | `/api/uptime` | Create monitoring target |
-| DELETE | `/api/uptime/{id}` | Delete target + history |
-| GET | `/api/uptime/{id}/history` | Check history (up to 500) |
-| POST | `/api/uptime/{id}/check` | Trigger manual check |
-
-### Scanning & Scripts
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/scripts/execute` | Execute a script |
-| GET | `/api/scripts/history` | Script execution history |
+`OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY`. Without a key the assistant reports
+that no provider is configured and everything else keeps working.
 
 ---
 
-## Environment Variables
+## 6. Email / SMTP alerts
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | (required) |
-| `SECRET_KEY` | JWT signing key | (required) |
-| `PULSE_GATEWAY_IP` | Gateway IP for latency monitoring | `192.168.1.1` |
-| `PULSE_ISP_IP` | ISP DNS for latency monitoring | `8.8.8.8` |
-| `PULSE_CLOUDFLARE_IP` | Cloudflare DNS for latency monitoring | `1.1.1.1` |
-| `CORS_ALLOW_ORIGINS` | Allowed CORS origins | `["http://localhost:5000"]` |
-| `OPENAI_API_KEY` | OpenAI API key for AI assistant features | (optional) |
-| `ANTHROPIC_API_KEY` | Anthropic API key for AI assistant features | (optional) |
+Alerts are sent by the backend process itself (`app/services/alerts.py`) for new
+HIGH/CRITICAL vulnerabilities, device-health drops and completed scans. Nothing
+leaves the box until `ENABLE_EMAIL_ALERTS=true`.
 
----
+### 6.1 Minimum configuration
 
-## Docker Deployment
-
-### Quick Start
-
-```bash
-cd Netpulse
-
-# Build and start (PostgreSQL included)
-docker-compose up -d --build
-
-# Access at http://localhost:8000
-```
-
-### docker-compose.yml Services
-
-| Service | Image | Port | Description |
-|---------|-------|------|-------------|
-| `db` | timescale/timescaledb:latest-pg16 | 127.0.0.1:5432 | PostgreSQL with health check |
-| `redis` | redis:7-alpine | 127.0.0.1:6379 | Celery broker/backend |
-| `app` | Custom (multi-stage) | 8000 | Backend + built frontend |
-| `celery_worker` | Custom (multi-stage) | (none) | Executes background jobs + schedules periodic jobs (`--beat`) |
-
-### Environment Configuration
-
-Edit `docker-compose.yml` or create a `.env` file:
+All four keys are required; a missing one is logged and the send is skipped:
 
 ```env
-SECRET_KEY=your-secure-random-key-here
-PULSE_GATEWAY_IP=192.168.1.1
-PULSE_ISP_IP=8.8.8.8
-PULSE_CLOUDFLARE_IP=1.1.1.1
+ENABLE_EMAIL_ALERTS=true
+SMTP_HOST=smtp.example.com
+ALERT_EMAIL_FROM=netpulse@example.com
+ALERT_EMAIL_TO=you@example.com
 ```
 
-### Docker Commands
+`SMTP_USERNAME` + `SMTP_PASSWORD` are needed when the server requires login.
+
+### 6.2 Choosing `SMTP_SECURITY`
+
+| Value | Use it when |
+|---|---|
+| `auto` (default) | Port 465 → implicit TLS; every other port → STARTTLS, falling back to plaintext if the server does not offer it. |
+| `ssl` | Force implicit TLS (usually 465). |
+| `starttls` | Force STARTTLS and fail instead of falling back to plaintext (587). |
+| `none` | A local relay such as Postfix on 25 that has no encryption. |
+
+### 6.3 Provider settings that work
+
+| Provider | Host | Port | Security | Notes |
+|---|---|---|---|---|
+| Gmail / Workspace | `smtp.gmail.com` | 587 | `starttls` | Needs an **app password** (2-Step Verification must be on); the account password will be refused. |
+| Microsoft 365 | `smtp.office365.com` | 587 | `starttls` | Often blocked for basic auth on new tenants; use an SMTP AUTH-enabled mailbox or a relay. |
+| Fastmail | `smtp.fastmail.com` | 465 | `ssl` | App password. |
+| Local Postfix/Exim | `localhost` | 25 | `none` | No credentials; deliverability depends on the relay's DNS setup. |
+
+Example for Gmail:
+
+```env
+ENABLE_EMAIL_ALERTS=true
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURITY=starttls
+SMTP_USERNAME=you@gmail.com
+SMTP_PASSWORD=abcd efgh ijkl mnop     # 16-character app password
+ALERT_EMAIL_FROM=you@gmail.com
+ALERT_EMAIL_TO=alerts@example.com
+```
+
+### 6.4 Testing it
+
+Send one mail through the same code path the app uses (run from the repository
+root with the venv active):
 
 ```bash
-# Start in background
-docker-compose up -d --build
-
-# View logs
-docker-compose logs -f app
-
-# Stop
-docker-compose down
-
-# Stop and remove data
-docker-compose down -v
+python -c "import asyncio; from app.services.alerts import send_email_alert; \
+print(asyncio.run(send_email_alert('NetPulse test', 'SMTP works?')))"
 ```
 
-### Network Capabilities
+`True` means the server accepted the message. On failure `logs/api.log` holds one
+line saying which SMTP stage failed:
 
-The Docker container includes:
-- **nmap**: Port scanning and service detection
-- **tcpdump**: Packet capture
-- **ping**: Connectivity testing
-- Runs with `NET_RAW` + `NET_ADMIN` capabilities
+- `Email alert skipped: SMTP_HOST, ALERT_EMAIL_TO missing in .env` → keys not set.
+- `Email alert not sent (host:port, security=…): <reason>` → wrong password,
+  blocked port, certificate problem or DNS.
 
----
+Restart the API after editing `.env`: settings are read once at import time.
 
-## Security
+### 6.5 What the in-app switches do
 
-- Rate limiting: 200 requests/minute via SlowAPI
-- Security headers: X-Content-Type-Options, X-Frame-Options, CSP
-- Request size limit: 10MB
-- CORS protection with configurable origins
-- JWT tokens with configurable expiry
-- bcrypt password hashing
-- Non-root Docker user in production
+**Settings → Notifications** stores per-user preferences (critical-only, offline
+alerts, daily summary). The sender reads `.env` only, so those switches do not
+currently change what leaves the box.
 
 ---
 
-## Troubleshooting
+## 7. First run, accounts and roles
 
-### Database Connection
-- Verify `DATABASE_URL` is correct
-- Check PostgreSQL is running: `pg_isready`
-- Tables auto-create on startup via `Base.metadata.create_all`
+1. First start on an empty database shows **Set up this instance** on the sign-in
+   screen. Creating that account is the only way in.
+2. If `SETUP_TOKEN` is set, the screen also requires it.
+3. If `BOOTSTRAP_ADMIN_PASSWORD` is set, the account is created at boot and the
+   setup screen is skipped; the password must be replaced at first sign-in.
+4. Admins add everyone else from **Settings → Users**. Invited accounts get a
+   temporary password and choose their own at first sign-in.
+5. Roles: `admin` (everything) and `viewer` (read-only, cannot scan, run scripts,
+   restore backups or open a console). The last admin cannot be demoted.
 
-### Frontend Not Loading
-- Ensure Vite dev server is on port 5000
-- Check `vite.config.ts` has `allowedHosts: true`
-- Browser console for errors
-
-### Nmap Scans Failing
-- Verify nmap installed: `nmap --version`
-- Some scans need root/sudo
-- Check target firewall rules
-
-### Uptime Checks Failing
-- Ping checks need ICMP access (may be blocked in containers without NET_RAW)
-- HTTP checks support redirects and skip SSL verification
-- Minimum interval: 10 seconds
+Password recovery without SMTP: `POST /api/auth/forgot-password` writes the
+one-time code to the log as
+`PASSWORD RESET REQUESTED FOR <email>. RESET TOKEN: …`. The user enters that code
+on `/forgot-password`; it expires after one hour.
 
 ---
 
-## Development Tips
+## 8. Project layout
 
-- Backend auto-reloads with `--reload` flag
-- Frontend uses Vite HMR for instant updates
-- Database tables auto-create on startup
-- Theme changes persist in localStorage (`np-theme`)
-- Auth token stored in localStorage (`np-token`)
-- WebSocket at `/api/ws/metrics` for live metric streaming
+```
+app/
+├── api/
+│   ├── deps.py              # DB session, current user, role guards
+│   └── routes/              # One module per API area (see 11)
+├── core/
+│   ├── config.py            # Settings, .env loading, gateway detection
+│   ├── paths.py             # PROJECT_ROOT / data / scans / backups / logs
+│   ├── redis.py             # Redis helpers
+│   └── celery_app.py        # Celery instance (worker only)
+├── db/                      # Engine, session factory, Base
+├── models/                  # SQLAlchemy models
+├── services/                # Discovery, scanning, alerts, capture, routers
+├── main.py                  # App, middleware, lifespan loops, SPA serving
+└── tasks.py                 # Celery tasks
+frontend/
+├── src/{views,components,stores,router,utils}
+├── src/assets/styles.css    # Theme tokens (Nightshade / SysAdmin)
+└── vite.config.ts
+migrations/                  # SQL for existing databases
+scripts/
+├── setup_linux.sh  setup_macos.sh  windows_setup.bat
+├── run_stack.sh    windows_run_stack.bat
+├── stack.py                 # Runs API + worker + Vite with prefixed output
+└── prebuilt/                # Allowlisted automation scripts
+tests/                       # pytest suite (no external services required)
+```
+
+---
+
+## 9. Development loop
+
+| What | Command |
+|---|---|
+| Full stack, one window | `./scripts/run_stack.sh` (or `scripts\windows_run_stack.bat`) |
+| API only | `python -m uvicorn app.main:app --reload --port 8000` |
+| Frontend only | `cd frontend && npm run dev` |
+| Tests | `python -m pytest -q` (247 tests, SQLite, no services needed) |
+| Lint | `ruff check app/` |
+| Dead-code check | `vulture app/ vulture_whitelist.py --min-confidence 80` |
+| Type-check the SPA | `cd frontend && npx vue-tsc --noEmit` |
+| Production build | `cd frontend && npm run build` |
+
+`vulture_whitelist.py` lists callables the framework invokes (FastAPI
+dependencies, Celery tasks); add an entry there rather than deleting live code.
+
+CI (`.github/workflows/ci.yml`) runs ruff + vulture, the pytest suite and a
+`docker compose build --no-cache` smoke test on every push and pull request.
+
+---
+
+## 10. Database and migrations
+
+- Tables are created at startup with `Base.metadata.create_all`, so a fresh
+  database needs nothing.
+- Changes to an **existing** database are SQL files in `migrations/`, applied by
+  hand in filename order:
+
+  ```bash
+  psql "$DATABASE_URL" -f migrations/20261025_add_networks.sql
+  ```
+
+- `python scripts/apply_email_nullable.py` performs the one non-trivial data
+  migration (making `users.email` nullable).
+- The `networks` table and `devices.network_id` are also added at startup when
+  missing, so that upgrade needs no manual step.
+- Backups: **Settings → Backup** exports the inventory tables as JSON to
+  `data/backups/`; restore replaces those rows and requires typing `restore`.
+
+---
+
+## 11. API map
+
+All paths are under `/api`. Everything except `/health`, the first-run auth
+endpoints and the login route needs a bearer token.
+
+| Prefix | Provides |
+|---|---|
+| `/health` | Liveness, nmap/Redis/database capability report |
+| `/auth` | Login, logout, `me`, user administration, first-run setup status |
+| `/auth` (account) | `PATCH /me`, `POST /change-password` |
+| `/devices` | Inventory, zones, detail, deep scans, ping status, config files |
+| `/networks` | Remembered networks (rename, current network) |
+| `/network-segments` | Segment list and gateway detection |
+| `/nmap` | Profiles, plan/execute scans, job status, artifacts |
+| `/recon` | Discovery sweeps and passive ARP results |
+| `/device-actions` | Block/unblock, quarantine, isolation, ARP fixes |
+| `/uptime` | Targets, history, manual checks |
+| `/metrics` | Series for the dashboard charts |
+| `/insights` | Derived summaries for the overview |
+| `/logs` | Application log ring buffer, PDF export |
+| `/syslog` | Start/stop the UDP collector, query stored events |
+| `/captures`, `/pcaps`, `/packets` | Packet capture, PCAP index, Zeek summaries |
+| `/playbooks` | Router drivers, config drift, isolation playbooks |
+| `/reports` | Device and network PDFs |
+| `/scripts` | Allowlisted scripts, jobs, logs |
+| `/backup` | Export/list/download/delete/restore |
+| `/settings` | Per-user and system settings, environment status |
+| `/plugins` | Built-in plugin registry |
+| `/tools` | MobaXterm / Wireshark launch helpers, terminal bridge |
+| `/ws` | WebSocket log and SSH streams |
+
+Interactive documentation is served at `/docs` (OpenAPI at `/openapi.json`).
+
+---
+
+## 12. Data written to disk
+
+| Path | Contents |
+|---|---|
+| `data/scans/scan_*.txt` | nmap and playbook artifacts |
+| `data/backups/` | JSON exports |
+| `data/known_hosts.json` | Pinned SSH host keys |
+| `logs/api.log`, `logs/worker.log`, `logs/ui.log` | Per-service output from `stack.py` |
+| `frontend/dist/` | Production SPA served by the API |
+
+Paths are anchored to the checkout in `app/core/paths.py`, so starting the API
+from another directory no longer scatters files. Packet captures follow
+`PCAP_STORAGE_DIR` instead.
+
+---
+
+## 13. Cross-platform notes
+
+| Concern | Behaviour |
+|---|---|
+| Raw sockets | Linux: root or `CAP_NET_RAW`. Windows: Administrator. macOS: `sudo`. Without them, discovery uses the ARP table and nmap falls back to TCP connect scans. |
+| Gateway detection | Scapy first; then `/proc/net/route`, `ip route`, `route print` or `ipconfig` depending on the OS. All probes are guarded, so an unsupported OS simply reports "auto" as unresolved. |
+| Paths | No hard-coded `/tmp` or `/` separators in application code; `pathlib` joins and `tempfile.gettempdir()` decide. |
+| Shells | The bash helpers fall back to a Python socket probe where bash lacks `/dev/tcp` (macOS). |
+| Redis on Windows | Memurai, listening on 6379 with the same protocol. |
+| PostgreSQL exposure | A default install listens on every interface. NetPulse only connects from the same machine, so bind the server to loopback: `scripts\harden_postgres.ps1` on Windows, or `listen_addresses = 'localhost'` in `postgresql.conf` elsewhere. |
+| Line endings | `.gitattributes` normalises to LF in the repository; the `.bat` files are LF and run fine under `cmd`. |
+
+---
+
+## 14. Troubleshooting
+
+**`Could not connect to database` / `database "netpulse" does not exist`**
+Check `POSTGRES_HOST=localhost` outside Docker (the default `db` is a Compose
+hostname), confirm the service is up (`pg_isready`), and create the database if
+the setup script's step was skipped:
+`sudo -u postgres createdb -O netpulse netpulse`.
+
+**Sign-in page shows "Cannot reach the server"**
+The API is not answering on the origin the page was loaded from. In development
+check port 8000; in production check `docker compose logs app` or
+`logs/api.log`.
+
+**Scan jobs refuse to start**
+nmap is missing or unreadable. `nmap --version` must work for the user running
+the API; the health endpoint (`/api/health`) reports the detected capabilities
+and the install hint.
+
+**Discovery finds nothing**
+Traffic may be blocked: verify the machine is on that subnet, that the switch
+does not isolate client ports, and that the process can open raw sockets (see
+section 13). Wi-Fi client isolation is the most common cause on home networks.
+
+**Email alerts do not arrive**
+`ENABLE_EMAIL_ALERTS=false`, a missing `SMTP_HOST`/`ALERT_EMAIL_FROM`/
+`ALERT_EMAIL_TO`, or a rejected login. `logs/api.log` names the failing stage —
+see [section 6.4](#64-testing-it).
+
+**Frontend shows the API's JSON for a route**
+`frontend/dist` is stale or missing. Rebuild with `cd frontend && npm run build`
+and reload; the SPA is served from that directory.
+
+**Vite starts on an unexpected port**
+6969/6970/8888/9999 were all busy, so Vite used 5173. Add that origin to
+`CORS_ALLOW_ORIGINS` if the browser blocks API calls.
+
+**Sessions end early**
+`access_token_expire_minutes` defaults to 60 unless "Remember me" is ticked
+(30 days). Changing `SECRET_KEY` invalidates every token immediately.

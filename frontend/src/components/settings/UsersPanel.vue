@@ -183,7 +183,7 @@ onMounted(loadAccounts);
       <div class="flex flex-col">
         <span class="np-panel-title">Users</span>
         <span class="text-[0.7rem] text-[var(--np-text-dim)]">
-          Everyone who can sign in here. Public sign-up is off, so accounts start in this panel.
+          Accounts with access to this console.
         </span>
       </div>
     </header>
@@ -279,8 +279,8 @@ onMounted(loadAccounts);
     <div class="np-settings-section">
       <p class="np-settings-section-title">Existing accounts</p>
       <p class="mb-2 text-[0.68rem] text-[var(--np-text-dim)]">
-        Change a role inline. The new role applies on their next request, and
-        the last admin cannot be demoted.
+        Role changes apply immediately. The last remaining admin cannot be
+        demoted.
       </p>
       <p
         v-if="rosterMessage"
@@ -322,7 +322,7 @@ onMounted(loadAccounts);
             </p>
             <p class="truncate text-[0.68rem] text-[var(--np-text-dim)]">
               <template v-if="account.email">{{ account.email }}</template>
-              <template v-else>No email on file — recovery unavailable</template>
+              <template v-else>No email on file</template>
               · added {{ formatCreated(account.created_at) }}
             </p>
             <p v-if="rowError?.id === account.id" class="mt-1 text-[0.68rem] font-semibold text-[var(--np-danger)]">

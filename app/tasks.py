@@ -19,6 +19,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.celery_app import celery_app
 from app.core.config import settings
+from app.core.paths import SCANS_DIR, ensure_dir
 from app.services.alerts import process_vulnerability_alerts, send_system_alert
 from app.services.latency_monitor import monitor_latency
 from app.services.packet_capture import capture_to_pcap
@@ -603,7 +604,6 @@ def index_pcap_file(pcap_file_id: int, chunk_size: int = 5000) -> int:
                     # automatically analyzed by the Implicit AI Analyst.
                     try:
                         import uuid
-                        from pathlib import Path as _Path
 
                         from sqlalchemy import func, select
 
@@ -630,8 +630,7 @@ def index_pcap_file(pcap_file_id: int, chunk_size: int = 5000) -> int:
                         ]
 
                         scan_id = str(uuid.uuid4())
-                        scans_dir = _Path("data/scans")
-                        scans_dir.mkdir(parents=True, exist_ok=True)
+                        scans_dir = ensure_dir(SCANS_DIR)
                         artifact_path = scans_dir / f"scan_{scan_id}.txt"
 
                         now = datetime.utcnow()

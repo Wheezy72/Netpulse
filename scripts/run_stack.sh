@@ -69,8 +69,23 @@ env_value() {
 
 # Is something listening on a local TCP port? Auth is checked separately by
 # psql; a plain connect avoids pg_hba semantics getting in the way.
+# /dev/tcp is a bash built-in that macOS's bash 3.2 does not have, so fall back
+# to a one-line Python probe there instead of reporting every service as down.
 tcp_open() {
-  (exec 3<>"/dev/tcp/127.0.0.1/$1") >/dev/null 2>&1
+  if (exec 3<>"/dev/tcp/127.0.0.1/$1") >/dev/null 2>&1; then
+    return 0
+  fi
+  python - "$1" <<'PY' >/dev/null 2>&1
+import socket, sys
+s = socket.socket()
+s.settimeout(1)
+try:
+    s.connect(("127.0.0.1", int(sys.argv[1])))
+except OSError:
+    sys.exit(1)
+finally:
+    s.close()
+PY
 }
 
 # psql must run as the postgres OS account (peer auth refuses root). When this

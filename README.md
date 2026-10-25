@@ -177,6 +177,8 @@ Output stays on one terminal: every line is prefixed with the service that
 produced it (`[api]`, `[worker]`, `[ui]`) and the full text of each service is
 kept in `logs/api.log`, `logs/worker.log` and `logs/ui.log`. `--verbose` keeps
 per-request access logs, `--no-frontend` / `--no-worker` skip a service.
+See [docs/dev_guide.md](docs/dev_guide.md) for the full `.env` reference and
+SMTP setup.
 
 Notes for Linux:
 
@@ -194,12 +196,34 @@ Notes for Linux:
 </details>
 
 <details>
+<summary><b>macOS (Homebrew)</b></summary>
+
+```bash
+./scripts/setup_macos.sh
+./scripts/run_stack.sh
+```
+
+`setup_macos.sh` installs `python@3.12`, `node`, `nmap`, `postgresql@16` and
+`redis` through Homebrew, starts the two services with `brew services`, creates
+the database, writes `.env`, builds the venv and the frontend.
+
+macOS needs `sudo` for raw packet access: `sudo .venv/bin/python scripts/stack.py`.
+Without it, discovery falls back to the ARP table and nmap to TCP connect scans.
+
+</details>
+
+<details>
 <summary><b>Windows</b></summary>
 
 ```cmd
 scripts\windows_setup.bat
 scripts\windows_run_stack.bat
 ```
+
+Run the launcher from an **Administrator** prompt: ARP sweeps and SYN/OS
+detection need raw socket access. PostgreSQL plus Redis (or [Memurai](https://www.memurai.com/)
+on Windows) must be installed first; the setup script verifies nmap and creates
+the database.
 
 </details>
 
@@ -314,10 +338,12 @@ pytest tests/ -v
 ## What changed recently
 
 - Removed the Threat Intelligence (AbuseIPDB) and WhatsApp integrations, along with their settings.
+- Bare-metal macOS support (`scripts/setup_macos.sh`), and every path the backend writes is now anchored to the checkout instead of the working directory.
+- Dropped unused frontend dependencies and modules; the TypeScript build now type-checks clean (`vue-tsc --noEmit`).
 - nmap is now a hard requirement; scan profiles are planned from the capabilities of the installed nmap, including which vulnerability scripts exist.
 - The dashboard reports live ping status instead of a device-role breakdown.
 - Accounts can be created with a username only, and an email can be attached later in Settings, which is what enables password recovery. Passwords can be changed from the same place.
-- Removed the non-functional view-density setting and the Wireshark button; Settings is now in the top bar.
+- Removed the non-functional view-density setting; Settings is now in the top bar.
 - RBAC is now two roles, admin and viewer.
 
 ---

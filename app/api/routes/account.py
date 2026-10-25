@@ -26,12 +26,14 @@ from app.api.deps import (
     get_password_hash,
     verify_password,
 )
-from app.api.routes.auth import _normalize_email, token_subject_for
+from app.api.routes.auth import (
+    MIN_PASSWORD_LENGTH,
+    _normalize_email,
+    token_subject_for,
+)
 from app.models.user import User
 
 router = APIRouter()
-
-MIN_PASSWORD_LENGTH = 6
 
 # Distinct messages so the UI can place the error next to the right field.
 ERR_EMAIL_TAKEN = "That email is already in use."

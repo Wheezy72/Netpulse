@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_user, require_admin
 from app.core.celery_app import celery_app
+from app.core.paths import SCANS_DIR, ensure_dir
 from app.models.router_config_baseline import RouterConfigBaseline
 from app.models.scan_job import ScanJob, ScanJobStatus
 from app.models.user import User
@@ -394,8 +395,7 @@ async def config_drift_check(
         db.add(baseline)
 
     scan_id = str(uuid.uuid4())
-    scans_dir = Path("data/scans")
-    scans_dir.mkdir(parents=True, exist_ok=True)
+    scans_dir = ensure_dir(SCANS_DIR)
     artifact_path = scans_dir / f"scan_{scan_id}.txt"
 
     config_lines = config.splitlines()

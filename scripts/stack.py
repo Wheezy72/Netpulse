@@ -256,7 +256,12 @@ def _stop(processes: list[tuple[Service, subprocess.Popen[str]]]) -> None:
 def build_services(verbose: bool, with_worker: bool, with_frontend: bool) -> list[Service]:
     api_command = [
         sys.executable, "-m", "uvicorn", "app.main:app",
-        "--reload", "--host", "0.0.0.0", "--port", str(API_PORT),
+        "--reload",
+        # Watch the source only. Watching the project root made WatchFiles walk
+        # node_modules, logs/ and data/ too, and on Windows the reloader can
+        # wedge on that — after which edits silently stop restarting the API.
+        "--reload-dir", "app",
+        "--host", "0.0.0.0", "--port", str(API_PORT),
     ]
     if not verbose:
         # One line per HTTP request buried every real message.

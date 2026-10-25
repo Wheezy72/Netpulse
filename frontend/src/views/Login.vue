@@ -396,10 +396,7 @@ async function handleSubmit(): Promise<void> {
               Set up this instance
             </button>
           </template>
-          <!-- Only a confirmed answer may claim an account exists. -->
-          <p v-else-if="needsSetup === false" class="text-xs text-[var(--np-text-dim)]">
-            Accounts are created by an administrator in Settings → Users.
-          </p>
+          <!-- Only a confirmed answer may offer first-run setup. -->
         </div>
       </div>
 

@@ -92,11 +92,11 @@ function getWsBase(): string {
 }
 
 const terminalTitle = computed(() => (currentScanId.value ? `Scan ${currentScanId.value}` : "Toolbox Output Console"));
+const terminalToken = computed(() => getStoredToken() || null);
 const terminalStreamUrl = computed(() => {
-  if (!currentScanId.value) return null;
-  const token = getStoredToken();
-  if (!token) return null;
-  return `${getWsBase()}/api/ws/scans/${currentScanId.value}?token=${encodeURIComponent(token)}`;
+  if (!currentScanId.value || !terminalToken.value) return null;
+  // No token in the URL: it rides in the WebSocket subprotocol instead.
+  return `${getWsBase()}/api/ws/scans/${currentScanId.value}`;
 });
 
 const downloadUrl = computed(() => {
@@ -153,7 +153,7 @@ async function startScan(command: string): Promise<void> {
     return;
   }
   if (!target.value.trim()) {
-    emit("toast", "warning", "Please enter a target (IP or hostname).");
+    emit("toast", "warning", "Enter a target IP or hostname.");
     return;
   }
 
@@ -605,7 +605,7 @@ watch(
                   spellcheck="false"
                 ></textarea>
                 <p class="mt-1 text-[0.6rem] text-[var(--np-text-dim)]/70">
-                  Sent to the script as ctx.params. Each script documents the keys it accepts, e.g. "target" or "targets".
+                  Optional JSON arguments, for example {"target": "192.168.1.10"}.
                 </p>
               </div>
 
@@ -633,7 +633,7 @@ watch(
                     {{ scriptJobStatus }}
                   </span>
                 </div>
-                <pre class="text-[10px] font-mono leading-relaxed text-[var(--np-text-muted)] max-h-60 overflow-y-auto custom-scrollbar whitespace-pre-wrap p-2 rounded bg-[var(--np-surface-elevated)] border border-[var(--np-border-subtle)]">{{ scriptLogs || 'Select a script and start the job to view log telemetry.' }}</pre>
+                <pre class="text-[10px] font-mono leading-relaxed text-[var(--np-text-muted)] max-h-60 overflow-y-auto custom-scrollbar whitespace-pre-wrap p-2 rounded bg-[var(--np-surface-elevated)] border border-[var(--np-border-subtle)]">{{ scriptLogs || 'Select a script and start a job to see its output.' }}</pre>
               </div>
             </div>
 
@@ -664,10 +664,11 @@ watch(
 
       <!-- Real-time terminal output component -->
       <div class="flex-1 min-h-0 bg-[var(--np-surface)]">
-        <LiveTerminal 
-          :title="terminalTitle" 
-          :stream-url="terminalStreamUrl" 
-          :theme="props.theme" 
+        <LiveTerminal
+          :title="terminalTitle"
+          :stream-url="terminalStreamUrl"
+          :theme="props.theme"
+          :token="terminalToken"
         />
       </div>
     </div>

@@ -72,7 +72,7 @@ export default defineConfig({
             if (id.includes("echarts") || id.includes("zrender")) {
               return "vendor-echarts";
             }
-            if (id.includes("cytoscape") || id.includes("vis-network") || id.includes("@vue-flow")) {
+            if (id.includes("@vue-flow")) {
               return "vendor-graphs";
             }
             return "vendor";

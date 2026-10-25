@@ -100,13 +100,51 @@ async def _get_user_from_token(token: str, db: AsyncSession) -> User | None:
     return await resolve_user_from_subject(db, subject)
 
 
+async def _accept_with_protocol(websocket: WebSocket) -> None:
+    """Accept the handshake, echoing the token subprotocol when one was offered.
+
+    A browser that asked for subprotocols and got none still connects, but some
+    clients (and every test harness) treat an unselected subprotocol as a
+    mismatch, so pick the bearer one back.
+    """
+    offered = [
+        protocol
+        for protocol in (websocket.scope.get("subprotocols") or [])
+        if protocol.startswith("bearer.")
+    ]
+    await websocket.accept(subprotocol=offered[0] if offered else None)
+
+
+def _bearer_from_handshake(websocket: WebSocket) -> str:
+    """Find the access token on a WebSocket handshake.
+
+    Browsers cannot set headers on a WebSocket, so the three usable places are
+    the subprotocol list, an Authorization header (non-browser clients), and the
+    query string. The query string is last because it is the only one written
+    into proxy and access logs, where a long-lived token does not belong.
+
+    The subprotocol form is ``bearer.<jwt>``; the value is echoed back as the
+    selected subprotocol so browsers accept the handshake.
+    """
+    for protocol in websocket.scope.get("subprotocols") or []:
+        if protocol.startswith("bearer."):
+            return protocol[len("bearer.") :]
+
+    header = websocket.headers.get("authorization") or ""
+    scheme, _, value = header.partition(" ")
+    if scheme.lower() == "bearer" and value.strip():
+        return value.strip()
+
+    return websocket.query_params.get("token") or ""
+
+
 @router.websocket("/scripts/{job_id}")
 async def websocket_script_logs(websocket: WebSocket, job_id: int) -> None:
     """Stream ScriptJob logs and status over WebSocket (JSON events)."""
 
-    await websocket.accept()
+    await _accept_with_protocol(websocket)
 
-    token = websocket.query_params.get("token")
+    token = _bearer_from_handshake(websocket)
     if not token:
         await websocket.send_json({"event": "error", "message": "Missing token"})
         await websocket.close(code=4401)
@@ -173,9 +211,9 @@ async def websocket_script_logs(websocket: WebSocket, job_id: int) -> None:
 async def websocket_scan_output(websocket: WebSocket, scan_id: str) -> None:
     """Stream scan output as raw text frames suitable for xterm.js."""
 
-    await websocket.accept()
+    await _accept_with_protocol(websocket)
 
-    token = websocket.query_params.get("token")
+    token = _bearer_from_handshake(websocket)
     if not token:
         await websocket.send_text("[error] Missing token\n")
         await websocket.close(code=4401)
@@ -247,9 +285,9 @@ async def websocket_scan_output(websocket: WebSocket, scan_id: str) -> None:
 async def websocket_metrics(websocket: WebSocket) -> None:
     """Stream real-time dashboard metrics over WebSocket."""
 
-    await websocket.accept()
+    await _accept_with_protocol(websocket)
 
-    token = websocket.query_params.get("token")
+    token = _bearer_from_handshake(websocket)
     if not token:
         await websocket.send_json({"event": "error", "message": "Missing token"})
         await websocket.close(code=4401)
@@ -391,7 +429,7 @@ async def websocket_ssh(websocket: WebSocket) -> None:
     so neither the password nor the bearer token lands in an access log,
     a proxy log or browser history.
     """
-    await websocket.accept()
+    await _accept_with_protocol(websocket)
 
     ip = websocket.query_params.get("ip")
     if not ip:

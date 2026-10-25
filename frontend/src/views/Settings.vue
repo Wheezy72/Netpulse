@@ -526,7 +526,7 @@ onMounted(async () => {
         <div class="space-y-4">
           <div class="flex flex-col gap-1 border-b border-[var(--np-border-subtle)] pb-2">
             <h4 class="text-xs uppercase tracking-wider font-bold text-[var(--np-text)]">Dispatch Policy</h4>
-            <p class="text-[0.65rem] text-[var(--np-text-dim)]">Define when alerts should be fired.</p>
+            <p class="text-[0.65rem] text-[var(--np-text-dim)]">When alerts fire.</p>
           </div>
 
           <div class="grid grid-cols-1 gap-4">
@@ -584,14 +584,13 @@ onMounted(async () => {
       <div class="np-settings-section space-y-3">
         <p class="np-settings-section-title">Remembered networks</p>
         <p class="text-[0.7rem] text-[var(--np-text-dim)] font-semibold">
-          Detected from the subnet and the router's MAC address. Name them so you can tell
-          five homes that all use 192.168.1.x apart.
+          Rename the networks this install has detected.
         </p>
 
         <p v-if="networksLoading" class="text-[0.75rem] text-[var(--np-text-dim)] font-semibold">Loading...</p>
         <p v-else-if="networksError" class="text-[0.75rem] text-rose-400">{{ networksError }}</p>
         <p v-else-if="rememberedNetworks.length === 0" class="text-[0.75rem] text-[var(--np-text-dim)] font-semibold">
-          No network recorded yet — run a discovery sweep, or open this page while attached to one.
+          No network recorded yet. Run a discovery sweep.
         </p>
 
         <div v-else class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -731,14 +730,13 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Scan Scheduler</span>
-          <span class="text-[0.7rem] text-[var(--np-text-dim)] font-semibold">Configure automatic scans.</span>
+          <span class="text-[0.7rem] text-[var(--np-text-dim)] font-semibold">Unattended scans.</span>
         </div>
       </header>
 
       <div v-if="!isAdmin" class="np-settings-section">
         <p class="text-[0.75rem] text-[var(--np-text-dim)] font-semibold">
-          Only an administrator can schedule scans. A viewer account can see
-          the current schedule but cannot change it.
+          Scheduling is admin-only. Viewers can see the schedule.
         </p>
       </div>
 
@@ -776,7 +774,7 @@ onMounted(async () => {
             </label>
           </div>
           <p class="mt-2 text-[0.68rem] text-[var(--np-text-dim)]">
-            Leave all unchecked to scan every active segment, or the attached subnet when none are configured. Restricted subnets are always skipped.
+            Leave all unchecked to scan every active segment, or the attached subnet when none are configured. Restricted subnets are skipped.
           </p>
         </div>
 
@@ -844,7 +842,7 @@ onMounted(async () => {
           <p class="np-settings-section-title">Restore from Backup</p>
           <p class="flex items-center gap-1.5 text-[0.7rem] font-bold text-[var(--np-danger)]">
             <TriangleAlert class="h-3.5 w-3.5 shrink-0" :stroke-width="1.7" />
-            This will replace existing data in the restored tables.
+            This replaces current data with the contents of the backup.
           </p>
           <div class="mt-2 flex flex-col gap-2">
             <input type="file" accept=".json" @change="onBackupFileChange" class="np-neon-input rounded px-3 py-2 text-[0.8rem]" />

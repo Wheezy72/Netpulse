@@ -14,15 +14,23 @@ from app.api.routes import account
 
 class TestPasswordPolicy:
     def test_rejects_short_password(self):
-        with pytest.raises(ValueError, match="at least 6"):
+        with pytest.raises(ValueError, match=f"at least {account.MIN_PASSWORD_LENGTH}"):
             account._validate_new_password("abc")
+
+    def test_rejects_just_under_the_floor(self):
+        short = "a" * (account.MIN_PASSWORD_LENGTH - 1)
+        with pytest.raises(ValueError):
+            account._validate_new_password(short)
+
+    def test_accepts_exactly_the_floor(self):
+        account._validate_new_password("a" * account.MIN_PASSWORD_LENGTH)
 
     def test_rejects_reusing_current_password(self):
         with pytest.raises(ValueError, match="different"):
-            account._validate_new_password("longenough", "longenough")
+            account._validate_new_password("longenough-password", "longenough-password")
 
     def test_accepts_valid_password(self):
-        account._validate_new_password("longenough", "somethingelse")
+        account._validate_new_password("longenough-password", "somethingelse-entirely")
 
     def test_rejects_empty(self):
         with pytest.raises(ValueError):

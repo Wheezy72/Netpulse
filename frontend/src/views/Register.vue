@@ -235,8 +235,8 @@ async function handleSubmit(): Promise<void> {
     errorMessage.value = "Passwords do not match.";
     return;
   }
-  if (password.value.length < 6) {
-    errorMessage.value = "Password must be at least 6 characters.";
+  if (password.value.length < 12) {
+    errorMessage.value = "Password must be at least 12 characters.";
     return;
   }
   const candidateEmail = email.value.trim();
@@ -342,10 +342,10 @@ async function handleSubmit(): Promise<void> {
               autocomplete="off"
               spellcheck="false"
               class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 text-sm"
-              placeholder="From the server console or SETUP_TOKEN"
+              placeholder="Setup token"
             />
             <p class="mt-1.5 text-[0.65rem] leading-relaxed np-dim-text">
-              Required because SETUP_TOKEN is set on this server.
+              This server requires the setup token from its configuration.
             </p>
           </div>
 

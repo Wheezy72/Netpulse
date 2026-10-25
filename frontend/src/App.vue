@@ -429,8 +429,8 @@ async function handleForcePasswordChange() {
     forceError.value = "All fields are required.";
     return;
   }
-  if (forceNewPassword.value.length < 6) {
-    forceError.value = "New password must be at least 6 characters.";
+  if (forceNewPassword.value.length < 12) {
+    forceError.value = "New password must be at least 12 characters.";
     return;
   }
   if (forceNewPassword.value !== forceConfirmPassword.value) {
@@ -665,7 +665,7 @@ async function handleForcePasswordChange() {
           </div>
 
           <p v-if="lastScanId" class="np-accent-text mt-2 font-mono text-[0.6rem]">
-            Scan {{ lastScanId }} queued — watch live output in the Toolbox.
+            Scan {{ lastScanId }} queued.
           </p>
         </section>
 
@@ -693,7 +693,7 @@ async function handleForcePasswordChange() {
           </header>
 
           <p class="mt-3 text-xs leading-relaxed text-[var(--np-text-muted)]">
-            Finds hosts that answer and adds them to the inventory. No ports are scanned.
+            Adds every host that answers to the inventory. No port scan.
           </p>
 
           <label class="mt-4 block text-[0.6rem] font-mono uppercase tracking-wider text-[var(--np-text-dim)]">
@@ -708,7 +708,7 @@ async function handleForcePasswordChange() {
             @keyup.enter="runSweep"
           />
           <p class="mt-1.5 text-[0.65rem] text-[var(--np-text-dim)]">
-            Leave blank to sweep the subnets this machine is attached to.
+            Leave blank to sweep the networks this host is attached to.
           </p>
 
           <p
@@ -793,8 +793,7 @@ async function handleForcePasswordChange() {
                 <span class="np-accent-text font-mono text-[0.6rem]">Open</span>
               </button>
               <p class="mt-1 text-[0.6rem] text-[var(--np-text-dim)]">
-                Found on {{ hostLabel }} — it opens there, not in this browser.
-                Nothing is executed unless you click it.
+                Opens on {{ hostLabel }}.
               </p>
             </div>
 
@@ -810,8 +809,7 @@ async function handleForcePasswordChange() {
                 Download MobaXterm
               </a>
               <p v-if="isMobile" class="mt-2 text-[0.65rem] leading-relaxed text-[var(--np-text-dim)]">
-                MobaXterm is a desktop terminal — install it on {{ hostLabel }} to
-                use this button. On a phone, use the devices page to inspect hosts.
+                Install MobaXterm on {{ hostLabel }}.
               </p>
             </div>
           </template>
@@ -1004,8 +1002,7 @@ async function handleForcePasswordChange() {
                   {{ item.label }}
                 </button>
                 <p class="px-3 pt-1 text-[0.6rem] leading-relaxed text-[var(--np-text-dim)]">
-                  Scans and sweeps run on {{ hostLabel }}. MobaXterm and Wireshark
-                  open on that machine too — this phone has nothing to open.
+                  Runs on {{ hostLabel }}.
                 </p>
               </div>
 

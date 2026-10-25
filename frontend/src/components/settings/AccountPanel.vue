@@ -81,8 +81,8 @@ async function changePassword(): Promise<void> {
     passwordError.value = "Fill in both password fields.";
     return;
   }
-  if (newPassword.value.length < 6) {
-    passwordError.value = "New password must be at least 6 characters.";
+  if (newPassword.value.length < 12) {
+    passwordError.value = "New password must be at least 12 characters.";
     return;
   }
   if (newPassword.value !== confirmPassword.value) {
@@ -173,7 +173,7 @@ onMounted(async () => {
       <div>
         <p class="np-settings-section-title">Password</p>
         <p class="text-[0.7rem] text-[var(--np-text-dim)]">
-          Use at least 6 characters. You stay signed in on this device after the change.
+          Use at least 12 characters. You stay signed in on this device after the change.
         </p>
       </div>
 

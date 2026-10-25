@@ -498,7 +498,7 @@ onMounted(async () => {
             Find devices
           </p>
           <p class="mt-0.5 text-[0.7rem]" :style="{ color: 'var(--np-text-muted)' }">
-            Discovery only — finds hosts, scans no ports. Leave blank to sweep the attached subnets.
+            Leave blank to sweep the attached subnet.
           </p>
         </div>
         <input
@@ -545,7 +545,7 @@ onMounted(async () => {
           v-if="networks.length > 1"
           v-model="selectedNetwork"
           class="np-neon-input px-3 py-1.5 text-xs"
-          title="Devices are kept per network; pick which one to show"
+          title="Inventory is tracked per network"
         >
           <option v-for="n in networks" :key="n.id" :value="n.id">
             {{ n.name }}{{ n.is_current ? " (current)" : "" }}

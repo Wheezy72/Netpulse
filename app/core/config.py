@@ -6,6 +6,8 @@ from typing import List, Any
 from pydantic import Field, model_validator, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.paths import DATA_DIR, DEFAULT_PCAP_DIR, PROJECT_ROOT
+
 
 def detect_default_gateway() -> str:
     """Auto-detect the default gateway IP on Windows, Linux, or macOS.
@@ -196,13 +198,15 @@ class Settings(BaseSettings):
     # Legacy name for backward compatibility
     medical_iot_vlan_cidrs: List[str] = Field(default_factory=list)
 
-    # Paths
-    scripts_base_dir: str = "./scripts"
+    # Paths. Anchored to the checkout so the script allowlist resolves the same
+    # way no matter which directory the process was started from.
+    scripts_base_dir: str = str(PROJECT_ROOT / "scripts")
     scripts_uploads_subdir: str = "uploads"
     scripts_prebuilt_subdir: str = "prebuilt"
 
-    # Packet capture storage
-    pcap_storage_dir: str = "/tmp/pcaps"
+    # Packet capture storage. Defaults to a directory under the platform temp
+    # root, because a literal /tmp does not exist on Windows.
+    pcap_storage_dir: str = str(DEFAULT_PCAP_DIR)
     # Empty means "the interface carrying the default route", resolved at run
     # time. A literal "eth0" is wrong on most laptops and on every USB Wi-Fi
     # adapter (wlan0 / wlx…), where capture would otherwise fail silently.
@@ -226,7 +230,7 @@ class Settings(BaseSettings):
     max_ssh_sessions_per_user: int = 4
     # Pinned host keys, keyed by "ip:port". Kept on disk so a restart does not
     # silently re-trust whatever answers on that address next time.
-    ssh_known_hosts_file: str = "data/known_hosts.json"
+    ssh_known_hosts_file: str = str(DATA_DIR / "known_hosts.json")
 
     # Security / auth. env: SECRET_KEY
     signing_key: str = Field(default="CHANGE_ME_IN_PRODUCTION", validation_alias="SECRET_KEY")
@@ -329,7 +333,9 @@ class Settings(BaseSettings):
             "config_drift_report.py",
             "nmap_web_recon.py",
             "nmap_smb_audit.py",
-            "custom_probe.py",
+            "snmp_arp_discovery.py",
+            "snmp_topology_discovery.py",
+            "switch_security_audit.py",
             "malformed_syn_flood.py",
             "malformed_xmas_scan.py",
             "malformed_overlap_fragments.py",

@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_user, require_compliance_role, require_scan_role
+from app.core.paths import BACKUP_DIR
 from app.models.device import Device
 from app.models.user import User
 from app.services.icmp import ping as icmp_ping
@@ -654,7 +655,7 @@ async def get_device_configs(
     if device is None:
         raise HTTPException(status_code=404, detail="Device not found")
 
-    search_paths = [Path("/data/backups"), Path("data/backups")]
+    search_paths = [BACKUP_DIR]
     found_files = []
 
     prefixes = []
@@ -704,7 +705,7 @@ async def get_device_config_content(
     if ".." in filename or "/" in filename or "\\" in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
-    search_paths = [Path("/data/backups"), Path("data/backups")]
+    search_paths = [BACKUP_DIR]
     for base_path in search_paths:
         filepath = base_path / filename
         if filepath.exists() and filepath.is_file():
