@@ -1060,26 +1060,54 @@ async def upsert_discovered_hosts(
                     return row
 
         # 3. Randomised MAC behind a known hostname: phones/laptops rotate
-        #    both. Only an *unambiguous* match counts — two devices sharing
-        #    a generic name must never be fused.
+        #    both. A host that answered ICMP but left no ARP entry arrives
+        #    with no MAC at all, which is the same situation from the row's
+        #    point of view. Only an *unambiguous* match counts — two devices
+        #    sharing a generic name must never be fused.
         name = (host.hostname or "").strip().lower()
-        if name and is_locally_administered(host.mac_address):
+        if name and (not host.mac_address or is_locally_administered(host.mac_address)):
             candidates = [
                 row
                 for row in rows
                 if row.id not in claimed
                 and row.ip_address not in observed_ips
                 and (row.hostname or "").strip().lower() == name
-                and is_locally_administered(row.mac_address)
+                and (
+                    not row.mac_address
+                    or is_locally_administered(row.mac_address)
+                )
             ]
             if len(candidates) == 1:
                 return candidates[0]
 
         return None
 
+    # The same machine often answers twice in one sweep: once at the address
+    # its ARP entry still names, and once at the address it really holds. A
+    # host that replied to ICMP but has no ARP entry carries no MAC, so it
+    # cannot be told apart from a new device by address alone. If a single
+    # host in this sweep already reports the same hostname *with* a MAC, the
+    # MAC-less answer is the same machine and is dropped rather than turned
+    # into a twin row.
+    named_with_mac: Dict[str, int] = {}
+    for candidate in hosts:
+        if candidate.mac_address and (candidate.hostname or "").strip():
+            key = candidate.hostname.strip().lower()
+            named_with_mac[key] = named_with_mac.get(key, 0) + 1
+
     pending: List[Device] = []
     for host in hosts:
         device = _find_identity(host)
+
+        if device is None and not host.mac_address and host.hostname:
+            name = host.hostname.strip().lower()
+            if named_with_mac.get(name) == 1:
+                logger.info(
+                    "Skipping MAC-less duplicate at %s (hostname=%r)",
+                    host.ip_address,
+                    host.hostname,
+                )
+                continue
 
         if device is None:
             device = Device(
@@ -1162,11 +1190,14 @@ async def upsert_discovered_hosts(
         row_mac = (row.mac_address or "").upper()
         row_name = (row.hostname or "").strip().lower()
         mac_moved = bool(row_mac) and row_mac in survivor_macs
+        # A twin with no MAC is the common case when a host answered the sweep
+        # but had no ARP entry: nothing proves it is a different machine, and
+        # its unique hostname already points at the survivor.
         name_moved = (
             bool(row_name)
             and row_name in survivor_names
             and stale_name_counts.get(row_name) == 1
-            and is_locally_administered(row_mac)
+            and (not row_mac or is_locally_administered(row_mac))
         )
         if not (mac_moved or name_moved):
             continue

@@ -166,6 +166,88 @@ class TestUpsertDiscoveredHosts:
         assert device.device_type == "Router"  # a shallow sweep must not erase it
         assert device.mac_address == "AABBCC000002"  # a MAC change is a real signal
 
+    async def test_follows_a_randomised_host_that_lost_its_mac(self, db_session) -> None:
+        """A host found by ICMP alone has no ARP entry, so no MAC.
+
+        That used to look like a brand-new machine and created a second row
+        under the same name; the identity now follows the unique hostname.
+        """
+        from sqlalchemy import select
+
+        from app.models.device import Device
+
+        # 0x12 sets the locally-administered bit: a randomised/private MAC.
+        await upsert_discovered_hosts(
+            db_session,
+            [
+                DiscoveredHost(
+                    ip_address="10.0.0.20",
+                    mac_address="123A1FAA7FEB",
+                    hostname="Immortan",
+                    device_type="Windows Workstation",
+                )
+            ],
+        )
+
+        created, updated = await upsert_discovered_hosts(
+            db_session,
+            [DiscoveredHost(ip_address="10.0.0.22", hostname="Immortan")],
+        )
+        assert (created, updated) == (0, 1)
+
+        device = (await db_session.execute(select(Device))).scalars().one()
+        assert device.ip_address == "10.0.0.22"
+        assert device.device_type == "Windows Workstation"
+
+    async def test_retires_a_macless_twin_of_a_live_row(self, db_session) -> None:
+        """The ghost left by the old address-keyed upsert has no MAC at all."""
+        from sqlalchemy import select
+
+        from app.models.device import Device
+
+        db_session.add(
+            Device(ip_address="10.0.0.102", hostname="Immortan", device_type="Windows Workstation")
+        )
+        await db_session.flush()
+
+        await upsert_discovered_hosts(
+            db_session,
+            [
+                DiscoveredHost(
+                    ip_address="10.0.0.100",
+                    mac_address="123A1FAA7FEB",
+                    hostname="Immortan",
+                    device_type="Windows Workstation",
+                )
+            ],
+        )
+
+        rows = (await db_session.execute(select(Device))).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].ip_address == "10.0.0.100"
+
+    async def test_one_sweep_does_not_add_a_macless_twin(self, db_session) -> None:
+        """Same sweep, two answers from one machine: one address has the MAC."""
+        from sqlalchemy import select
+
+        from app.models.device import Device
+
+        created, updated = await upsert_discovered_hosts(
+            db_session,
+            [
+                DiscoveredHost(
+                    ip_address="10.0.0.100",
+                    mac_address="123A1FAA7FEB",
+                    hostname="Immortan",
+                ),
+                DiscoveredHost(ip_address="10.0.0.102", hostname="Immortan"),
+            ],
+        )
+        assert (created, updated) == (1, 0)
+
+        rows = (await db_session.execute(select(Device))).scalars().all()
+        assert [row.ip_address for row in rows] == ["10.0.0.100"]
+
     async def test_gateway_flag_latches(self, db_session) -> None:
         from sqlalchemy import select
 
