@@ -16,6 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.script_job import ScriptJob, ScriptJobStatus
+from app.services.proc import run_captured
+
+# Hard ceiling for a script job. The Celery task in front of this dies at 300s
+# anyway; failing here records why, with the log the operator needs to see.
+SCRIPT_JOB_TIMEOUT_SECONDS = 300.0
 
 
 _HOSTNAME_PATTERN = re.compile(
@@ -323,16 +328,11 @@ if __name__ == "__main__":
         temp_file_path.write_text(wrapper_code, encoding="utf-8")
 
         if settings.environment.lower() == "development":
-            # Bypass sandbox: execute Python code natively using asyncio subprocess
-            proc = await asyncio.create_subprocess_exec(
-                sys.executable,
-                str(temp_file_path.resolve()),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+            # Bypass sandbox: execute the generated wrapper with this interpreter.
+            argv: list[str] = [sys.executable, str(temp_file_path.resolve())]
         else:
             # Production: execute using secure gVisor sandbox containment scripts
-            proc = await asyncio.create_subprocess_exec(
+            argv = [
                 "docker",
                 "run",
                 "--runtime=runsc",
@@ -345,13 +345,26 @@ if __name__ == "__main__":
                 "python:3.11-slim",
                 "python",
                 f"/workspace/temp/{temp_file_path.name}",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+            ]
 
-        stdout_bytes, stderr_bytes = await proc.communicate()
-        stdout_str = stdout_bytes.decode(errors="replace")
-        stderr_str = stderr_bytes.decode(errors="replace")
+        # run_captured instead of asyncio.create_subprocess_exec: on Windows
+        # under ``uvicorn --reload`` the loop cannot spawn subprocesses, which
+        # made every script job fail with a bare NotImplementedError.
+        #
+        # Bounded: a prebuilt script that walks a dead host would otherwise sit
+        # in RUNNING forever, and the job row is the only place the operator can
+        # see that. 300s matches the Celery task time limit.
+        try:
+            returncode, stdout_str, stderr_str = await run_captured(
+                argv, timeout=SCRIPT_JOB_TIMEOUT_SECONDS
+            )
+        except TimeoutError:
+            log(
+                f"Script stopped after {SCRIPT_JOB_TIMEOUT_SECONDS}s "
+                "(no result; check the script's target and its own internal timeouts)"
+            )
+            job.status = ScriptJobStatus.FAILED
+            return
 
         result_dict = None
         for line in stdout_str.splitlines():
@@ -370,11 +383,11 @@ if __name__ == "__main__":
             if line.strip():
                 log(f"stderr: {line}")
 
-        if proc.returncode == 0:
+        if returncode == 0:
             job.result = result_dict if isinstance(result_dict, dict) else {"result": str(result_dict)}
             job.status = ScriptJobStatus.SUCCESS
         else:
-            log(f"Script process exited with non-zero code: {proc.returncode}")
+            log(f"Script process exited with non-zero code: {returncode}")
             job.status = ScriptJobStatus.FAILED
 
     except Exception as exc:  # noqa: BLE001

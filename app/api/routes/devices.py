@@ -23,6 +23,7 @@ from app.models.script_job import ScriptJob
 from app.models.vulnerability import Vulnerability, VulnerabilitySeverity
 from app.services.device_discovery import run_device_discovery
 from app.services.device_enrichment import scan_device_ports, upsert_device_ports
+from app.services.router_source import describe_configuration, verify_devices as run_verification
 from app.services.oui import is_locally_administered
 from app.services.os_fingerprint import resolve_device_os
 
@@ -43,6 +44,11 @@ class DeviceOut(BaseModel):
     zone: Optional[str]
     network_id: Optional[int] = None
     last_seen: Optional[datetime]
+    # Router verification: listed by the router's own ARP/DHCP tables on the
+    # last pull (True) or only answered the console's probes (False).
+    verified: bool = False
+    verified_at: Optional[datetime] = None
+    verified_source: Optional[str] = None
     created_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -108,6 +114,10 @@ class DiscoveryResponse(BaseModel):
     skipped_restricted: List[str]
     warnings: List[str]
     hosts: List[DiscoveredHostOut]
+    # Present when a router source is configured: how many devices the router
+    # itself lists (verified) versus only answered our probes (unverified), and
+    # which router addresses it knows that we have never seen (unmatched).
+    router_verification: Optional[Dict[str, Any]] = None
 
 
 class DeepScanResponse(BaseModel):
@@ -134,6 +144,7 @@ class TopologyNode(BaseModel):
     vulnerability_severity: Optional[str]
     vulnerability_count: int
     last_seen: Optional[datetime]
+    verified: bool = False
 
 
 class TopologyEdge(BaseModel):
@@ -250,6 +261,68 @@ async def discover_devices(
             DiscoveredHostOut.model_validate(host, from_attributes=True)
             for host in outcome.hosts
         ],
+        router_verification=outcome.router_verification,
+    )
+
+
+class VerifyResponse(BaseModel):
+    """One pass of the router-verified inventory."""
+
+    configured: bool
+    source: str
+    target: str
+    entries: int
+    verified: int
+    unverified: int
+    unmatched: List[str]
+    warnings: List[str]
+    error: Optional[str] = None
+    options: Dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post(
+    "/verify",
+    response_model=VerifyResponse,
+    summary="Ask the router which devices it lists, and mark them verified",
+    dependencies=[Depends(require_scan_role())],
+)
+async def verify_against_router(db: AsyncSession = Depends(db_session)) -> VerifyResponse:
+    """Reconcile the inventory against the router's own tables.
+
+    ``verified`` marks devices the router's ARP/DHCP tables list — it handed
+    out that address and knows that MAC. Rows without it are merely
+    *observed*: they answered our probes, which a stale neighbour entry also
+    does. ``unmatched`` lists router addresses we have never seen, which is the
+    gap worth looking at rather than something to ignore.
+
+    Runs automatically after every sweep when a source is configured;
+    ``ROUTER_SOURCE=off`` turns the whole feature off.
+    """
+    outcome = await run_verification(db)
+    options = describe_configuration()
+    if outcome is None:
+        return VerifyResponse(
+            configured=False,
+            source="off",
+            target="",
+            entries=0,
+            verified=0,
+            unverified=0,
+            unmatched=[],
+            warnings=["ROUTER_SOURCE is off."],
+            options=options,
+        )
+    return VerifyResponse(
+        configured=True,
+        source=outcome.source,
+        target=outcome.target,
+        entries=outcome.entries,
+        verified=outcome.verified,
+        unverified=outcome.unverified,
+        unmatched=outcome.unmatched,
+        warnings=outcome.warnings,
+        error=outcome.error,
+        options=options,
     )
 
 
@@ -336,6 +409,7 @@ async def get_topology(
                 vulnerability_severity=max_sev.value if max_sev else None,
                 vulnerability_count=vuln_count,
                 last_seen=d.last_seen,
+                verified=d.verified,
             )
         )
 
@@ -596,11 +670,28 @@ async def deep_scan_device(
         # subnet, failure) leaves the previously stored ports untouched.
         created, updated, removed = await upsert_device_ports(db, device.id, observations)
 
-    # Operating system. nmap's stack fingerprint is the strongest answer
-    # available; without nmap we fall back to the hostname, vendor and port
-    # signatures already known about this host rather than guessing.
+    # Operating system. Three signals, in order of how much they prove:
+    #   * service banners (self-reported): the only thing that can name a
+    #     distribution, because Kali, Debian and Ubuntu share one TCP/IP stack;
+    #   * nmap's stack fingerprint: the strongest generic family answer;
+    #   * TTL, vendor and open ports: coarse hints when nothing better answers.
     os_label: Optional[str] = None
     os_confidence: Optional[str] = None
+    banners = [
+        " ".join(
+            part
+            for part in (obs.service, obs.product, obs.version, obs.extra_info, obs.banner)
+            if part
+        )
+        for obs in observations
+    ]
+    ttl: Optional[int] = None
+    try:
+        reply = await icmp_ping(device.ip_address, timeout_s=1.0)
+        ttl = reply.ttl
+    except Exception:  # noqa: BLE001 - TTL is a hint, never a requirement
+        ttl = None
+
     try:
         os_label, os_confidence = await asyncio.to_thread(
             resolve_device_os,
@@ -609,6 +700,8 @@ async def deep_scan_device(
             vendor=device.vendor,
             open_ports=[obs.port for obs in observations if obs.state == "open"],
             mac_randomised=is_locally_administered(device.mac_address),
+            service_banners=banners,
+            ttl=ttl,
         )
     except Exception as exc:  # noqa: BLE001 - fingerprinting must not fail the scan
         warnings.append(f"OS detection failed: {exc}")

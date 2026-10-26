@@ -49,16 +49,128 @@ const playbooksLoading = ref(false);
 const selectedPlaybookId = ref("");
 const selectedPlaybook = computed(() => playbooks.value.find((p) => p.id === selectedPlaybookId.value) || null);
 
+// The last scan is remembered in localStorage so closing the page (or the
+// browser) does not lose the run: coming back shows its status and findings
+// instead of an empty console.
+const LAST_SCAN_KEY = "np:last-scan";
+
+interface ScanPort {
+  port: number;
+  protocol: string;
+  state: string;
+  service: string;
+  version: string;
+}
+
+interface ScanHost {
+  address: string;
+  hostname: string | null;
+  state: string;
+  latency_ms: number | null;
+  mac_address: string | null;
+  vendor: string | null;
+  os: string | null;
+  open_ports: number;
+  ports: ScanPort[];
+}
+
+interface ScanSummary {
+  exit_code?: number;
+  error?: string;
+  hosts?: ScanHost[];
+  hosts_up?: number;
+  hosts_total?: number;
+  open_ports?: number;
+  scan_seconds?: number | null;
+  duration_seconds?: number;
+  timeout_seconds?: number;
+}
+
+interface ScanMeta {
+  id: string;
+  command: string;
+  target: string;
+  scan_type: string;
+  started_at: string;
+  completed_at: string | null;
+  status: string;
+  result_summary?: ScanSummary | null;
+  ai_briefing?: string | null;
+}
+
 const currentScanId = ref<string | null>(null);
-const scanMeta = ref<{ id: string; status: string; ai_briefing?: string | null; result_summary?: Record<string, any> | null } | null>(null);
+const scanMeta = ref<ScanMeta | null>(null);
 const scanMetaLoading = ref(false);
+const scanHistory = ref<ScanMeta[]>([]);
+const historyLoading = ref(false);
+const expandedHost = ref<string | null>(null);
 let scanPollTimer: number | null = null;
+
+const scanRunning = computed(
+  () => !!scanMeta.value && ["pending", "running"].includes(scanMeta.value.status)
+);
+const scanHosts = computed<ScanHost[]>(() => scanMeta.value?.result_summary?.hosts ?? []);
+const scanHostsUp = computed(() => scanMeta.value?.result_summary?.hosts_up ?? scanHosts.value.length);
+const scanOpenPorts = computed(
+  () =>
+    scanMeta.value?.result_summary?.open_ports ??
+    scanHosts.value.reduce((total, host) => total + (host.open_ports || 0), 0)
+);
+
+function hostTitle(host: ScanHost): string {
+  return host.hostname ? `${host.hostname} (${host.address})` : host.address;
+}
+
+function statusClass(status: string): string {
+  if (status === "completed") return "np-brand-soft np-brand-text border np-brand-border";
+  if (status === "failed") return "bg-red-500/15 text-red-400 border border-red-500/30";
+  return "np-brand-soft np-brand-text border np-brand-border";
+}
+
+function rememberScan(id: string | null): void {
+  try {
+    if (id) window.localStorage.setItem(LAST_SCAN_KEY, id);
+    else window.localStorage.removeItem(LAST_SCAN_KEY);
+  } catch {
+    // Private-mode browsers have no storage; the page still works this session.
+  }
+}
 
 // --- Diagnostics State (TCP & MTR) ---
 const tcpHost = ref("");
 const tcpPort = ref(80);
 const tcpTesting = ref(false);
-const tcpResult = ref<{ latency_ms: number | null; error: string | null } | null>(null);
+// The probe reports what happened, not just "it failed": open / closed (host
+// up, nothing listening) / filtered (host up, packets dropped) / unreachable
+// (nothing answers at all).
+type TcpVerdict = "open" | "closed" | "filtered" | "unreachable" | "unknown";
+const tcpResult = ref<{
+  latency_ms: number | null;
+  error: string | null;
+  verdict?: TcpVerdict;
+  hint?: string | null;
+  host_reachable?: boolean | null;
+} | null>(null);
+
+function tcpVerdictLabel(verdict?: TcpVerdict): string {
+  switch (verdict) {
+    case "open": return "Open";
+    case "closed": return "Closed";
+    case "filtered": return "Filtered";
+    case "unreachable": return "Host not answering";
+    default: return "Inconclusive";
+  }
+}
+
+function tcpVerdictClass(verdict?: TcpVerdict): string {
+  switch (verdict) {
+    case "open": return "np-level-info";
+    case "closed": return "np-level-info";
+    case "filtered": return "np-level-warning";
+    case "unreachable": return "np-level-error";
+    default: return "np-level-info";
+  }
+}
 
 interface MtrHop {
   hop: number;
@@ -127,23 +239,72 @@ function stopScanPolling(): void {
   }
 }
 
+async function loadScanHistory(): Promise<void> {
+  historyLoading.value = true;
+  try {
+    const { data } = await axios.get<ScanMeta[]>("/api/nmap/history");
+    scanHistory.value = data;
+  } catch {
+    scanHistory.value = [];
+  } finally {
+    historyLoading.value = false;
+  }
+}
+
+async function fetchScanResult(id: string): Promise<ScanMeta | null> {
+  try {
+    const { data } = await axios.get<ScanMeta>(`/api/nmap/result/${id}`, {
+      params: { include_output: false },
+    });
+    scanMeta.value = data;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 function startScanPolling(): void {
   stopScanPolling();
   scanPollTimer = window.setInterval(async () => {
-    if (!currentScanId.value) return;
-    try {
-      const { data } = await axios.get(`/api/nmap/result/${currentScanId.value}`, {
-        params: { include_output: false },
-      });
-      scanMeta.value = data;
-      if (data.status === "completed" || data.status === "failed") {
-        stopScanPolling();
-        emit("toast", "success", `Scan ${currentScanId.value} completed!`);
+    const id = currentScanId.value;
+    if (!id) return;
+    const data = await fetchScanResult(id);
+    if (!data) return;
+    if (data.status === "completed" || data.status === "failed") {
+      stopScanPolling();
+      if (data.status === "completed") {
+        emit("toast", "success", `Scan finished: ${scanHostsUp.value} host(s) up.`);
+      } else {
+        emit("toast", "error", `Scan ${id} failed. Output is in the console.`);
       }
-    } catch {
-      // ignore transient polling errors
+      void loadScanHistory();
     }
   }, 2000);
+}
+
+async function selectScan(id: string): Promise<void> {
+  currentScanId.value = id;
+  rememberScan(id);
+  await fetchScanResult(id);
+  if (scanRunning.value) startScanPolling();
+  else isTerminalOpen.value = true;
+}
+
+async function restoreLastScan(): Promise<void> {
+  let id: string | null = null;
+  try {
+    id = window.localStorage.getItem(LAST_SCAN_KEY);
+  } catch {
+    id = null;
+  }
+  if (!id) return;
+  const data = await fetchScanResult(id);
+  if (!data) {
+    rememberScan(null);
+    return;
+  }
+  currentScanId.value = id;
+  if (data.status === "pending" || data.status === "running") startScanPolling();
 }
 
 // --- Execute Nmap Scan ---
@@ -164,9 +325,12 @@ async function startScan(command: string): Promise<void> {
       save_results: saveResults.value,
     });
     currentScanId.value = data.id;
+    rememberScan(data.id);
+    scanMeta.value = null;
     isTerminalOpen.value = true;
     startScanPolling();
-    emit("toast", "success", `Scan initialized: ${data.id}`);
+    void loadScanHistory();
+    emit("toast", "success", `Scan queued: ${data.id}`);
   } catch (e: any) {
     emit("toast", "error", e?.response?.data?.detail || "Failed to start scan");
   }
@@ -205,10 +369,13 @@ async function runTcpTest(): Promise<void> {
   tcpTesting.value = true;
   tcpResult.value = null;
   try {
-    const { data } = await axios.post<{ latency_ms: number | null; error: string | null }>(
-      "/api/insights/tcp-probe",
-      { host, port: tcpPort.value }
-    );
+    const { data } = await axios.post<{
+      latency_ms: number | null;
+      error: string | null;
+      verdict?: TcpVerdict;
+      hint?: string | null;
+      host_reachable?: boolean | null;
+    }>("/api/insights/tcp-probe", { host, port: tcpPort.value, timeout_s: 5 });
     tcpResult.value = data;
   } catch (err: any) {
     tcpResult.value = {
@@ -337,6 +504,8 @@ async function loadPlaybooks(): Promise<void> {
 onMounted(() => {
   loadPlaybooks();
   loadPrebuiltScripts();
+  void loadScanHistory();
+  void restoreLastScan();
 });
 
 onBeforeUnmount(() => {
@@ -352,6 +521,7 @@ watch(
     else {
       stopScanPolling();
       scanMeta.value = null;
+      rememberScan(null);
     }
   }
 );
@@ -417,6 +587,127 @@ watch(
                 <input id="save" v-model="saveResults" type="checkbox" class="rounded accent-[var(--np-accent)]" style="border-color: var(--np-border); background: var(--np-surface)" />
                 <label for="save" class="text-xs text-[var(--np-text-dim)]/60">Log results to database</label>
               </div>
+            </div>
+          </div>
+
+          <!-- Results. The console is only useful while a scan runs; these two
+               panels are what you come back to when it has finished. -->
+          <div v-if="scanMeta || scanHistory.length" class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <div class="lg:col-span-2 p-4 rounded-xl bg-[var(--np-thead-bg)] border border-[var(--np-border-subtle)] space-y-3">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <h3 class="text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">Last scan findings</h3>
+                  <p v-if="scanMeta" class="mt-1 font-mono text-[0.65rem] text-[var(--np-text-dim)]/70">
+                    {{ scanMeta.target }} · {{ scanMeta.scan_type }}
+                  </p>
+                  <p v-else class="mt-1 text-[0.65rem] text-[var(--np-text-dim)]/60">
+                    No scan loaded. Pick one from the list on the right.
+                  </p>
+                </div>
+                <span v-if="scanMeta" class="px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase" :class="statusClass(scanMeta.status)">
+                  {{ scanMeta.status }}
+                </span>
+              </div>
+
+              <div v-if="scanMeta" class="flex flex-wrap gap-2 text-[0.6rem] font-mono uppercase tracking-wider">
+                <span class="rounded border border-[var(--np-border-subtle)] px-2 py-1 text-[var(--np-text)]">
+                  {{ scanHostsUp }} host(s) up
+                </span>
+                <span class="rounded border border-[var(--np-border-subtle)] px-2 py-1 text-[var(--np-text)]">
+                  {{ scanOpenPorts }} open port(s)
+                </span>
+                <span v-if="scanMeta.result_summary?.scan_seconds" class="rounded border border-[var(--np-border-subtle)] px-2 py-1 text-[var(--np-text-dim)]">
+                  {{ scanMeta.result_summary.scan_seconds }}s in nmap
+                </span>
+                <span v-if="scanMeta.result_summary?.error" class="rounded border border-red-500/40 px-2 py-1 text-red-400">
+                  {{ scanMeta.result_summary.error }}
+                </span>
+              </div>
+
+              <p v-if="scanMeta && scanRunning" class="text-[0.65rem] text-[var(--np-text-dim)]/70 animate-pulse">
+                Running — findings appear here as soon as nmap finishes.
+              </p>
+
+              <div v-else-if="scanMeta && scanHosts.length === 0" class="text-[0.65rem] text-[var(--np-text-dim)]/70">
+                No hosts answered. That is a finding too: nothing on this target responded to the probe.
+              </div>
+
+              <div v-else-if="scanHosts.length" class="overflow-x-auto custom-scrollbar">
+                <table class="w-full text-[0.65rem] font-mono text-left">
+                  <thead>
+                    <tr class="text-[0.55rem] uppercase tracking-wider text-[var(--np-text-dim)]/60 border-b border-[var(--np-border-subtle)]">
+                      <th class="py-1.5 pr-2">Host</th>
+                      <th class="py-1.5 pr-2">Name</th>
+                      <th class="py-1.5 pr-2 text-right">Latency</th>
+                      <th class="py-1.5 pr-2 text-right">Open</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-[var(--np-border-subtle)]">
+                    <template v-for="host in scanHosts" :key="host.address">
+                      <tr
+                        class="cursor-pointer hover:bg-[var(--np-surface-elevated)]"
+                        @click="expandedHost = expandedHost === host.address ? null : host.address"
+                      >
+                        <td class="py-1.5 pr-2 text-[var(--np-text)]">{{ host.address }}</td>
+                        <td class="py-1.5 pr-2 text-[var(--np-text-muted)] truncate max-w-[140px]" :title="hostTitle(host)">
+                          {{ host.hostname || host.vendor || '—' }}
+                        </td>
+                        <td class="py-1.5 pr-2 text-right text-[var(--np-text-dim)]">
+                          {{ host.latency_ms !== null ? host.latency_ms + ' ms' : '—' }}
+                        </td>
+                        <td class="py-1.5 pr-2 text-right np-brand-text font-bold">{{ host.open_ports }}</td>
+                      </tr>
+                      <tr v-if="expandedHost === host.address">
+                        <td colspan="4" class="pb-2">
+                          <p v-if="host.ports.length === 0" class="text-[0.6rem] text-[var(--np-text-dim)]/60">
+                            No port detail (ping sweep).
+                          </p>
+                          <ul v-else class="space-y-0.5">
+                            <li v-for="p in host.ports" :key="p.port + p.protocol" class="flex gap-2 text-[0.6rem]">
+                              <span class="w-14 shrink-0 text-[var(--np-text)]">{{ p.port }}/{{ p.protocol }}</span>
+                              <span class="w-14 shrink-0" :class="p.state === 'open' ? 'np-brand-text' : 'text-[var(--np-text-dim)]/60'">{{ p.state }}</span>
+                              <span class="text-[var(--np-text-muted)]">{{ p.service }}</span>
+                              <span class="truncate text-[var(--np-text-dim)]/60" :title="p.version">{{ p.version }}</span>
+                            </li>
+                          </ul>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="lg:col-span-1 p-4 rounded-xl bg-[var(--np-thead-bg)] border border-[var(--np-border-subtle)] space-y-3">
+              <div class="flex items-center justify-between">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">Recent scans</h3>
+                <button class="text-[10px] font-mono text-[var(--np-text-dim)] hover:np-brand-text" @click="loadScanHistory">
+                  {{ historyLoading ? '…' : 'Refresh' }}
+                </button>
+              </div>
+              <p v-if="scanHistory.length === 0" class="text-[0.65rem] text-[var(--np-text-dim)]/60">
+                No scans yet.
+              </p>
+              <ul v-else class="max-h-64 overflow-y-auto custom-scrollbar space-y-1">
+                <li v-for="job in scanHistory" :key="job.id">
+                  <button
+                    class="w-full rounded border px-2 py-1.5 text-left transition-colors"
+                    :class="job.id === currentScanId ? 'np-brand-border np-brand-soft' : 'border-[var(--np-border-subtle)] hover:bg-[var(--np-surface-elevated)]'"
+                    @click="selectScan(job.id)"
+                  >
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="truncate font-mono text-[0.65rem] text-[var(--np-text)]">{{ job.target }}</span>
+                      <span class="shrink-0 text-[9px] font-mono uppercase" :class="job.status === 'failed' ? 'text-red-400' : job.status === 'completed' ? 'np-brand-text' : 'text-[var(--np-text-dim)]'">
+                        {{ job.status }}
+                      </span>
+                    </div>
+                    <div class="text-[0.55rem] font-mono uppercase tracking-wider text-[var(--np-text-dim)]/60">
+                      {{ job.scan_type }} · {{ job.result_summary?.hosts_up ?? 0 }} up ·
+                      {{ job.result_summary?.open_ports ?? 0 }} ports
+                    </div>
+                  </button>
+                </li>
+              </ul>
             </div>
           </div>
 
@@ -518,15 +809,17 @@ watch(
                 </button>
               </div>
 
-              <div v-if="tcpResult" class="p-3 rounded text-xs" :class="tcpResult.error ? 'np-level-error' : 'np-level-info'">
-                <p v-if="tcpResult.error" class="flex items-center gap-1.5">
-                  <CircleX class="h-3.5 w-3.5 shrink-0" :stroke-width="1.7" />
-                  Probe failed: {{ tcpResult.error }}
+              <div v-if="tcpResult" class="p-3 rounded text-xs space-y-1" :class="tcpVerdictClass(tcpResult.verdict)">
+                <p class="flex items-center gap-1.5 font-bold uppercase tracking-wide text-[0.6rem]">
+                  <CircleCheck v-if="tcpResult.verdict === 'open'" class="h-3.5 w-3.5 shrink-0" :stroke-width="1.7" />
+                  <CircleX v-else class="h-3.5 w-3.5 shrink-0" :stroke-width="1.7" />
+                  {{ tcpVerdictLabel(tcpResult.verdict) }}
+                  <span v-if="tcpResult.latency_ms !== null" class="font-mono normal-case font-normal">
+                    · {{ tcpResult.latency_ms }} ms handshake
+                  </span>
                 </p>
-                <p v-else class="flex items-center gap-1.5">
-                  <CircleCheck class="h-3.5 w-3.5 shrink-0" :stroke-width="1.7" />
-                  TCP handshake completed in <span class="font-bold font-mono">{{ tcpResult.latency_ms }} ms</span>
-                </p>
+                <p v-if="tcpResult.error" class="font-mono text-[0.65rem]">{{ tcpResult.error }}</p>
+                <p v-if="tcpResult.hint" class="text-[0.65rem] opacity-90">{{ tcpResult.hint }}</p>
               </div>
             </div>
 

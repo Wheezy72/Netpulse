@@ -113,6 +113,15 @@ class TcpProbeResponse(BaseModel):
     port: int
     latency_ms: Optional[float] = None
     error: Optional[str] = None
+    # What actually happened, instead of "it failed":
+    #   open       — the handshake completed
+    #   closed     — the host answered and refused (RST); nothing is listening
+    #   filtered   — no answer for the port, but the host itself replies to ping
+    #   unreachable— nothing answered at all: host down, or all traffic dropped
+    #   unknown    — the address could not even be resolved
+    verdict: str = "unknown"
+    host_reachable: Optional[bool] = None
+    hint: Optional[str] = None
 
 
 class Bottleneck(BaseModel):
@@ -140,8 +149,27 @@ class NetworkHealth(BaseModel):
     online_window_minutes: int = ONLINE_WINDOW_MINUTES
 
 
-async def _probe_tcp(host: str, port: int, timeout_s: float) -> tuple[Optional[float], Optional[str]]:
-    """Open a TCP connection and time it. Never raises."""
+# A refused connection arrives as WSAECONNREFUSED (10061) or, through
+# asyncio's Proactor transport, as WinError 1225 (ERROR_CONNECTION_REFUSED).
+# Both mean the same thing and neither is a ConnectionRefusedError subclass on
+# Windows, so they are matched explicitly.
+_REFUSED_ERRNOS = {10061, 1225}
+
+
+def _is_refusal(exc: OSError) -> bool:
+    return isinstance(exc, ConnectionRefusedError) or getattr(exc, "winerror", None) in _REFUSED_ERRNOS
+
+
+async def _probe_tcp(
+    host: str, port: int, timeout_s: float
+) -> tuple[Optional[float], Optional[str], str, Optional[bool]]:
+    """Open a TCP connection and time it. Never raises.
+
+    Returns ``(latency_ms, error, verdict, host_reachable)``. A timeout alone is
+    an unhelpful answer — a dropped SYN and a switched-off machine look
+    identical — so a timed-out probe is followed by one ICMP ping. That is what
+    turns "Timed out after 3s" into "the host does not answer at all".
+    """
     started = time.perf_counter()
     try:
         _reader, writer = await asyncio.wait_for(
@@ -149,17 +177,64 @@ async def _probe_tcp(host: str, port: int, timeout_s: float) -> tuple[Optional[f
             timeout=timeout_s,
         )
     except asyncio.TimeoutError:
-        return None, f"Timed out after {timeout_s:g}s"
+        reachable = await _host_answers(host)
+        if reachable:
+            return (
+                None,
+                f"No answer on port {port} after {timeout_s:g}s",
+                "filtered",
+                True,
+            )
+        return (
+            None,
+            f"No answer on port {port} after {timeout_s:g}s, and the host does not reply to ping",
+            "unreachable",
+            False,
+        )
     except OSError as exc:
-        return None, str(exc) or exc.__class__.__name__
+        if _is_refusal(exc):
+            return None, f"Connection refused on port {port}", "closed", True
+        return None, str(exc) or exc.__class__.__name__, "unknown", None
     except Exception as exc:  # noqa: BLE001 - reported to the caller, not raised
-        return None, str(exc) or exc.__class__.__name__
+        return None, str(exc) or exc.__class__.__name__, "unknown", None
 
     latency_ms = round((time.perf_counter() - started) * 1000, 2)
     writer.close()
     with suppress(Exception):
         await writer.wait_closed()
-    return latency_ms, None
+    return latency_ms, None, "open", True
+
+
+async def _host_answers(host: str) -> Optional[bool]:
+    """One ICMP probe. ``None`` when even asking is impossible."""
+    try:
+        from app.services.icmp import ping
+
+        outcome = await ping(host, count=1, timeout_s=1.0)
+    except Exception:  # noqa: BLE001 - a probe must never fail the request
+        return None
+    return bool(outcome.reachable)
+
+
+def _probe_hint(verdict: str, host: str, port: int) -> str:
+    if verdict == "open":
+        return f"Something is listening on {port}."
+    if verdict == "closed":
+        return (
+            f"The host answered and refused the connection, so nothing is listening on {port}. "
+            "That is a healthy answer — the machine is up."
+        )
+    if verdict == "filtered":
+        return (
+            f"The host is up but never answered on {port}: a firewall is dropping the packets, "
+            "or the service is bound to another interface."
+        )
+    if verdict == "unreachable":
+        return (
+            f"{host} did not answer the TCP attempt or a ping. Either it is switched off, "
+            "or a firewall drops everything from this machine."
+        )
+    return "The address could not be reached at all — check the spelling or the route."
 
 
 @router.post(
@@ -182,8 +257,16 @@ async def tcp_probe(payload: TcpProbeRequest) -> TcpProbeResponse:
             detail="Invalid host: supply a hostname or IP address",
         )
 
-    latency_ms, error = await _probe_tcp(host, payload.port, payload.timeout_s)
-    return TcpProbeResponse(host=host, port=payload.port, latency_ms=latency_ms, error=error)
+    latency_ms, error, verdict, reachable = await _probe_tcp(host, payload.port, payload.timeout_s)
+    return TcpProbeResponse(
+        host=host,
+        port=payload.port,
+        latency_ms=latency_ms,
+        error=error,
+        verdict=verdict,
+        host_reachable=reachable,
+        hint=_probe_hint(verdict, host, payload.port),
+    )
 
 
 @router.get(

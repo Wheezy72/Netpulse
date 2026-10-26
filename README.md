@@ -316,9 +316,9 @@ pytest tests/ -v
 <td>
 
 **Reports**
-- PDF exports
-- Device inventory
-- Application logs
+- PDF exports in the console's own palette
+- Inventory with a summary, breakdowns and a device table
+- Application logs and scan results, with "page n of m"
 
 </td>
 </tr>
@@ -337,6 +337,11 @@ pytest tests/ -v
 
 ## What changed recently
 
+- PDF reports were rebuilt on one design system (`app/services/pdf_report.py`): the console's ink/emerald palette, a dark cover band, computed summaries and breakdown bars instead of placeholder figures, and page numbers. Inventory, logs and scan reports share it.
+- OS identification now reads service banners and hostnames before nmap's stack fingerprint, and falls back to TTL and vendor. Kali can be named from a banner or hostname; a Kali VM is annotated "(virtual machine)" when the MAC belongs to a hypervisor.
+- The Logs page is a stream viewer: clickable level filters, a command-line style search (`/` to focus), expandable source details, copy-per-line and a status bar that says how fresh the view is.
+- The launcher console is quieter: repeated lines are collapsed, library chatter (scapy's route and pcap warnings, pip's upgrade notice) stays in the log files, and a single ready block prints the URLs. `.venv` setup messages are plain and only failures print a log.
+- The left rail's quick actions sit low rather than centred, the version label is gone, and the four actions carry animated glyphs (radar reticle, discovery ping, terminal caret, packet waveform). Quick-action dialogs are centred and no longer push the page down.
 - Removed the Threat Intelligence (AbuseIPDB) and WhatsApp integrations, along with their settings.
 - Bare-metal macOS support (`scripts/setup_macos.sh`), and every path the backend writes is now anchored to the checkout instead of the working directory.
 - Dropped unused frontend dependencies and modules; the TypeScript build now type-checks clean (`vue-tsc --noEmit`).

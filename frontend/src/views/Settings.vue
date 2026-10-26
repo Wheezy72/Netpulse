@@ -120,6 +120,17 @@ async function saveNetworkName(network: RememberedNetwork): Promise<void> {
   }
 }
 
+async function forgetNetwork(network: RememberedNetwork): Promise<void> {
+  if (!isAdmin.value || network.is_current) return;
+  if (!window.confirm(`Forget "${network.name}"? Devices stay in the inventory.`)) return;
+  try {
+    await axios.delete(`/api/networks/${network.id}`);
+    await loadRememberedNetworks();
+  } catch (e: any) {
+    networksError.value = e.response?.data?.detail || "Failed to forget network.";
+  }
+}
+
 // Network
 const segments = ref<NetworkSegment[]>([]);
 const segmentsLoading = ref(false);
@@ -627,14 +638,26 @@ onMounted(async () => {
               <button type="button" class="np-cyber-btn rounded px-2 py-1 text-[0.7rem]" @click="saveNetworkName(net)">Save</button>
               <button type="button" class="rounded px-2 py-1 text-[0.7rem] border border-[var(--np-border-subtle)] text-[var(--np-text-dim)]" @click="renamingNetworkId = null">Cancel</button>
             </div>
-            <button
-              v-else-if="isAdmin"
-              type="button"
-              class="mt-2 rounded px-2 py-1 text-[0.7rem] border border-[var(--np-border-subtle)] text-[var(--np-text-dim)] hover:text-[var(--np-text)] transition-colors"
-              @click="startRenamingNetwork(net)"
-            >
-              Rename
-            </button>
+            <div v-else-if="isAdmin" class="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                class="rounded px-2 py-1 text-[0.7rem] border border-[var(--np-border-subtle)] text-[var(--np-text-dim)] hover:text-[var(--np-text)] transition-colors"
+                @click="startRenamingNetwork(net)"
+              >
+                Rename
+              </button>
+              <!-- The network this host sits on cannot be forgotten: the next
+                   detection would recreate it and orphan its devices. -->
+              <button
+                v-if="!net.is_current"
+                type="button"
+                class="rounded px-2 py-1 text-[0.7rem] border border-red-500/40 text-red-500 hover:bg-red-600/20 transition-colors"
+                @click="forgetNetwork(net)"
+              >
+                Forget
+              </button>
+              <span v-else class="text-[0.6rem] text-[var(--np-text-dim)]">attached now</span>
+            </div>
           </div>
         </div>
       </div>

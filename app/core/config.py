@@ -1,4 +1,5 @@
 from functools import lru_cache
+import logging
 import sys
 import subprocess
 from typing import List, Any
@@ -16,14 +17,23 @@ def detect_default_gateway() -> str:
     a low-TTL traceroute probe to escape the bridge network namespace and
     detect the host physical default gateway IP.
     """
+    best_metric = 1 << 30
     detected_gw = None
 
-    # Try Scapy first
+    # Scapy logs "No route found for IPv4 destination 0.0.0.0 (no default
+    # route?)" every time its route helper is asked about a destination it
+    # cannot place. That is information for a packet-level debugger, not for
+    # every API and worker start on a machine without a default route, so the
+    # query below reads the routing table directly instead of asking for a
+    # lookup that logs.
     try:
         from scapy.all import conf
-        route = conf.route.route("0.0.0.0")
-        if route and len(route) >= 3 and route[2] and route[2] != "0.0.0.0":
-            detected_gw = str(route[2])
+
+        for net, mask, gateway, _iface, _output, metric in conf.route.routes:
+            if not net and not mask and gateway and gateway != "0.0.0.0":
+                candidate = str(gateway)
+                if detected_gw is None or metric < best_metric:
+                    detected_gw, best_metric = candidate, metric
     except Exception:
         pass
 
@@ -258,6 +268,52 @@ class Settings(BaseSettings):
     # request must also present this token.
     setup_token: str | None = Field(default=None, validation_alias="SETUP_TOKEN")
 
+    # Router-verified inventory. env: ROUTER_*
+    #
+    # An ARP/ICMP sweep can only prove that *something* answered — it cannot
+    # tell a phone that is really online from a stale neighbour entry, and it
+    # cannot see a device the console's own segment does not carry. The
+    # router's tables answer that question directly: it handed out the lease
+    # and it has the MAC in its ARP/bridge table.
+    #
+    #   ROUTER_SOURCE=auto | snmp | routeros | dnsmasq | off
+    #     auto     — the default: probe the detected gateway over SNMP with the
+    #                 default community, use a local dnsmasq/Pi-hole leases file
+    #                 if one exists, and the RouterOS API when ROUTEROS_URL is
+    #                 set. Nothing else to configure.
+    #     snmp     — IP-MIB arpTable of ROUTER_HOST only
+    #     routeros — MikroTik API (ARP + DHCP leases)
+    #     dnsmasq  — a leases file (ROUTER_DHCP_LEASES_FILE, or auto-discovered)
+    #     off      — never query a router
+    #
+    # Vendor notes: MikroTik, Huawei (business/CPE with SNMP enabled), ZTE,
+    # Ubiquiti, Cisco, TP-Link business and OpenWrt all speak SNMPv2c. Cheap
+    # consumer Tenda boxes usually do not — enable SNMP under Administration →
+    # SNMP if the router offers it, otherwise those devices simply stay
+    # "observed" and the console says so instead of guessing.
+    router_source: str = "auto"
+    # Empty means "the detected gateway", which is the right router on a
+    # single-gateway home or office LAN.
+    router_host: str = ""
+    router_snmp_port: int = 161
+    # Community strings are shared secrets; keep them out of code.
+    router_snmp_community: str | None = Field(default=None, validation_alias="ROUTER_SNMP_COMMUNITY")
+    # Short by default: this runs after every sweep, and an unresponsive or
+    # SNMP-less router must not hold the inventory up. One retry because a
+    # busy router drops the first datagram far more often than it is absent,
+    # and the walk uses GETBULK so a retry costs one packet, not the table.
+    router_snmp_timeout: float = 1.5
+    router_snmp_retries: int = 1
+    # MikroTik API endpoint, e.g. ROUTEROS_URL=192.168.1.1:8728
+    routeros_url: str = ""
+    routeros_user: str = ""
+    routeros_pass: str | None = Field(default=None, validation_alias="ROUTEROS_PASSWORD")
+    # dnsmasq/pi-hole leases: "<expiry> <mac> <ip> <hostname> <client-id>"
+    router_dhcp_leases_file: str = ""
+    # Seconds between automatic pulls. 0 keeps verification on demand and
+    # after each discovery sweep only.
+    router_verify_interval: int = 300
+
     # Alerting / notifications (email only). env: SMTP_PASSWORD
     enable_email_alerts: bool = False
     smtp_host: str | None = None
@@ -378,6 +434,22 @@ class Settings(BaseSettings):
     @property
     def secret_key(self) -> str:
         return self.signing_key
+
+    @property
+    def router_source_configured(self) -> bool:
+        """True when verification should run. ``auto`` is on by default.
+
+        It probes the detected gateway with a read-only SNMP walk and falls
+        back cleanly when the router does not answer, so leaving it on costs at
+        most a one-second timeout per sweep. The switch is ``off`` — spelled
+        any of those four ways, or set to an empty value.
+        """
+        return self.router_source.strip().lower() not in {
+            "",
+            "off",
+            "none",
+            "disabled",
+        }
 
     @property
     def postgres_password(self) -> str | None:

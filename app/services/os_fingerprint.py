@@ -56,9 +56,85 @@ APPLE_VENDORS = {"apple"}
 MICROSOFT_VENDORS = {"microsoft"}
 LINUX_VENDORS = {"raspberry pi foundation", "raspberry pi"}
 
+# Hypervisor OUIs. A virtual machine answers exactly like the OS it runs, so
+# these do not change the family; they explain why a Kali box is a Kali box and
+# let the label say so ("Linux (virtual machine)") instead of pretending the
+# stack fingerprint identified the distro.
+HYPERVISOR_VENDORS = {
+    "vmware",
+    "virtualbox",
+    "qemu",
+    "xensource",
+    "microsoft corporation",
+    "parallels",
+    "innotek gmbh",
+}
+
+# Distribution signatures. These are self-reported strings -- a service banner,
+# an mDNS record, a DHCP hostname -- and self-reported beats inferred, because
+# nothing else on a LAN can tell Kali from Debian: they run the same kernel, so
+# their TCP/IP stacks are byte-for-byte identical. nmap can say "Linux 5.x";
+# only a banner or a hostname can say "Kali".
+DISTRO_SIGNATURES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("kali",), "Kali Linux"),
+    (("raspbian", "raspberry pi os", "raspberrypi"), "Raspberry Pi OS"),
+    (("ubuntu", "canonical"), "Ubuntu"),
+    (("debian", "deb12", "deb11", "deb10"), "Debian"),
+    (("almalinux",), "AlmaLinux"),
+    (("rocky linux", "rockylinux"), "Rocky Linux"),
+    (("centos",), "CentOS"),
+    (("red hat", "rhel", "redhat"), "Red Hat"),
+    (("fedora",), "Fedora"),
+    (("alpine",), "Alpine Linux"),
+    (("arch linux", "manjaro"), "Arch Linux"),
+    (("opensuse", "suse"), "openSUSE"),
+)
+
+# A virtual-machine vendor plus a Unix banner is still Linux; the hint is only
+# used to annotate the label, never to replace it.
+VM_SUFFIX = " (virtual machine)"
+
 
 def _clean(value: Optional[str]) -> str:
     return (value or "").strip().lower()
+
+
+def os_label_from_banner(banner: str) -> Optional[str]:
+    """A distribution name when *banner* names one, else ``None``.
+
+    Banners are the one signal that separates distributions: OpenSSH built by
+    Debian says ``OpenSSH_9.2p1 Debian-2``, an Ubuntu package says ``Ubuntu``,
+    and a Kali host usually says either, so Kali wins only when it is spelled
+    out. That is deliberate -- guessing "Kali" from Debian would mislabel every
+    Debian server on the LAN.
+    """
+    text = _clean(banner)
+    if not text:
+        return None
+    for needles, label in DISTRO_SIGNATURES:
+        if any(needle in text for needle in needles):
+            return label
+    return None
+
+
+def os_family_from_ttl(ttl: Optional[int]) -> OSGuess:
+    """Coarse family from the reply's TTL.
+
+    TTL is decremented per hop, so the initial value is rounded up to the
+    nearest conventional maximum. 64 = Unix-like, 128 = Windows, 255 = network
+    equipment. This is a hint, never proof: it cannot name a distribution and a
+    middlebox can rewrite it.
+    """
+    if not ttl or ttl <= 0 or ttl > 255:
+        return None, None
+    if ttl <= 32:
+        # Rare initial values; most likely a heavily routed 64.
+        return None, None
+    if ttl <= 64:
+        return "Linux/Unix", "low"
+    if ttl <= 128:
+        return "Windows", "low"
+    return "Network device", "low"
 
 
 def infer_os_from_host(
@@ -67,6 +143,8 @@ def infer_os_from_host(
     vendor: Optional[str] = None,
     open_ports: Iterable[int] = (),
     mac_randomised: bool = False,
+    service_banners: Iterable[str] = (),
+    ttl: Optional[int] = None,
 ) -> OSGuess:
     """Infer ``(os, confidence)`` from signals other than nmap's fingerprint.
 
@@ -76,8 +154,15 @@ def infer_os_from_host(
     host = _clean(hostname)
     vend = _clean(vendor)
     ports = {int(p) for p in open_ports if p}
+    is_vm = any(marker in vend for marker in HYPERVISOR_VENDORS)
 
-    # 1. Hostname: self-reported and specific.
+    # 1. Service banners: the only signal that names a distribution.
+    for banner in service_banners:
+        label = os_label_from_banner(str(banner))
+        if label:
+            return label + (VM_SUFFIX if is_vm else ""), "high"
+
+    # 2. Hostname: self-reported and specific.
     if host:
         if "android" in host or host.startswith(("sm-", "pixel-")):
             return "Android", "high"
@@ -87,10 +172,12 @@ def infer_os_from_host(
             return "macOS", "high"
         if host.startswith(("desktop-", "laptop-", "win-", "ms surface")) or "-pc" in host:
             return "Windows", "high"
-        if any(token in host for token in ("ubuntu", "debian", "fedora", "arch", "raspberrypi", "kali")):
+        if "kali" in host:
+            return "Kali Linux" + (VM_SUFFIX if is_vm else ""), "high"
+        if any(token in host for token in ("ubuntu", "debian", "fedora", "arch", "raspberrypi")):
             return "Linux", "high"
 
-    # 2. Ports: a platform's own services.
+    # 3. Ports: a platform's own services.
     if PORT_WINDOWS & ports:
         return "Windows", "high"
     if PORT_ADB & ports:
@@ -102,7 +189,16 @@ def infer_os_from_host(
         # Linux from macOS needs nmap's fingerprint.
         return "Linux", "medium"
 
-    # 3. Vendor — only trustworthy on a real (non-randomised) MAC.
+    # 4. TTL, when nothing more specific answered. A Unix-like TTL is exactly
+    # what a Kali VM answers with, so it supports "Linux" without inventing a
+    # distribution the network cannot see.
+    ttl_family, ttl_confidence = os_family_from_ttl(ttl)
+    if ttl_family:
+        if ttl_family == "Linux/Unix" and is_vm:
+            return "Linux" + VM_SUFFIX, "medium"
+        return ttl_family, ttl_confidence
+
+    # 5. Vendor — only trustworthy on a real (non-randomised) MAC.
     if mac_randomised:
         return None, None
     if vend in MICROSOFT_VENDORS:
@@ -126,6 +222,17 @@ def nmap_os_detect(ip_address: str, *, timeout_seconds: int = 60) -> OSGuess:
     """
     if shutil.which("nmap") is None:
         return None, None
+
+    # -O needs raw sockets. Without Npcap/root nmap fails the whole scan with
+    # "Failed to open device", which used to cost the caller a dozen seconds
+    # before falling back anyway. Ask the capability probe first.
+    try:
+        from app.services.nmap_capabilities import detect_capabilities
+
+        if not detect_capabilities().privileged:
+            return None, None
+    except Exception:  # noqa: BLE001 - capability probe is advisory
+        pass
 
     try:
         import nmap  # python-nmap
@@ -172,15 +279,38 @@ def resolve_device_os(
     open_ports: Iterable[int] = (),
     mac_randomised: bool = False,
     prefer_nmap: bool = True,
+    service_banners: Iterable[str] = (),
+    ttl: Optional[int] = None,
 ) -> OSGuess:
-    """Best available OS label for one host, nmap first when it is usable."""
-    if prefer_nmap:
-        label, confidence = nmap_os_detect(ip_address)
-        if label:
-            return label, confidence
-    return infer_os_from_host(
+    """Best available OS label for one host.
+
+    Order is deliberate. A banner or hostname that names a distribution wins,
+    because that is the only evidence that can distinguish Kali from Debian.
+    nmap's stack fingerprint answers next -- it is the strongest generic answer
+    and the only one that can say "Windows 10" without ports. TTL and vendor
+    fill in the rest.
+    """
+    banners = [str(banner) for banner in service_banners if banner]
+    label, confidence = infer_os_from_host(
         hostname=hostname,
+        open_ports=open_ports,
+        mac_randomised=mac_randomised,
+        service_banners=banners,
+    )
+    if label and confidence == "high":
+        return label, confidence
+
+    if prefer_nmap:
+        nmap_label, nmap_confidence = nmap_os_detect(ip_address)
+        if nmap_label:
+            return nmap_label, nmap_confidence
+
+    if label:
+        return label, confidence
+
+    return infer_os_from_host(
         vendor=vendor,
         open_ports=open_ports,
         mac_randomised=mac_randomised,
+        ttl=ttl,
     )

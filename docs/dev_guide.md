@@ -17,6 +17,7 @@ test and ship. For the short version see [../README.md](../README.md).
 - [12. Data written to disk](#12-data-written-to-disk)
 - [13. Cross-platform notes](#13-cross-platform-notes)
 - [14. Troubleshooting](#14-troubleshooting)
+- [15. Reports and OS identification](#15-reports-and-os-identification)
 
 ---
 
@@ -446,7 +447,7 @@ endpoints and the login route needs a bearer token.
 | `/syslog` | Start/stop the UDP collector, query stored events |
 | `/captures`, `/pcaps`, `/packets` | Packet capture, PCAP index, Zeek summaries |
 | `/playbooks` | Router drivers, config drift, isolation playbooks |
-| `/reports` | Device and network PDFs |
+| `/reports` | Device inventory, log and scan PDFs (see section 15) |
 | `/scripts` | Allowlisted scripts, jobs, logs |
 | `/backup` | Export/list/download/delete/restore |
 | `/settings` | Per-user and system settings, environment status |
@@ -527,3 +528,66 @@ and reload; the SPA is served from that directory.
 **Sessions end early**
 `access_token_expire_minutes` defaults to 60 unless "Remember me" is ticked
 (30 days). Changing `SECRET_KEY` invalidates every token immediately.
+
+---
+
+## 15. Reports and OS identification
+
+### 15.1 Where reports are drawn
+
+Every PDF in the app is built by `app/services/pdf_report.py`. The routes in
+`app/api/routes/reports.py` only collect data; the builder decides layout. That
+split is deliberate: a new report is a `build_*` function, not another copy of
+the page chrome.
+
+| Route | Builder | Contents |
+|---|---|---|
+| `GET /api/reports/devices/pdf` | `build_inventory_pdf` | Summary strip, findings, type/OS breakdown bars, device table, page numbers |
+| `POST /api/reports/generate` | `build_inventory_pdf` | Same body for the requested report type; `include_metrics`/`include_alerts` are accepted but no longer print placeholder figures |
+| `POST /api/reports/logs/pdf` | `build_logs_pdf` | Level counts, level breakdown, one row per entry with wrapped messages |
+| `POST /api/reports/scan/pdf` | `build_scan_pdf` | Host/port/duration summary, exact command, host table, raw output in a wrapped block. With `scan_id` the content comes from the stored job and its artifact |
+
+The palette is the console's: `#09090B` ink, `#10B981` emerald, slate greys,
+with danger/warning/info only on level chips. The dark band and emerald rule at
+the top of each page are drawn in `_page_chrome`, and `_numbered_canvas` adds
+"Page n of m" in a second pass. If `reportlab` is missing the route returns a
+one-page `fallback_pdf` instead of a 500.
+
+Adding a report:
+
+1. Write `build_<name>_pdf(**data)` in `pdf_report.py` using `_cover`,
+   `stat_cards`, `section`, `bars`, `data_table` and `section_note`.
+2. Keep it pure: no database session, no HTTP. The route passes plain values.
+3. Escape user text with `_esc`; the table helper does it for string cells.
+
+### 15.2 How a device gets an OS label
+
+Identification runs on a deep scan (`POST /api/devices/{id}/deep-scan`) and
+follows a strict order of evidence in `app/services/os_fingerprint.py`:
+
+| Rank | Signal | What it can prove |
+|---|---|---|
+| 1 | Service banner (`ssh OpenSSH 9.6p1 Kali-1`, `Debian-2`, `Ubuntu`) | The distribution, because the banner is self-reported |
+| 2 | Hostname | `kali`, `desktop-…`, `android-…`, `…-MacBook-Pro` |
+| 3 | nmap stack fingerprint (`-O --osscan-guess`) | OS family and version range, needs Npcap or root |
+| 4 | TTL of the ICMP reply | Unix-like (64), Windows (128), network gear (255) - a hint |
+| 5 | MAC vendor and open ports | Hardware family; 139/445 Windows, 5555 Android, 62078 iOS |
+
+Kali and Debian share one TCP/IP stack, so a stack fingerprint can only ever say
+"Linux". Naming Kali requires a banner or hostname that says so; the report and
+the device drawer show that label with its confidence. A hypervisor vendor
+(VMware, VirtualBox, QEMU, Hyper-V) appends "(virtual machine)" without changing
+the family.
+
+### 15.3 Reading the launcher console
+
+`scripts/stack.py` is the only writer of the shared console:
+
+- identical consecutive lines are collapsed into `… previous line repeated Nx`;
+- known noise (scapy's pcap banner, its `No route found` warning, pip's upgrade
+  notice) is dropped from the console but kept in `logs/<service>.log`;
+- `Starting NetPulse` lists one line per service, and the ready block prints the
+  console URL, API, docs and log paths once the health endpoint answers.
+
+`--verbose` keeps HTTP access logs and INFO-level worker output; `--stop` and
+`--replace` manage the single running instance described in section 9.

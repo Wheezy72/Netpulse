@@ -33,6 +33,23 @@ class Device(Base):
     zone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     is_gateway: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Router verification. ``verified`` means the router's own tables (ARP /
+    # DHCP leases, via SNMP or the RouterOS API) listed this device on the last
+    # pull — the address is held by something the router knows about. A row
+    # without it is merely *observed*: it answered the console's own probes,
+    # which a stale neighbour entry also does. See app/services/router_source.py.
+    verified: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        server_default="false",
+    )
+    # Kept for rows that are no longer listed, so "last confirmed by the router
+    # at …" stays meaningful after the flag drops.
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Which source confirmed it: "snmp", "routeros" or "dnsmasq".
+    verified_source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
     last_seen: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

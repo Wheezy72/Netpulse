@@ -73,6 +73,10 @@ class DiscoveryOutcome:
     methods: List[str] = field(default_factory=list)
     skipped_restricted: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    # Set when a router source is configured: the second half of "is this
+    # device really on my network". A sweep only proves something answered;
+    # the router's own tables say who actually holds an address.
+    router_verification: Optional[Dict[str, Any]] = None
 
 
 def classify_host(
@@ -323,6 +327,29 @@ def _gateway_from_os_commands() -> Optional[str]:
     return None
 
 
+def _scapy_default_route(conf) -> tuple[str | None, str | None]:
+    """``(interface, gateway)`` for the IPv4 default route, read directly.
+
+    ``conf.route.route("0.0.0.0")`` answers the same question, but it logs
+    "No route found for IPv4 destination 0.0.0.0 (no default route?)" every
+    single time on a host whose table has no default — which filled the console
+    on exactly the networks that needed a fallback. Reading the table cannot
+    log anything, and the lowest metric wins the same way the lookup did.
+    """
+    best: tuple[str | None, str | None] = (None, None)
+    best_metric = 1 << 30
+    try:
+        for _net, _mask, gateway, route_iface, _addr, metric in conf.route.routes:
+            if _net or _mask or not gateway or gateway == "0.0.0.0":
+                continue
+            if metric < best_metric:
+                best = (route_iface, str(gateway))
+                best_metric = metric
+    except Exception:
+        return None, None
+    return best
+
+
 def detect_gateway_ips() -> set[str]:
     """IPs that should be flagged ``is_gateway``: the real one and any override.
 
@@ -339,7 +366,7 @@ def detect_gateway_ips() -> set[str]:
     try:
         from scapy.all import conf
 
-        detected = conf.route.route("0.0.0.0")[2]
+        _iface, detected = _scapy_default_route(conf)
         if detected and detected != "0.0.0.0":
             gateway_ips.add(str(detected))
     except Exception:
@@ -414,7 +441,8 @@ def default_interface() -> Optional[str]:
         return _interface_from_os()
 
     try:
-        return conf.route.route("0.0.0.0")[0] or conf.iface or _interface_from_os()
+        route_iface, _gateway = _scapy_default_route(conf)
+        return route_iface or conf.iface or _interface_from_os()
     except Exception:
         return _interface_from_os()
 
@@ -534,7 +562,8 @@ def local_subnets(iface: Optional[str] = None) -> Tuple[List[str], Optional[str]
 
     if conf is not None:
         try:
-            resolved_iface = iface or conf.route.route("0.0.0.0")[0] or conf.iface
+            route_iface, _gateway = _scapy_default_route(conf)
+            resolved_iface = iface or route_iface or conf.iface
         except Exception:
             resolved_iface = iface
 
@@ -985,6 +1014,43 @@ async def _classify_by_ttl(host: DiscoveredHost) -> Tuple[Optional[str], Optiona
     return os_from_ttl(outcome.ttl, mac_address=host.mac_address)
 
 
+def occupant_changed(
+    row_mac: Optional[str],
+    row_hostname: Optional[str],
+    row_vendor: Optional[str],
+    host: DiscoveredHost,
+) -> bool:
+    """True when the address now belongs to a *different* machine.
+
+    An address is a lease, not an identity. When the phone holding
+    ``192.168.1.55`` switches off and a VM takes the same lease, the row that
+    keeps the old hostname and device type makes the VM look like the phone.
+
+    Two cases are provably the same machine: the same MAC, and a MAC that
+    changed behind the same hostname (phones and laptops rotate private MACs
+    per network and keep their name). A different hostname, or a different
+    vendor for a globally-unique MAC, is a new tenant at that address.
+    """
+    new_mac = (host.mac_address or "").upper()
+    old_mac = (row_mac or "").upper()
+    if not new_mac or not old_mac or new_mac == old_mac:
+        return False
+
+    old_name = (row_hostname or "").strip().lower()
+    new_name = (host.hostname or "").strip().lower()
+    if old_name and new_name:
+        return old_name != new_name
+
+    old_vendor = (row_vendor or "").strip().lower()
+    new_vendor = (host.vendor or "").strip().lower()
+    if old_vendor and new_vendor and old_vendor != new_vendor:
+        return True
+
+    # Nothing names the newcomer at all: a rotated private MAC keeps the row,
+    # while a globally-unique MAC that disagrees is a different network card.
+    return not is_locally_administered(new_mac)
+
+
 async def upsert_discovered_hosts(
     db: Any,
     hosts: Sequence[DiscoveredHost],
@@ -1020,9 +1086,11 @@ async def upsert_discovered_hosts(
       * ``is_gateway`` latches true.
     """
     # Imported here so the module stays importable without SQLAlchemy.
+    from sqlalchemy import delete as sa_delete
     from sqlalchemy import or_, select, update as sa_update
 
     from app.models.device import Device
+    from app.models.device_port import DevicePort
     from app.models.script_job import ScriptJob
 
     observed_at = now or datetime.now(timezone.utc)
@@ -1145,6 +1213,31 @@ async def upsert_discovered_hosts(
             by_ip.pop(device.ip_address, None)
             device.ip_address = host.ip_address
             by_ip[host.ip_address] = device
+
+        if occupant_changed(
+            device.mac_address, device.hostname, device.vendor, host
+        ):
+            # Someone else holds this address now. Dropping the descriptive
+            # fields is what stops a Linux VM from inheriting "phone"; ports
+            # and verification described the previous occupant, so they go too.
+            logger.info(
+                "New occupant at %s: was mac=%s hostname=%r, now mac=%s hostname=%r",
+                host.ip_address,
+                device.mac_address,
+                device.hostname,
+                host.mac_address,
+                host.hostname,
+            )
+            await db.execute(
+                sa_delete(DevicePort).where(DevicePort.device_id == device.id)
+            )
+            device.hostname = None
+            device.vendor = None
+            device.device_type = None
+            device.os = None
+            device.verified = False
+            device.verified_at = None
+            device.verified_source = None
 
         if host.mac_address and device.mac_address != host.mac_address:
             device.mac_address = host.mac_address
@@ -1417,5 +1510,30 @@ async def run_device_discovery(
                 enriched,
                 network_id=await current_network_id(db),
             )
+
+        # Verification marks what the router itself lists — the second half of
+        # "is this device really on my network". It never fails a sweep: a
+        # router that cannot be talked to must not roll back the discovery
+        # that just succeeded, so problems are reported in the result instead
+        # of being raised here.
+        if persist:
+            try:
+                from app.services.router_source import verify_if_configured
+
+                verification = await verify_if_configured(db)
+            except Exception as exc:  # noqa: BLE001 - reported, not raised
+                outcome.router_verification = {
+                    "source": "",
+                    "target": "",
+                    "entries": 0,
+                    "verified": 0,
+                    "unverified": 0,
+                    "unmatched": [],
+                    "warnings": [],
+                    "error": str(exc) or type(exc).__name__,
+                }
+            else:
+                if verification is not None:
+                    outcome.router_verification = verification.as_dict()
 
     return outcome

@@ -12,6 +12,8 @@ from app.core.paths import SCANS_DIR as SCANS_DIR_PATH
 from app.core.paths import ensure_dir
 from app.models.scan_job import ScanJob, ScanJobStatus
 from app.services.nmap_capabilities import NMAP_INSTALL_HINT
+from app.services.nmap_results import parse_nmap_text
+from app.services.proc import EOF, ChildProcess
 
 SCANS_DIR = ensure_dir(SCANS_DIR_PATH)
 
@@ -79,25 +81,14 @@ async def run_scan_job(
     job.result_summary = None
     await db.commit()
 
-    proc = await asyncio.create_subprocess_exec(
-        *safe_args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-
-    queue: asyncio.Queue[str] = asyncio.Queue()
-
-    async def _read_stream(stream: asyncio.StreamReader | None) -> None:
-        if stream is None:
-            return
-        while True:
-            chunk = await stream.readline()
-            if not chunk:
-                return
-            await queue.put(chunk.decode(errors="replace"))
-
-    stdout_task = asyncio.create_task(_read_stream(proc.stdout))
-    stderr_task = asyncio.create_task(_read_stream(proc.stderr))
+    # ChildProcess rather than asyncio.create_subprocess_exec: under
+    # ``uvicorn --reload`` on Windows the loop is a SelectorEventLoop, where
+    # asyncio's subprocess API raises a bare NotImplementedError and every scan
+    # died before nmap even started. stderr is merged so scan errors land in the
+    # artifact next to the progress output.
+    child = ChildProcess(safe_args, merge_stderr=True, stream=True)
+    scan_started = time.monotonic()
+    elapsed: float | None = None
 
     pending = ""
     last_flush = time.monotonic()
@@ -115,27 +106,27 @@ async def run_scan_job(
         async with asyncio.timeout(timeout_seconds):
             while True:
                 try:
-                    chunk = await asyncio.wait_for(queue.get(), timeout=0.25)
-                    pending += chunk
+                    chunk = await asyncio.wait_for(child.lines.get(), timeout=0.25)
                 except TimeoutError:
                     chunk = ""
+
+                if chunk is EOF:
+                    break
+                pending += chunk
 
                 now = time.monotonic()
                 if pending and (len(pending) >= 8192 or now - last_flush >= 0.75):
                     _flush_to_file()
 
-                if proc.returncode is not None and queue.empty() and stdout_task.done() and stderr_task.done():
-                    break
-
-                if proc.returncode is None and stdout_task.done() and stderr_task.done():
-                    await proc.wait()
-    except asyncio.TimeoutError:
-        proc.terminate()
+            returncode = await child.wait()
+            elapsed = time.monotonic() - scan_started
+    except TimeoutError:
+        child.terminate()
         try:
-            await asyncio.wait_for(proc.wait(), timeout=5)
+            await asyncio.wait_for(child.wait(), timeout=5)
         except TimeoutError:
-            proc.kill()
-            await proc.wait()
+            child.kill()
+            await child.wait()
 
         _flush_to_file()
         with artifact_path.open("a", encoding="utf-8", errors="replace") as f:
@@ -147,30 +138,28 @@ async def run_scan_job(
         await db.commit()
         return
     finally:
-        await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+        await child.drain()
 
     _flush_to_file()
 
-    await proc.wait()
+    # The findings are parsed here, not in a follow-up task: a scan that has to
+    # queue behind other work used to report nothing when the page closed, and
+    # the task it deferred to had been deleted long ago. The artifact is already
+    # on disk, so parsing costs one file read and makes the result durable.
+    findings = parse_nmap_text(artifact_path.read_text(encoding="utf-8", errors="replace"))
+    summary: dict[str, object] = {"exit_code": returncode, **findings}
+    if elapsed is not None:
+        summary["duration_seconds"] = round(elapsed, 2)
 
     job.completed_at = datetime.utcnow()
-    job.result_summary = {"exit_code": proc.returncode}
+    job.result_summary = summary
 
-    if proc.returncode == 0:
+    if returncode == 0:
         job.status = ScanJobStatus.COMPLETED
     else:
         job.status = ScanJobStatus.FAILED
 
     await db.commit()
-
-    if proc.returncode == 0:
-        try:
-            from app.core.celery_app import celery_app
-
-            celery_app.send_task("app.tasks.analyze_scan_results", args=[job.id])
-        except Exception:
-            # Scan completion should not fail if the broker/worker is unavailable.
-            pass
 
     # For now, we keep the artifact even when save_results is False because it
     # is useful for postmortem/debugging. Future: cleanup job.

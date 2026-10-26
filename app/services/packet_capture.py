@@ -17,6 +17,7 @@ from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.models.packet_capture import PacketCapture, PacketCaptureStatus, PacketHeader
 from app.models.pcap_meta import PcapFile
+from app.services.proc import ChildProcess
 
 
 logger = logging.getLogger(__name__)
@@ -205,33 +206,29 @@ async def _run_tcpdump_capture(
     if bpf_filter:
         args.extend(shlex.split(bpf_filter))
 
-    proc = await asyncio.create_subprocess_exec(
-        *args,
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    # ChildProcess, not asyncio.create_subprocess_exec: the Windows
+    # SelectorEventLoop that ``uvicorn --reload`` installs cannot spawn children
+    # at all, and tcpdump captures silently produced empty files there.
+    child = ChildProcess(args, capture_stderr=True, stream=False)
 
     try:
         try:
-            await asyncio.wait_for(proc.wait(), timeout=duration)
+            await asyncio.wait_for(child.wait(), timeout=duration)
         except asyncio.TimeoutError:
-            proc.terminate()
+            child.terminate()
             try:
-                await asyncio.wait_for(proc.wait(), timeout=10)
+                await asyncio.wait_for(child.wait(), timeout=10)
             except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
+                child.kill()
+                await child.wait()
     finally:
-        if proc.returncode is None:
-            proc.kill()
-            await proc.wait()
+        if child.returncode is None:
+            child.kill()
+            await child.wait()
+        await child.drain()
 
-    stderr = b""
-    if proc.stderr is not None:
-        stderr = await proc.stderr.read()
-
-    if stderr:
-        msg = stderr.decode(errors="ignore").strip()
+    msg = child.stderr_text().strip()
+    if msg:
         lowered = msg.lower()
         if "you don't have permission" in lowered or "permission denied" in lowered:
             raise PermissionError(msg)

@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models.network import Network
 from app.services.oui import lookup_vendor, normalize_mac
@@ -61,8 +61,27 @@ class NetworkProfile:
 
     @property
     def key(self) -> str:
-        mac = (self.gateway_mac or "-").upper()
-        return f"{self.cidr or '-'}|{mac}"
+        """Stable identity for this network.
+
+        The gateway's MAC is the only value that survives a re-detect: subnet
+        detection fails whenever scapy cannot enumerate interfaces (packet
+        capture driver stopped, no privileges), and the old ``cidr|mac`` key
+        then produced a *second* row for the same router — the duplicate
+        "192.168.1.1 / unknown subnet" entry next to the real one.
+        """
+        if self.gateway_mac:
+            return f"mac:{self.gateway_mac.upper()}"
+        if self.cidr:
+            return f"cidr:{self.cidr}"
+        return f"gw:{self.gateway_ip}"
+
+    @property
+    def legacy_keys(self) -> list[str]:
+        """Keys rows may still carry from before the identity change."""
+        keys = [f"{self.cidr or '-'}|{(self.gateway_mac or '-').upper()}"]
+        if self.gateway_ip and self.gateway_mac:
+            keys.append(f"{self.gateway_ip}|{self.gateway_mac.upper()}")
+        return keys
 
     @property
     def default_name(self) -> str:
@@ -231,14 +250,219 @@ def _is_stale(value: Optional[datetime], seconds: float) -> bool:
         return True
 
 
+async def _find_network(db: Any, profile: NetworkProfile) -> Optional[Network]:
+    """Locate the row for *profile*, tolerating keys from older versions."""
+    network = (
+        await db.execute(select(Network).where(Network.key == profile.key))
+    ).scalar_one_or_none()
+    if network is not None:
+        return network
+
+    # Rows written before the key changed. Adopting them in place is what keeps
+    # the inventory attached to one row per network instead of growing a new
+    # one every time the key formula moves.
+    for legacy in profile.legacy_keys:
+        legacy_row = (
+            await db.execute(select(Network).where(Network.key == legacy))
+        ).scalar_one_or_none()
+        if legacy_row is not None:
+            return legacy_row
+
+    # The gateway's hardware address identifies the router even when the subnet
+    # could not be read, which is exactly how duplicates were created.
+    if profile.gateway_mac:
+        return (
+            await db.execute(
+                select(Network)
+                .where(func.upper(Network.gateway_mac) == profile.gateway_mac.upper())
+                .order_by(Network.first_seen)
+            )
+        ).scalars().first()
+
+    return None
+
+
+async def fold_network_devices(db: Any, keep_id: int, dup_id: int) -> int:
+    """Move *dup_id*'s devices onto *keep_id*, merging rows that share an IP.
+
+    A plain ``UPDATE ... SET network_id`` is not enough: two rows for the same
+    network can each hold a device at the same address, and ``devices`` is
+    unique on ``(network_id, ip_address)`` — the update then fails with a
+    UniqueViolation. Same address on the same network is one machine, so the
+    two rows are folded: blanks are filled from whichever row has the value,
+    verification and ``last_seen`` are combined, and one row is deleted.
+
+    Returns the number of device rows that were merged away.
+    """
+    from sqlalchemy import delete as sa_delete
+    from sqlalchemy import select
+    from sqlalchemy import update as sa_update
+
+    from app.models.device import Device
+    from app.models.script_job import ScriptJob
+
+    keep_rows = {
+        row.ip_address: row
+        for row in (
+            await db.execute(select(Device).where(Device.network_id == keep_id))
+        ).scalars().all()
+    }
+    dup_rows = list(
+        (await db.execute(select(Device).where(Device.network_id == dup_id)))
+        .scalars()
+        .all()
+    )
+
+    merged = 0
+    for row in dup_rows:
+        twin = keep_rows.get(row.ip_address)
+        if twin is None:
+            row.network_id = keep_id
+            continue
+
+        await _absorb_device(db, twin, row)
+        merged += 1
+
+    return merged
+
+
+async def _absorb_device(db: Any, keep: Any, drop: Any) -> None:
+    """Merge *drop* into *keep* and delete it. Both are rows for one address."""
+    from sqlalchemy import delete as sa_delete
+    from sqlalchemy import update as sa_update
+
+    from app.models.device import Device
+    from app.models.script_job import ScriptJob
+
+    merge_device_details(keep, drop)
+
+    # script_jobs holds an FK without ON DELETE CASCADE.
+    await db.execute(sa_update(ScriptJob).where(ScriptJob.device_id == drop.id).values(device_id=keep.id))
+    await db.execute(sa_delete(Device).where(Device.id == drop.id))
+
+
+def merge_device_details(keep: Any, drop: Any) -> None:
+    """Fold *drop*'s known facts into *keep* in place (no I/O).
+
+    Two rows for one address means one machine seen twice: whichever row holds
+    the fact wins, and nothing that was verified or seen more recently is lost
+    when the redundant row goes away.
+    """
+    for attribute in ("hostname", "mac_address", "vendor", "device_type", "os", "zone"):
+        if not getattr(keep, attribute) and getattr(drop, attribute):
+            setattr(keep, attribute, getattr(drop, attribute))
+    if drop.verified and not keep.verified:
+        keep.verified = True
+        keep.verified_at = drop.verified_at
+        keep.verified_source = drop.verified_source
+    if drop.last_seen and (keep.last_seen is None or drop.last_seen > keep.last_seen):
+        keep.last_seen = drop.last_seen
+    keep.is_gateway = bool(keep.is_gateway or drop.is_gateway)
+
+
+async def adopt_orphan_devices(db: Any, network: Network) -> int:
+    """Attach devices recorded before networks existed to *network*.
+
+    ``UPDATE devices SET network_id = ...`` is what a plain adoption wants, but
+    it fails whenever an orphan shares an address with a row already on this
+    network: ``uq_devices_network_ip`` then rejects the whole statement, and
+    the boot logged a UniqueViolation instead of adopting anything. Orphans
+    without a twin are repointed; orphans with one are folded into it.
+
+    Returns the number of rows that now live on *network* as a result.
+    """
+    from sqlalchemy import select
+
+    from app.models.device import Device
+
+    orphans = list(
+        (await db.execute(select(Device).where(Device.network_id.is_(None)))).scalars().all()
+    )
+    if not orphans:
+        return 0
+
+    existing = {
+        row.ip_address: row
+        for row in (
+            await db.execute(select(Device).where(Device.network_id == network.id))
+        ).scalars().all()
+    }
+
+    adopted = 0
+    for row in orphans:
+        twin = existing.get(row.ip_address)
+        if twin is None:
+            row.network_id = network.id
+            existing[row.ip_address] = row
+            adopted += 1
+            continue
+        logger.info(
+            "Folding pre-network device row #%s %s into #%s.",
+            row.id,
+            row.ip_address,
+            twin.id,
+        )
+        await _absorb_device(db, twin, row)
+
+    await db.commit()
+    return adopted
+
+
+async def _merge_duplicates(db: Any, keep: Network, profile: NetworkProfile) -> None:
+    """Fold other rows describing this same router into *keep*.
+
+    Same gateway MAC means the same network no matter what the subnet read as
+    on the sweep that created the row. Duplicates carry devices, so they are
+    repointed rather than dropped.
+    """
+    if not profile.gateway_mac:
+        return
+
+    from sqlalchemy import delete as sa_delete
+
+    duplicates = list(
+        (
+            await db.execute(
+                select(Network).where(
+                    func.upper(Network.gateway_mac) == profile.gateway_mac.upper(),
+                    Network.id != keep.id,
+                )
+            )
+        ).scalars().all()
+    )
+    if not duplicates:
+        return
+
+    for dup in duplicates:
+        merged = await fold_network_devices(db, keep.id, dup.id)
+        if merged:
+            logger.info(
+                "Folded %d duplicate device row(s) from network #%s into #%s.",
+                merged,
+                dup.id,
+                keep.id,
+            )
+        if dup.first_seen and (keep.first_seen is None or dup.first_seen < keep.first_seen):
+            keep.first_seen = dup.first_seen
+        logger.info(
+            "Merging duplicate network #%s '%s' (cidr=%r) into #%s '%s' — same gateway %s.",
+            dup.id,
+            dup.name,
+            dup.cidr,
+            keep.id,
+            keep.name,
+            format_mac(profile.gateway_mac),
+        )
+        await db.execute(sa_delete(Network).where(Network.id == dup.id))
+
+
 async def resolve_current_network(db: Any, *, refresh: bool = False) -> Optional[Network]:
     """Return the ``Network`` row for the network this host is on, creating it once."""
     profile = await asyncio.to_thread(current_profile, refresh=refresh)
     if profile is None:
         return None
 
-    result = await db.execute(select(Network).where(Network.key == profile.key))
-    network = result.scalar_one_or_none()
+    network = await _find_network(db, profile)
     now = datetime.now(timezone.utc)
 
     if network is None:
@@ -267,6 +491,10 @@ async def resolve_current_network(db: Any, *, refresh: bool = False) -> Optional
 
     # Refresh what the host observes, but never overwrite the operator's name.
     changed = False
+    if network.key != profile.key:
+        # Old or transient key (see NetworkProfile.key): adopt the stable one.
+        network.key = profile.key
+        changed = True
     for attribute, value in (
         ("cidr", profile.cidr),
         ("gateway_ip", profile.gateway_ip),
@@ -284,6 +512,10 @@ async def resolve_current_network(db: Any, *, refresh: bool = False) -> Optional
         changed = True
 
     if changed:
+        await db.commit()
+
+    await _merge_duplicates(db, network, profile)
+    if changed or network.id is not None:
         await db.commit()
     return network
 

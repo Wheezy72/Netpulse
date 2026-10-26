@@ -20,17 +20,25 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# One line per fact, aligned, so the preflight can be read at a glance instead
+# of reconstructed from wrapped warning paragraphs.
+step() { printf '  %-14s %s\n' "$1" "$2"; }
+warn() { printf '  %-14s %s\n' "warning" "$1" >&2; }
+
+printf '\n  NetPulse\n  ----------------------------------------------\n\n'
+
 if [ "$(id -u)" -ne 0 ]; then
-  echo "WARNING: Running without root privileges."
-  echo "ARP discovery and SYN/OS scans need root or CAP_NET_RAW on Linux."
-  echo "Without it, discovery falls back to the ARP table and nmap connect scans."
-  echo "For full functionality, run with: sudo $0"
+  warn "running as a standard user"
+  step "limits" "ARP sweeps and SYN/OS scans need root (CAP_NET_RAW)"
+  step "fallback" "ARP table discovery and nmap connect scans"
+  printf '  %-14s %s\n' "to unlock" "sudo $0"
   echo ""
-  read -p "Continue anyway? [y/N] " -n 1 -r
+  read -p "  Continue anyway? [y/N] " -n 1 -r
   echo ""
   if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 1
   fi
+  echo ""
 fi
 
 if [ -d ".venv" ]; then
@@ -39,12 +47,12 @@ if [ -d ".venv" ]; then
 fi
 
 if ! command -v python >/dev/null 2>&1; then
-  echo "ERROR: python is not on PATH. Run ./scripts/setup_linux.sh first." >&2
+  warn "python is not on PATH - run ./scripts/setup_linux.sh first"
   exit 1
 fi
 
 if ! command -v nmap >/dev/null 2>&1; then
-  echo "WARNING: nmap is not installed; scan profiles will refuse to run." >&2
+  warn "nmap is not installed - scan profiles will refuse to run"
 fi
 
 ENV_FILE="$ROOT_DIR/.env"
@@ -109,18 +117,16 @@ DB_USER="$(env_value POSTGRES_USER netpulse)"
 DB_PASS="$(env_value POSTGRES_PASSWORD netpulse)"
 
 if [ -n "${DATABASE_URL:-}" ]; then
-  echo "==> DATABASE_URL is set explicitly; leaving that database as it is."
+  step "database" "DATABASE_URL is set - using it as-is"
 elif [ ! -f "$ENV_FILE" ]; then
-  echo "WARNING: no .env found -- run ./scripts/setup_linux.sh first." >&2
+  warn "no .env found - run ./scripts/setup_linux.sh first"
 elif [ -z "$DB_HOST" ]; then
-  echo "WARNING: POSTGRES_HOST is not set in .env." >&2
-  echo "         Bare-metal installs need POSTGRES_HOST=localhost; otherwise the" >&2
-  echo "         backend defaults to the Docker hostname 'db' and cannot connect." >&2
+  warn "POSTGRES_HOST is not set in .env"
+  step "" "bare-metal installs need POSTGRES_HOST=localhost"
 elif [ "$DB_HOST" != "localhost" ] && [ "$DB_HOST" != "127.0.0.1" ]; then
-  echo "==> POSTGRES_HOST=${DB_HOST} is not local; skipping the database check."
+  step "database" "POSTGRES_HOST=${DB_HOST} is remote - skipping the local check"
 elif ! command -v psql >/dev/null 2>&1; then
-  echo "WARNING: psql is not installed, so the database cannot be checked." >&2
-  echo "         Run ./scripts/setup_linux.sh first." >&2
+  warn "psql is not installed - run ./scripts/setup_linux.sh first"
 else
   app_can_connect() {
     PGPASSWORD="$DB_PASS" psql -h 127.0.0.1 -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
@@ -129,7 +135,7 @@ else
 
   if ! app_can_connect; then
     if ! tcp_open "$DB_PORT"; then
-      echo "==> PostgreSQL is not running; starting it..."
+      step "postgres" "not running - starting it"
       if [ "$(id -u)" -eq 0 ] && command -v systemctl >/dev/null 2>&1; then
         systemctl start postgresql >/dev/null 2>&1 || true
       fi
@@ -138,9 +144,8 @@ else
         sleep 1
       done
       if ! tcp_open "$DB_PORT"; then
-        echo "ERROR: PostgreSQL is not answering on 127.0.0.1:${DB_PORT}." >&2
-        echo "       Start it with: sudo systemctl start postgresql" >&2
-        echo "       (Or run ./scripts/setup_linux.sh on a fresh machine.)" >&2
+        warn "PostgreSQL is not answering on 127.0.0.1:${DB_PORT}"
+        step "to fix" "sudo systemctl start postgresql"
         exit 1
       fi
     fi
@@ -150,24 +155,23 @@ else
     # backend then died with `database "netpulse" does not exist`.
     if run_as_postgres -tAc "SELECT 1" >/dev/null 2>&1; then
       if ! run_as_postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" 2>/dev/null | grep -q 1; then
-        echo "==> Creating PostgreSQL role '${DB_USER}'..."
+        step "postgres" "creating role '${DB_USER}'"
         run_as_postgres -c "CREATE ROLE ${DB_USER} LOGIN PASSWORD '${DB_PASS}';" >/dev/null || true
       fi
       if ! run_as_postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" 2>/dev/null | grep -q 1; then
-        echo "==> Creating PostgreSQL database '${DB_NAME}'..."
+        step "postgres" "creating database '${DB_NAME}'"
         run_as_postgres -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" >/dev/null || true
         run_as_postgres -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" >/dev/null 2>&1 || true
       fi
       if app_can_connect; then
-        echo "==> Database '${DB_NAME}' is ready."
+        step "database" "'${DB_NAME}' is ready"
       else
-        echo "WARNING: database '${DB_NAME}' exists but '${DB_USER}' cannot log in to it." >&2
-        echo "         Check POSTGRES_PASSWORD in .env and pg_hba.conf." >&2
+        warn "'${DB_NAME}' exists but '${DB_USER}' cannot log in"
+        step "to fix" "check POSTGRES_PASSWORD in .env and pg_hba.conf"
       fi
     else
-      echo "WARNING: cannot check the database without root." >&2
-      echo "         If the backend reports it is missing, run:" >&2
-      echo "         sudo -u postgres createdb -O ${DB_USER} ${DB_NAME}" >&2
+      warn "cannot check the database without root"
+      step "if missing" "sudo -u postgres createdb -O ${DB_USER} ${DB_NAME}"
     fi
   fi
 fi
@@ -184,7 +188,7 @@ redis_up() {
 }
 
 if ! redis_up; then
-  echo "==> Redis is not answering; starting it..."
+  step "redis" "not answering - starting it"
   if [ "$(id -u)" -eq 0 ] && command -v systemctl >/dev/null 2>&1; then
     for _redis_unit in redis-server redis; do
       if systemctl cat "${_redis_unit}.service" >/dev/null 2>&1; then
@@ -209,12 +213,14 @@ if ! redis_up; then
     done
   fi
   if redis_up; then
-    echo "==> Redis is up."
+    step "redis" "up"
   else
-    echo "WARNING: Redis could not be started; login rate limiting and background" >&2
-    echo "         tasks will misbehave. Start it with: sudo systemctl start redis-server" >&2
+    warn "Redis could not be started"
+    step "to fix" "sudo systemctl start redis-server"
   fi
 fi
+
+echo ""
 
 # Hand the terminal to scripts/stack.py: it starts the API, the Celery worker
 # and the Vite dev server in this one window, prefixes every line with the

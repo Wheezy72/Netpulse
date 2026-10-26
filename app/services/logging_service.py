@@ -88,6 +88,8 @@ NOISY_LOGGERS = {
     "httpcore",
     "hpack",
     "watchfiles.main",
+    "scapy.runtime",
+    "scapy.loading",
 }
 
 NOISY_MESSAGES = [
@@ -264,6 +266,14 @@ def setup_logging(
     access_logger.handlers = []
     access_logger.propagate = False
     access_logger.addHandler(memory_handler)
+
+    # scapy narrates its own environment through its logger, one line at a time:
+    # "No route found for IPv4 destination 0.0.0.0 (no default route?)" repeated
+    # after every sweep, and the capture-driver banner on every start. None of
+    # that is actionable, and it buried the warnings that were. Real scapy
+    # errors still come through at ERROR.
+    for name in ("scapy.runtime", "scapy.loading"):
+        logging.getLogger(name).setLevel(logging.ERROR)
 
 
 def get_logger(name: str) -> logging.Logger:

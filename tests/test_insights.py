@@ -93,7 +93,7 @@ class TestTcpProbe:
         port = int(server.sockets[0].getsockname()[1])
 
         try:
-            latency_ms, error = await _probe_tcp("127.0.0.1", port, 2.0)
+            latency_ms, error, verdict, reachable = await _probe_tcp("127.0.0.1", port, 2.0)
         finally:
             server.close()
             await server.wait_closed()
@@ -101,16 +101,56 @@ class TestTcpProbe:
         assert error is None
         assert latency_ms is not None
         assert latency_ms >= 0
+        assert verdict == "open"
+        assert reachable is True
 
-    async def test_reports_refused_connection(self) -> None:
-        latency_ms, error = await _probe_tcp("127.0.0.1", _free_port(), 2.0)
+    async def test_reports_refused_connection_as_closed(self) -> None:
+        # A refused connection is a healthy answer: the machine is up. Windows
+        # retries the SYN before reporting the refusal (~2s), so the timeout has
+        # to be comfortably above that or the verdict flips to "filtered".
+        latency_ms, error, verdict, reachable = await _probe_tcp("127.0.0.1", _free_port(), 6.0)
         assert latency_ms is None
         assert error
+        assert verdict == "closed"
+        assert reachable is True
 
     async def test_reports_unresolvable_host(self) -> None:
-        latency_ms, error = await _probe_tcp("host.invalid.", 80, 2.0)
+        latency_ms, error, _verdict, _reachable = await _probe_tcp("host.invalid.", 80, 2.0)
         assert latency_ms is None
         assert error
+
+    async def test_timeout_says_whether_the_host_answered_at_all(self, monkeypatch) -> None:
+        """A dropped SYN and a powered-off machine must not read the same.
+
+        A listening socket still completes the handshake at the OS level, so a
+        filtered port is simulated at the point the connection stalls.
+        """
+        import app.api.routes.insights as insights
+
+        async def _stall(*_args, **_kwargs):
+            raise asyncio.TimeoutError
+
+        monkeypatch.setattr(insights.asyncio, "open_connection", _stall)
+
+        async def _answers(_host: str) -> bool:
+            return True
+
+        monkeypatch.setattr(insights, "_host_answers", _answers)
+        latency, error, verdict, reachable = await _probe_tcp("10.0.0.5", 8080, 0.4)
+        assert latency is None
+        assert error and "No answer" in error
+        assert verdict == "filtered"
+        assert reachable is True
+
+        async def _silent_host(_host: str) -> bool:
+            return False
+
+        monkeypatch.setattr(insights, "_host_answers", _silent_host)
+        latency, error, verdict, reachable = await _probe_tcp("10.0.0.5", 8080, 0.4)
+        assert latency is None
+        assert error and "ping" in error
+        assert verdict == "unreachable"
+        assert reachable is False
 
 
 class TestInsightsApiModule:

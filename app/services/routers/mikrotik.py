@@ -48,6 +48,18 @@ class MikroTikRouterDriver(RouterDriver):
 
         return await asyncio.to_thread(lambda: self._with_api(_run))
 
+    async def get_dhcp_leases(self) -> list[dict[str, Any]]:
+        """Active DHCP leases: address, mac-address, host-name, status.
+
+        The most useful table on a MikroTik: unlike the ARP cache it survives
+        an idle host, and it carries the hostname the DHCP client asked for.
+        """
+
+        def _run(api: Any) -> list[dict[str, Any]]:
+            return list(api.get_resource("/ip/dhcp-server/lease").get())
+
+        return await asyncio.to_thread(lambda: self._with_api(_run))
+
     async def get_config(self) -> str:
         def _run(api: Any) -> str:
             response = api.get_resource("/").call("export")

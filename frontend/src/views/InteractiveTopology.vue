@@ -42,6 +42,7 @@ type TopologyNode = {
   vulnerability_severity?: string | null;
   vulnerability_count: number;
   last_seen?: string | null;
+  verified?: boolean;
 };
 
 type TopologyEdge = {
@@ -87,6 +88,36 @@ type SwitchConfig = {
 
 const topologyLoading = ref(false);
 const topologyError = ref<string | null>(null);
+
+// Live reachability. `last_seen` only says when a sweep last saw the host, so a
+// device that has since switched off still looked online on the map. These
+// come from the same ICMP probe the dashboard uses; the map is refreshed on the
+// same cadence instead of pretending its cached view is live.
+type PingState = { status: "up" | "slow" | "down"; latency_ms: number | null };
+const liveStatus = ref<Record<number, PingState>>({});
+const pingCheckedAt = ref<string | null>(null);
+let pingTimer: number | null = null;
+
+async function refreshLiveStatus(): Promise<void> {
+  try {
+    const { data } = await axios.get<{
+      results: { id: number; status: "up" | "slow" | "down"; latency_ms: number | null }[];
+      checked_at: string;
+    }>("/api/devices/ping-status", { params: { limit: 64 } });
+    const next: Record<number, PingState> = {};
+    for (const row of data.results ?? []) {
+      next[row.id] = { status: row.status, latency_ms: row.latency_ms };
+    }
+    liveStatus.value = next;
+    pingCheckedAt.value = data.checked_at;
+  } catch {
+    // A missing probe must not take the map down; nodes just show unknown.
+  }
+}
+
+function nodeReachability(device: TopologyNode): PingState | null {
+  return liveStatus.value[device.id] ?? null;
+}
 const selectedNode = ref<TopologyNode | null>(null);
 const deviceDetail = ref<DeviceDetail | null>(null);
 const deviceDetailLoading = ref(false);
@@ -371,18 +402,24 @@ function disconnectSsh() {
   sshConnecting.value = false;
 }
 
+async function openTerminalInContainer() {
+  // The console element is only mounted once `sshConnected` is true, so this
+  // has to run *after* the socket opens, not before. Requiring the container
+  // up front made every connection fail with "The console is not ready".
+  await nextTick();
+  if (!terminalContainer.value || !term) return;
+  term.open(terminalContainer.value);
+  fitAddon?.fit();
+  term.focus();
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+  }
+}
+
 async function connectSsh() {
   if (!selectedNode.value) return;
   sshConnecting.value = true;
   sshError.value = null;
-
-  await nextTick();
-
-  if (!terminalContainer.value) {
-    sshError.value = "The console is not ready. Reload the page and try again.";
-    sshConnecting.value = false;
-    return;
-  }
 
   const token = getStoredToken();
   const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || window.location.origin;
@@ -433,20 +470,7 @@ async function connectSsh() {
     );
     sshConnected.value = true;
     sshConnecting.value = false;
-    
-    if (terminalContainer.value && term) {
-      term.open(terminalContainer.value);
-      fitAddon?.fit();
-      term.focus();
-      
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({
-          type: "resize",
-          cols: term.cols,
-          rows: term.rows
-        }));
-      }
-    }
+    void openTerminalInContainer();
   };
 
   socket.onmessage = (event) => {
@@ -701,6 +725,12 @@ onMounted(() => {
       loadTopology();
     });
   });
+  void refreshLiveStatus();
+  // Reachability decays: a phone that switched off five minutes ago must stop
+  // showing a green ring. Cheaper than the map refresh, so it runs more often.
+  pingTimer = window.setInterval(() => {
+    if (document.visibilityState === "visible") void refreshLiveStatus();
+  }, 20_000);
   // The map used to render whatever the inventory held at mount time and
   // never look again — it read as "cached" on a live network. Quietly
   // re-poll while the tab is visible; skip while the drawer is open so the
@@ -715,6 +745,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (topologyRefreshTimer !== undefined) window.clearInterval(topologyRefreshTimer);
+  if (pingTimer !== null) window.clearInterval(pingTimer);
   window.removeEventListener("resize", handleResize);
   disconnectSsh();
 });
@@ -806,6 +837,8 @@ onBeforeUnmount(() => {
                 'np-node--critical': nodeDangerLevel(data.device) === 'critical',
                 'np-node--high': nodeDangerLevel(data.device) === 'high',
                 'np-node--dim': isDimmed(data.device),
+                'np-node--down': nodeReachability(data.device)?.status === 'down',
+                'np-node--slow': nodeReachability(data.device)?.status === 'slow',
               }"
             >
               <div class="np-orb">
@@ -817,7 +850,14 @@ onBeforeUnmount(() => {
               </div>
               <div class="np-label">
                 <span class="np-label-name">{{ data.device.hostname || data.device.ip_address }}</span>
-                <span class="np-label-ip">{{ data.device.ip_address }}</span>
+                <span class="np-label-ip">
+                  <span
+                    v-if="nodeReachability(data.device)"
+                    class="np-status-dot"
+                    :class="`np-status-dot--${nodeReachability(data.device)?.status}`"
+                  />
+                  {{ data.device.ip_address }}
+                </span>
               </div>
             </div>
           </template>
@@ -841,6 +881,7 @@ onBeforeUnmount(() => {
           <span class="flex items-center gap-1.5 text-[0.6rem] font-medium text-[var(--np-text-muted)]"><span class="np-legend-dot np-legend-dot--infra" /> Infrastructure</span>
           <span class="flex items-center gap-1.5 text-[0.6rem] font-medium text-[var(--np-text-muted)]"><span class="np-legend-dot" /> Endpoint</span>
           <span class="flex items-center gap-1.5 text-[0.6rem] font-medium text-[var(--np-text-muted)]"><span class="np-legend-dot np-legend-dot--danger" /> Alert</span>
+          <span class="flex items-center gap-1.5 text-[0.6rem] font-medium text-[var(--np-text-muted)]"><span class="np-legend-dot np-legend-dot--offline" /> Not responding</span>
         </div>
 
         <!-- Live counters -->
@@ -930,6 +971,21 @@ onBeforeUnmount(() => {
                 <div class="flex justify-between border-b border-[var(--np-border-subtle)] pb-1.5">
                   <dt class="text-[var(--np-text-dim)]">Last Seen</dt>
                   <dd class="text-[var(--np-text)]">{{ selectedNode.last_seen ? new Date(selectedNode.last_seen).toLocaleString() : '—' }}</dd>
+                </div>
+                <div class="flex justify-between border-b border-[var(--np-border-subtle)] pb-1.5">
+                  <dt class="text-[var(--np-text-dim)]">Responding</dt>
+                  <dd class="flex items-center gap-1.5">
+                    <template v-if="nodeReachability(selectedNode)">
+                      <span class="np-status-dot" :class="`np-status-dot--${nodeReachability(selectedNode)?.status}`" />
+                      <span class="text-[var(--np-text)]">
+                        {{ nodeReachability(selectedNode)?.status === 'down' ? 'no reply' : 'yes' }}
+                        <span v-if="nodeReachability(selectedNode)?.latency_ms !== null" class="text-[var(--np-text-dim)]">
+                          ({{ nodeReachability(selectedNode)?.latency_ms }} ms)
+                        </span>
+                      </span>
+                    </template>
+                    <span v-else class="text-[var(--np-text-dim)]">not probed</span>
+                  </dd>
                 </div>
               </dl>
 
@@ -1309,6 +1365,38 @@ onBeforeUnmount(() => {
     0 0 0 2px rgba(45, 212, 191, 0.9),
     0 16px 34px rgba(20, 184, 166, 0.28);
 }
+/* Reachability beats recency: the inventory says when a host was last seen,
+   the ping says whether it answers now. Offline orbs lose their colour, slow
+   ones get an amber ring, and the label carries a dot with the same reading. */
+.np-node--down .np-orb-disc {
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+.np-node--down .np-label-name {
+  opacity: 0.65;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.np-node--slow .np-orb-disc {
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.55);
+}
+.np-status-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 4px;
+  border-radius: 9999px;
+  vertical-align: middle;
+  background: var(--np-text-dim);
+}
+.np-status-dot--up { background: #22c55e; }
+.np-status-dot--slow { background: #f59e0b; }
+.np-status-dot--down { background: #ef4444; }
+.np-legend-dot--offline {
+  background: #71717a;
+  box-shadow: 0 0 8px rgba(113, 113, 122, 0.5);
+}
+
 .np-node--dim { opacity: 0.22; filter: saturate(0.35); }
 .np-map--light .np-node--dim { opacity: 0.4; filter: saturate(0.5); }
 

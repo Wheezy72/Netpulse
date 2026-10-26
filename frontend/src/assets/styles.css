@@ -291,6 +291,16 @@ textarea {
   box-shadow: var(--np-card-shadow);
 }
 
+/* Dialogs are centred by a transform, so they must never inherit a lift: the
+   "FREAKING OUT" jump on hover came from exactly this collision. */
+.np-dialog:hover,
+.np-dialog.glass-card:hover,
+.np-dialog.glass-card--static:hover {
+  transform: translate(-50%, -50%);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+  border-color: var(--np-border);
+}
+
 /* ============================================
    DIALOG — quick scan, sweep and terminal
 
@@ -310,9 +320,20 @@ body.theme-sysadmin .np-dialog-scrim {
 }
 
 .np-dialog {
+  /* .glass-card sets position: relative and it is declared later in this file
+     than Tailwind's `fixed` utility, so `fixed` on the element lost the tie.
+     The dialog was therefore in normal flow: it pushed the page down (the
+     "drooping" background) and translated itself up off the top of the
+     screen. Position is part of this class now, not an inline utility. */
+  position: fixed;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
+  /* The card's hover lift would replace this transform and throw the dialog
+     off-centre the instant the pointer touched it. These dialogs also carry
+     .glass-card, so the hover rule has to be pinned back to the centring
+     transform here. */
+  will-change: transform;
   max-height: calc(100vh - 2rem);
   overflow-y: auto;
   border-radius: 18px;

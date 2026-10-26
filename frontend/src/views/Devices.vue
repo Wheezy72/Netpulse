@@ -57,7 +57,29 @@ type DeviceRow = {
   is_gateway: boolean;
   zone: string | null;
   last_seen: string | null;
+  // Listed by the router's own ARP/DHCP tables on the last pull. Without it a
+  // row is only "observed": it answered our probes, which a stale neighbour
+  // entry can also do.
+  verified?: boolean;
+  verified_at?: string | null;
+  verified_source?: string | null;
 };
+
+function verificationLabel(device: DeviceRow): string {
+  if (!device.verified) return "Observed";
+  return device.verified_source ? `Verified · ${device.verified_source}` : "Verified";
+}
+
+function verificationTitle(device: DeviceRow): string {
+  if (device.verified) {
+    const when = device.verified_at ? new Date(device.verified_at).toLocaleString() : "the last pull";
+    return `The router's own tables listed this device at ${when}.`;
+  }
+  return (
+    "Only this console has seen it (probe / ARP table). " +
+    "The router did not confirm it on the last pull, so it may be a stale entry."
+  );
+}
 
 type DeviceDetail = {
   device: {
@@ -211,6 +233,8 @@ const filteredDevices = computed(() => {
         if (v === "gateway") return list.filter((d) => d.is_gateway);
         if (v === "down") return list.filter((d) => !d.last_seen);
         if (v === "blocked") return list.filter((d) => blockedDevices.value.has(d.ip_address));
+        if (v === "verified") return list.filter((d) => d.verified);
+        if (v === "observed") return list.filter((d) => !d.verified);
         return list;
       case "type":
         return list.filter((d) => (d.device_type ?? "").toLowerCase().includes(v));
@@ -617,7 +641,18 @@ onMounted(async () => {
                 <div class="text-[0.65rem] text-[var(--np-text-dim)] mt-0.5">{{ d.hostname || d.mac_address || 'Unknown' }}</div>
               </td>
               <td class="px-3 hidden sm:table-cell" :class="'py-2.5'">
-                <span class="sp-badge">{{ d.is_gateway ? 'Gateway' : (d.device_type || 'Unknown') }}</span>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="sp-badge">{{ d.is_gateway ? 'Gateway' : (d.device_type || 'Unknown') }}</span>
+                  <span
+                    class="rounded px-1.5 py-0.5 text-[0.55rem] uppercase tracking-wide border"
+                    :class="d.verified
+                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                      : 'border-[var(--np-border-subtle)] text-[var(--np-text-dim)]'"
+                    :title="verificationTitle(d)"
+                  >
+                    {{ verificationLabel(d) }}
+                  </span>
+                </div>
               </td>
               <td class="px-3 hidden md:table-cell text-[var(--np-text-dim)]/50" :class="'py-2.5'">
                 {{ d.zone || '—' }}

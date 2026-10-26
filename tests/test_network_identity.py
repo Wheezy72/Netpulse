@@ -46,13 +46,28 @@ class TestFingerprint:
         second = profile(gateway_mac="112233445566")
         assert first.key != second.key
 
-    def test_different_subnet_is_a_different_network(self) -> None:
-        assert profile(gateway_mac="AABBCCDDEEFF").key != profile(
+    def test_the_subnet_is_not_part_of_the_identity(self) -> None:
+        """Same router, different subnet reading: still one network.
+
+        Subnet detection is the fragile half of the fingerprint — it fails
+        whenever scapy cannot enumerate interfaces, and keying on it produced a
+        duplicate "unknown subnet" row next to the real one. The gateway's MAC
+        is what identifies a network.
+        """
+        assert profile(gateway_mac="AABBCCDDEEFF").key == profile(
             cidr="10.0.0.0/24", gateway_mac="AABBCCDDEEFF"
         ).key
+        assert profile(gateway_mac="AABBCCDDEEFF", cidr="").key == "mac:AABBCCDDEEFF"
 
     def test_unknown_mac_still_identifies_by_subnet(self) -> None:
-        assert profile().key == "192.168.1.0/24|-"
+        assert profile().key == "cidr:192.168.1.0/24"
+
+    def test_no_mac_and_no_subnet_falls_back_to_the_gateway(self) -> None:
+        assert profile(cidr="").key == "gw:192.168.1.1"
+
+    def test_legacy_keys_are_still_offered_for_lookup(self) -> None:
+        # Rows written before the key changed keep their inventory.
+        assert "192.168.1.0/24|AABBCCDDEEFF" in profile(gateway_mac="AABBCCDDEEFF").legacy_keys
 
 
 class TestDefaultName:
@@ -122,7 +137,7 @@ class TestProfileDetection:
         assert detected is not None
         assert detected.cidr == "10.0.0.0/24"
         assert detected.interface == "eth0"
-        assert detected.key == "10.0.0.0/24|AABBCCDDEEFF"
+        assert detected.key == "mac:AABBCCDDEEFF"
 
     def test_nothing_attached_means_no_network(self, monkeypatch) -> None:
         monkeypatch.setattr(identity, "_attached_subnets", lambda: ([], None))
@@ -146,6 +161,77 @@ class TestProfileDetection:
             assert len(calls) == 2
         finally:
             identity.invalidate_cache()
+
+
+class TestDeviceFold:
+    """Folding the duplicate device rows that duplicate networks produced.
+
+    Two rows for one address on one network is the shape that made the UI show
+    "2 of everything", and the merge has to keep every fact it had.
+    """
+
+    @staticmethod
+    def row(**overrides):
+        values = {
+            "id": 1,
+            "network_id": 1,
+            "ip_address": "192.168.1.101",
+            "hostname": None,
+            "mac_address": None,
+            "vendor": None,
+            "device_type": None,
+            "os": None,
+            "zone": None,
+            "verified": False,
+            "verified_at": None,
+            "verified_source": None,
+            "last_seen": None,
+            "is_gateway": False,
+        }
+        values.update(overrides)
+        return type("Row", (), values)()
+
+    def test_blank_fields_are_filled_from_the_other_row(self) -> None:
+        keep = self.row(hostname=None, mac_address=None)
+        drop = self.row(hostname="immortan", mac_address="AABBCCDDEEFF")
+
+        identity.merge_device_details(keep, drop)
+
+        assert keep.hostname == "immortan"
+        assert keep.mac_address == "AABBCCDDEEFF"
+
+    def test_known_fields_are_not_overwritten(self) -> None:
+        keep = self.row(hostname="immortan")
+        drop = self.row(hostname="stale-name")
+
+        identity.merge_device_details(keep, drop)
+
+        assert keep.hostname == "immortan"
+
+    def test_verification_is_kept_from_either_row(self) -> None:
+        keep = self.row(verified=False)
+        drop = self.row(verified=True, verified_at="2026-10-26", verified_source="router")
+
+        identity.merge_device_details(keep, drop)
+
+        assert keep.verified is True
+        assert keep.verified_source == "router"
+
+    def test_the_most_recent_sighting_wins(self) -> None:
+        keep = self.row(last_seen="2026-10-26T05:00:00")
+        drop = self.row(last_seen="2026-10-26T06:00:00")
+
+        identity.merge_device_details(keep, drop)
+
+        assert keep.last_seen == "2026-10-26T06:00:00"
+
+    def test_gateway_flag_is_sticky(self) -> None:
+        keep = self.row(is_gateway=False)
+        drop = self.row(is_gateway=True)
+
+        identity.merge_device_details(keep, drop)
+
+        assert keep.is_gateway is True
 
 
 class TestDiscoverySignature:

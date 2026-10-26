@@ -1,7 +1,27 @@
 <script setup lang="ts">
+/**
+ * Logs — a stream viewer, not a table dump.
+ *
+ * The page follows one reading order: what is happening (counts), then the
+ * filter that narrows it, then the stream itself, with a status bar that says
+ * how current the view is. Levels are shown as a coloured dot and their name,
+ * never as a bright slab, so a page of warnings stays readable.
+ */
 import axios from "axios";
-import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
-import { Download, Pause, Play, RefreshCw, Search, Trash2 } from "lucide-vue-next";
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
+import {
+  ArrowDownToLine,
+  ChevronDown,
+  CircleAlert,
+  Copy,
+  Check,
+  Pause,
+  Play,
+  RefreshCw,
+  Search,
+  Trash2,
+  X,
+} from "lucide-vue-next";
 
 type Theme = "nightshade" | "sysadmin";
 
@@ -70,22 +90,40 @@ const stats = ref<LogStats>({
 });
 const initialLoading = ref(true);
 const error = ref<string | null>(null);
+const lastLoadedAt = ref<Date | null>(null);
 
-const showSystemErrors = ref(false);
 const expandedRows = ref<Set<number>>(new Set());
+const copiedSeq = ref<number | null>(null);
 
 /** Highest seq already displayed — everything above it is new. */
 const cursor = ref(0);
 let newRowTimer: number | null = null;
 
 const levelFilter = ref<string>("all");
+/** "Errors" is a view over two levels, so it cannot be a server-side filter. */
+const errorFocus = ref(false);
 const searchQuery = ref<string>("");
+const searchInput = ref<HTMLInputElement | null>(null);
 const autoRefresh = ref(true);
 const refreshInterval = ref<number | null>(null);
 
-function levelClass(level: string): string {
-  const known = ["debug", "info", "warning", "error", "critical"];
-  return `np-level-${known.includes(level) ? level : "info"}`;
+const LEVELS = ["debug", "info", "warning", "error", "critical"] as const;
+type Level = (typeof LEVELS)[number];
+
+const LEVEL_COLOR: Record<Level, string> = {
+  debug: "var(--np-text-dim)",
+  info: "var(--np-info)",
+  warning: "var(--np-warning)",
+  error: "var(--np-danger)",
+  critical: "var(--np-danger)",
+};
+
+function levelOf(level: string): Level {
+  return (LEVELS as readonly string[]).includes(level) ? (level as Level) : "info";
+}
+
+function levelColor(level: string): string {
+  return LEVEL_COLOR[levelOf(level)];
 }
 
 function isErrorLevel(level: string): boolean {
@@ -146,8 +184,9 @@ async function loadLogs(options: { incremental?: boolean } = {}): Promise<void> 
 
     ingest(logsResponse.data.logs, incremental ? "append" : "replace");
     stats.value = statsResponse.data;
+    lastLoadedAt.value = new Date();
   } catch {
-    error.value = "Failed to load logs";
+    error.value = "Could not reach the log buffer. The API may be restarting.";
   } finally {
     initialLoading.value = false;
   }
@@ -161,7 +200,7 @@ async function clearLogs(): Promise<void> {
     logs.value = [];
     await loadLogs();
   } catch {
-    error.value = "Failed to clear logs";
+    error.value = "Could not clear the buffer";
   }
 }
 
@@ -170,6 +209,19 @@ function toggleRow(seq: number): void {
   if (next.has(seq)) next.delete(seq);
   else next.add(seq);
   expandedRows.value = next;
+}
+
+async function copyRow(entry: LogEntry): Promise<void> {
+  const line = `${entry.timestamp} ${entry.level.toUpperCase()} ${entry.logger} — ${entry.message}`;
+  try {
+    await navigator.clipboard.writeText(line);
+    copiedSeq.value = entry.seq;
+    window.setTimeout(() => {
+      if (copiedSeq.value === entry.seq) copiedSeq.value = null;
+    }, 1600);
+  } catch {
+    // Clipboard is permission-gated; the row stays selectable instead.
+  }
 }
 
 function formatTimestamp(ts: string): string {
@@ -183,13 +235,15 @@ function formatTimestamp(ts: string): string {
   });
 }
 
+function formatDetail(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  return String(value);
+}
+
 const filteredLogs = computed(() => {
-  let list = logs.value;
-  if (!showSystemErrors.value) {
-    list = list.filter((log) => !isErrorLevel(log.level));
-  }
   const raw = searchQuery.value.trim();
-  if (!raw) return list;
+  if (!raw) return logs.value;
 
   // Try regex, fall back to plain substring.
   let pattern: RegExp | null = null;
@@ -198,19 +252,47 @@ const filteredLogs = computed(() => {
   } catch {
     // invalid regex — substring match instead
   }
-  return list.filter((log) => {
+  return logs.value.filter((log) => {
     const haystack = `${log.message} ${log.logger} ${log.module ?? ""} ${log.function ?? ""}`;
     return pattern ? pattern.test(haystack) : haystack.toLowerCase().includes(raw.toLowerCase());
   });
 });
 
-const levelSummary = computed(() => [
-  { key: "debug", label: "debug", count: stats.value.debug },
-  { key: "info", label: "info", count: stats.value.info },
-  { key: "warning", label: "warn", count: stats.value.warning },
-  { key: "error", label: "error", count: stats.value.error },
-  { key: "critical", label: "crit", count: stats.value.critical },
+const levelChips = computed(() => [
+  { key: "all", label: "All", count: stats.value.total },
+  { key: "error", label: "Errors", count: stats.value.error + stats.value.critical },
+  { key: "warning", label: "Warnings", count: stats.value.warning },
+  { key: "info", label: "Info", count: stats.value.info },
+  { key: "debug", label: "Debug", count: stats.value.debug },
 ]);
+
+function selectLevel(key: string): void {
+  // "Errors" covers error and critical, which the API cannot express in one
+  // query, so that chip filters what is already loaded. The rest map to one
+  // server-side level each.
+  if (key === "error") {
+    errorFocus.value = true;
+    if (levelFilter.value !== "all") {
+      levelFilter.value = "all";
+      return; // the levelFilter watcher reloads with the full buffer
+    }
+    if (logs.value.length === 0) void loadLogs();
+    return;
+  }
+  errorFocus.value = false;
+  levelFilter.value = key;
+}
+
+function chipActive(key: string): boolean {
+  if (key === "error") return errorFocus.value;
+  return !errorFocus.value && levelFilter.value === key;
+}
+
+const visibleLogs = computed(() =>
+  errorFocus.value ? filteredLogs.value.filter((log) => isErrorLevel(log.level)) : filteredLogs.value
+);
+
+const filteredCount = computed(() => visibleLogs.value.length);
 
 function toggleAutoRefresh(): void {
   autoRefresh.value = !autoRefresh.value;
@@ -247,7 +329,17 @@ async function downloadLogsPDF(): Promise<void> {
     link.click();
     window.URL.revokeObjectURL(url);
   } catch {
-    error.value = "Failed to download PDF report";
+    error.value = "Could not build the PDF report";
+  }
+}
+
+/** "/" jumps to search without stealing characters from an input. */
+function onKeydown(event: KeyboardEvent): void {
+  const target = event.target as HTMLElement | null;
+  const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA";
+  if (event.key === "/" && !typing) {
+    event.preventDefault();
+    void nextTick(() => searchInput.value?.focus());
   }
 }
 
@@ -272,13 +364,14 @@ const syslogSourceFilter = ref("");
 const syslogSearchFilter = ref("");
 const syslogToggling = ref(false);
 
-function getSeverityClass(severity: string): string {
+function getSeverityColor(severity: string): string {
   const s = severity.toLowerCase();
-  if (s === "emergency" || s === "alert" || s === "critical") return "np-level-critical";
-  if (s === "error") return "np-level-error";
-  if (s === "warning") return "np-level-warning";
-  if (s === "debug") return "np-level-debug";
-  return "np-level-info";
+  if (s === "emergency" || s === "alert" || s === "critical" || s === "error") {
+    return "var(--np-danger)";
+  }
+  if (s === "warning") return "var(--np-warning)";
+  if (s === "debug") return "var(--np-text-dim)";
+  return "var(--np-info)";
 }
 
 async function loadSyslogStatus(): Promise<void> {
@@ -310,7 +403,7 @@ async function loadSyslogMessages(): Promise<void> {
     syslogTotal.value = msgRes.data.total;
     syslogStatus.value = statusRes.data;
   } catch {
-    syslogError.value = "Failed to load syslog messages";
+    syslogError.value = "Could not load syslog messages";
   } finally {
     syslogLoading.value = false;
   }
@@ -327,7 +420,7 @@ async function toggleSyslogListener(): Promise<void> {
     }
     await loadSyslogStatus();
   } catch {
-    syslogError.value = "Failed to toggle syslog listener";
+    syslogError.value = "Could not change the listener state";
   } finally {
     syslogToggling.value = false;
   }
@@ -340,7 +433,7 @@ async function clearSyslogMessages(): Promise<void> {
     syslogPage.value = 0;
     await loadSyslogMessages();
   } catch {
-    syslogError.value = "Failed to clear syslog messages";
+    syslogError.value = "Could not clear syslog messages";
   }
 }
 
@@ -372,283 +465,380 @@ watch(activeTab, (tab) => {
 onMounted(() => {
   void loadLogs();
   if (autoRefresh.value) startAutoRefresh();
+  document.addEventListener("keydown", onKeydown);
 });
 
 onUnmounted(() => {
   stopAutoRefresh();
+  document.removeEventListener("keydown", onKeydown);
   if (newRowTimer !== null) window.clearTimeout(newRowTimer);
 });
 </script>
 
 <template>
   <div class="np-fade-in space-y-4">
-    <!-- Same tab chrome as Settings: one tabs idiom across the app. -->
-    <div class="flex flex-wrap gap-1 border-b border-[var(--np-border-subtle)] pb-0">
-      <button
-        v-for="tab in [
-          { key: 'application', label: 'Application' },
-          { key: 'syslog', label: 'Syslog' },
-        ]"
-        :key="tab.key"
-        type="button"
-        class="np-subtab-btn -mb-px flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-xs transition-all duration-300"
-        :class="{ active: activeTab === tab.key }"
-        @click="activeTab = tab.key as 'application' | 'syslog'"
-      >
-        {{ tab.label }}
-      </button>
-    </div>
+    <!-- Page header: what this page is, and the two streams it carries. -->
+    <header class="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h1 class="text-lg font-bold tracking-tight text-[var(--np-text)]">Logs</h1>
+        <p class="mt-1 text-xs text-[var(--np-text-dim)]">
+          Everything the API and the worker have said, streamed live.
+        </p>
+      </div>
+      <div class="flex gap-1 rounded-lg border border-[var(--np-border-subtle)] p-1">
+        <button
+          v-for="tab in [
+            { key: 'application', label: 'Application' },
+            { key: 'syslog', label: 'Syslog' },
+          ]"
+          :key="tab.key"
+          type="button"
+          class="rounded-md px-3 py-1.5 text-xs font-semibold transition-colors"
+          :class="
+            activeTab === tab.key
+              ? 'bg-[var(--np-surface-hover)] text-[var(--np-text)]'
+              : 'text-[var(--np-text-dim)] hover:text-[var(--np-text)]'
+          "
+          @click="activeTab = tab.key as 'application' | 'syslog'"
+        >
+          {{ tab.label }}
+        </button>
+      </div>
+    </header>
 
-    <!-- Application logs -->
-    <section v-if="activeTab === 'application'" class="np-panel p-4">
-      <header class="np-panel-header -mx-4 -mt-4 mb-3 px-4">
-        <div class="flex flex-col">
-          <span class="np-panel-title">Logs</span>
-          <span class="text-[0.7rem] text-[var(--np-text-dim)]/50">
-            Application output, live.
-          </span>
+    <!-- ── Application stream ─────────────────────────────────────────── -->
+    <section
+      v-if="activeTab === 'application'"
+      class="overflow-hidden rounded-xl border border-[var(--np-border-subtle)] bg-[var(--np-surface)]"
+    >
+      <!-- Toolbar. One row: state, level filters, search, actions. -->
+      <div class="flex flex-wrap items-center gap-2 border-b border-[var(--np-border-subtle)] px-3 py-2">
+        <button
+          type="button"
+          class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[0.65rem] font-semibold transition-colors"
+          :class="
+            autoRefresh
+              ? 'border-[var(--np-accent-border)] bg-[var(--np-accent-soft)] text-[var(--np-accent)]'
+              : 'border-[var(--np-border-subtle)] text-[var(--np-text-dim)] hover:text-[var(--np-text)]'
+          "
+          :title="autoRefresh ? 'Pause the live refresh' : 'Resume the live refresh'"
+          @click="toggleAutoRefresh"
+        >
+          <span
+            class="h-1.5 w-1.5 rounded-full bg-current"
+            :class="autoRefresh ? 'animate-pulse' : 'opacity-50'"
+          />
+          {{ autoRefresh ? "Live" : "Paused" }}
+          <component
+            :is="autoRefresh ? Pause : Play"
+            class="h-3 w-3 opacity-60"
+            :stroke-width="1.7"
+          />
+        </button>
+
+        <div class="flex items-center gap-1">
+          <button
+            v-for="chip in levelChips"
+            :key="chip.key"
+            type="button"
+            class="flex items-center gap-1.5 rounded-md px-2 py-1 text-[0.65rem] font-medium transition-colors"
+            :class="
+              chipActive(chip.key)
+                ? 'bg-[var(--np-surface-hover)] text-[var(--np-text)]'
+                : 'text-[var(--np-text-dim)] hover:bg-[var(--np-surface-hover)]/60 hover:text-[var(--np-text)]'
+            "
+            :aria-pressed="chipActive(chip.key)"
+            @click="selectLevel(chip.key)"
+          >
+            <span
+              v-if="chip.key !== 'all'"
+              class="h-1.5 w-1.5 rounded-full"
+              :style="{ background: levelColor(chip.key) }"
+            />
+            {{ chip.label }}
+            <span class="font-mono tabular-nums opacity-60">{{ chip.count }}</span>
+          </button>
         </div>
-        <div class="flex items-center gap-2">
+
+        <div class="ml-auto flex flex-wrap items-center gap-2">
+          <div class="relative">
+            <Search
+              class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--np-text-dim)]"
+              :stroke-width="1.7"
+            />
+            <input
+              ref="searchInput"
+              v-model="searchQuery"
+              type="text"
+              placeholder="Search or regex…"
+              class="np-neon-input h-8 w-56 py-1 pl-8 pr-16 font-mono text-[0.7rem]"
+              aria-label="Filter loaded log lines"
+            />
+            <span
+              v-if="!searchQuery"
+              class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-[var(--np-border-subtle)] px-1 font-mono text-[0.55rem] text-[var(--np-text-dim)]"
+              >/</span
+            >
+            <button
+              v-else
+              type="button"
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--np-text-dim)] hover:text-[var(--np-text)]"
+              aria-label="Clear search"
+              @click="searchQuery = ''"
+            >
+              <X class="h-3.5 w-3.5" :stroke-width="1.7" />
+            </button>
+          </div>
+
+          <div class="flex items-center gap-1">
+            <button
+              type="button"
+              class="flex h-8 items-center gap-1.5 rounded-md px-2 text-[0.65rem] font-medium text-[var(--np-text-dim)] transition-colors hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)]"
+              title="Reload from the server"
+              @click="loadLogs()"
+            >
+              <RefreshCw class="h-3.5 w-3.5" :stroke-width="1.7" />
+              Refresh
+            </button>
+            <button
+              type="button"
+              class="flex h-8 items-center gap-1.5 rounded-md px-2 text-[0.65rem] font-medium text-[var(--np-text-dim)] transition-colors hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)]"
+              title="Download these logs as a PDF"
+              @click="downloadLogsPDF"
+            >
+              <ArrowDownToLine class="h-3.5 w-3.5" :stroke-width="1.7" />
+              PDF
+            </button>
+            <button
+              type="button"
+              class="flex h-8 items-center gap-1.5 rounded-md px-2 text-[0.65rem] font-medium text-[var(--np-text-dim)] transition-colors hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-danger)]"
+              title="Clear the in-memory buffer; files on disk are kept"
+              @click="clearLogs"
+            >
+              <Trash2 class="h-3.5 w-3.5" :stroke-width="1.7" />
+              Clear
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        v-if="error"
+        class="flex items-center gap-2 border-b border-[var(--np-danger)]/30 bg-[var(--np-danger)]/10 px-3 py-2 text-xs text-[var(--np-danger)]"
+      >
+        <CircleAlert class="h-3.5 w-3.5 shrink-0" :stroke-width="1.7" />
+        {{ error }}
+      </div>
+
+      <!-- Stream -->
+      <div class="custom-scrollbar max-h-[calc(100vh-17rem)] min-h-[18rem] overflow-y-auto">
+        <div v-if="initialLoading" class="space-y-1.5 p-3">
+          <div v-for="i in 8" :key="i" class="np-skeleton h-7 rounded"></div>
+        </div>
+
+        <div v-else-if="logs.length === 0" class="flex flex-col items-center gap-2 px-6 py-16 text-center">
+          <CircleAlert class="h-5 w-5 text-[var(--np-text-dim)]" :stroke-width="1.5" />
+          <p class="text-sm font-semibold text-[var(--np-text)]">Nothing logged in this session yet</p>
+          <p class="max-w-sm text-xs text-[var(--np-text-dim)]">
+            Lines appear here as the API and the worker write them. The buffer is
+            held in memory, so a restart starts a fresh one — the files on disk keep
+            the history.
+          </p>
+        </div>
+
+        <div
+          v-else-if="visibleLogs.length === 0"
+          class="flex flex-col items-center gap-2 px-6 py-16 text-center"
+        >
+          <Search class="h-5 w-5 text-[var(--np-text-dim)]" :stroke-width="1.5" />
+          <p class="text-sm font-semibold text-[var(--np-text)]">No lines match this filter</p>
+          <p class="text-xs text-[var(--np-text-dim)]">
+            {{ filteredCount }} of {{ logs.length }} loaded lines shown.
+          </p>
           <button
             type="button"
-            class="np-cyber-btn flex items-center gap-1.5"
-            :class="autoRefresh ? 'np-brand-border np-brand-text' : ''"
-            :title="autoRefresh ? 'Pause the live refresh' : 'Resume the live refresh'"
-            @click="toggleAutoRefresh"
+            class="mt-1 rounded-md border border-[var(--np-border-subtle)] px-2.5 py-1 text-[0.65rem] font-semibold text-[var(--np-text-muted)] hover:text-[var(--np-text)]"
+            @click="
+              searchQuery = '';
+              errorFocus = false;
+              levelFilter = 'all';
+            "
           >
-            <Pause v-if="autoRefresh" class="h-3.5 w-3.5" :stroke-width="1.7" />
-            <Play v-else class="h-3.5 w-3.5" :stroke-width="1.7" />
-            {{ autoRefresh ? 'Live' : 'Paused' }}
+            Clear filters
+          </button>
+        </div>
+
+        <div v-else class="divide-y divide-[var(--np-border-subtle)]">
+          <template v-for="log in visibleLogs" :key="log.seq">
+            <div
+              class="np-log-row group grid cursor-pointer grid-cols-[4.5rem_1.35rem_auto_1fr_auto] items-baseline gap-x-2 px-3 py-1.5 text-[0.7rem] hover:bg-[var(--np-surface-hover)]/60"
+              :class="{ 'np-log-row--new': log.isNew }"
+              role="button"
+              tabindex="0"
+              :aria-expanded="expandedRows.has(log.seq)"
+              @click="toggleRow(log.seq)"
+              @keydown.enter.prevent="toggleRow(log.seq)"
+              @keydown.space.prevent="toggleRow(log.seq)"
+            >
+              <span class="font-mono tabular-nums text-[var(--np-text-dim)]">
+                {{ formatTimestamp(log.timestamp) }}
+              </span>
+              <span
+                class="mt-[0.35rem] h-1.5 w-1.5 justify-self-center rounded-full"
+                :style="{ background: levelColor(log.level) }"
+                :title="log.level"
+              />
+              <span class="truncate font-mono text-[0.62rem] text-[var(--np-text-dim)]" :title="log.logger">
+                {{ log.logger }}
+              </span>
+              <p
+                class="min-w-0 break-words font-mono leading-relaxed"
+                :class="
+                  isErrorLevel(log.level)
+                    ? 'text-[var(--np-text)]'
+                    : 'text-[var(--np-text-muted)]'
+                "
+              >
+                {{ log.message }}
+              </p>
+              <div class="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                <button
+                  type="button"
+                  class="rounded p-0.5 text-[var(--np-text-dim)] hover:text-[var(--np-text)]"
+                  :title="copiedSeq === log.seq ? 'Copied' : 'Copy this line'"
+                  aria-label="Copy this log line"
+                  @click.stop="copyRow(log)"
+                >
+                  <component
+                    :is="copiedSeq === log.seq ? Check : Copy"
+                    class="h-3 w-3"
+                    :stroke-width="1.7"
+                  />
+                </button>
+                <ChevronDown
+                  class="h-3 w-3 text-[var(--np-text-dim)] transition-transform"
+                  :class="expandedRows.has(log.seq) ? 'rotate-180' : ''"
+                  :stroke-width="1.7"
+                />
+              </div>
+            </div>
+
+            <!-- Detail: where the line came from, and whatever it carried. -->
+            <div
+              v-if="expandedRows.has(log.seq)"
+              class="border-l-2 bg-[var(--np-surface-elevated)]/40 px-3 py-2"
+              :style="{ borderColor: levelColor(log.level) }"
+            >
+              <dl class="grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-1 font-mono text-[0.62rem]">
+                <dt class="text-[var(--np-text-dim)]">Level</dt>
+                <dd class="font-semibold" :style="{ color: levelColor(log.level) }">
+                  {{ log.level }}
+                </dd>
+                <dt class="text-[var(--np-text-dim)]">Logger</dt>
+                <dd class="break-all text-[var(--np-text-muted)]">{{ log.logger }}</dd>
+                <template v-if="log.module || log.function">
+                  <dt class="text-[var(--np-text-dim)]">Source</dt>
+                  <dd class="break-all text-[var(--np-text-muted)]">
+                    <span v-if="log.module">{{ log.module }}</span>
+                    <span v-if="log.function">:: {{ log.function }}()</span>
+                    <span v-if="log.line">:{{ log.line }}</span>
+                  </dd>
+                </template>
+                <template v-if="Object.keys(log.extra || {}).length">
+                  <dt class="text-[var(--np-text-dim)]">Extra</dt>
+                  <dd class="whitespace-pre-wrap break-all text-[var(--np-text-muted)]">
+                    {{ formatDetail(log.extra) }}
+                  </dd>
+                </template>
+                <template v-if="log.level === 'error' || log.level === 'critical'">
+                  <dt class="text-[var(--np-text-dim)]">Seen</dt>
+                  <dd class="text-[var(--np-text-muted)]">
+                    {{ new Date(log.timestamp).toLocaleString() }}
+                  </dd>
+                </template>
+              </dl>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Status bar: how much of what, and how fresh. -->
+      <div
+        class="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--np-border-subtle)] px-3 py-1.5 font-mono text-[0.6rem] text-[var(--np-text-dim)]"
+      >
+        <span>
+          {{ filteredCount }} of {{ logs.length }} loaded
+          <span class="opacity-70">·</span>
+          {{ stats.total }} in the buffer
+        </span>
+        <span class="opacity-70">·</span>
+        <span>{{ autoRefresh ? `refreshing every ${REFRESH_MS / 1000}s` : "refresh paused" }}</span>
+        <span v-if="lastLoadedAt" class="ml-auto">
+          updated {{ lastLoadedAt.toLocaleTimeString("en-US", { hour12: false }) }}
+        </span>
+      </div>
+    </section>
+
+    <!-- ── Syslog ─────────────────────────────────────────────────────── -->
+    <section
+      v-else
+      class="overflow-hidden rounded-xl border border-[var(--np-border-subtle)] bg-[var(--np-surface)]"
+    >
+      <div class="flex flex-wrap items-center gap-2 border-b border-[var(--np-border-subtle)] px-3 py-2">
+        <span
+          class="flex items-center gap-2 rounded-full border px-2.5 py-1 text-[0.65rem] font-semibold"
+          :class="
+            syslogStatus.running
+              ? 'border-[var(--np-accent-border)] bg-[var(--np-accent-soft)] text-[var(--np-accent)]'
+              : 'border-[var(--np-border-subtle)] text-[var(--np-text-dim)]'
+          "
+        >
+          <span
+            class="h-1.5 w-1.5 rounded-full bg-current"
+            :class="syslogStatus.running ? 'animate-pulse' : 'opacity-50'"
+          />
+          {{ syslogStatus.running ? `Listening on ${syslogStatus.port}` : "Listener stopped" }}
+          <span class="font-mono opacity-70">{{ syslogStatus.message_count }}</span>
+        </span>
+
+        <div class="ml-auto flex items-center gap-1">
+          <button
+            type="button"
+            class="flex h-8 items-center rounded-md px-2.5 text-[0.65rem] font-semibold transition-colors disabled:opacity-40"
+            :class="
+              syslogStatus.running
+                ? 'text-[var(--np-text-dim)] hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-danger)]'
+                : 'text-[var(--np-accent)] hover:bg-[var(--np-accent-soft)]'
+            "
+            :disabled="syslogToggling"
+            @click="toggleSyslogListener"
+          >
+            {{ syslogStatus.running ? "Stop listener" : "Start listener" }}
           </button>
           <button
             type="button"
-            class="np-cyber-btn flex items-center gap-1"
-            title="Download the log report as PDF"
-            @click="downloadLogsPDF"
-          >
-            <Download class="h-3.5 w-3.5" :stroke-width="1.7" />
-            PDF
-          </button>
-          <button
-            type="button"
-            class="np-cyber-btn flex items-center gap-1 disabled:opacity-40"
-            title="Reload from the server"
-            @click="loadLogs()"
+            class="flex h-8 items-center gap-1.5 rounded-md px-2 text-[0.65rem] font-medium text-[var(--np-text-dim)] hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)]"
+            @click="loadSyslogMessages"
           >
             <RefreshCw class="h-3.5 w-3.5" :stroke-width="1.7" />
             Refresh
           </button>
           <button
             type="button"
-            class="np-cyber-btn np-level-error flex items-center gap-1"
-            title="Clear the in-memory buffer"
-            @click="clearLogs"
+            class="flex h-8 items-center gap-1.5 rounded-md px-2 text-[0.65rem] font-medium text-[var(--np-text-dim)] hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-danger)]"
+            @click="clearSyslogMessages"
           >
             <Trash2 class="h-3.5 w-3.5" :stroke-width="1.7" />
             Clear
           </button>
         </div>
-      </header>
-
-      <!-- Level summary: a single quiet line instead of five coloured cards. -->
-      <div class="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[0.65rem]">
-        <span
-          v-for="item in levelSummary"
-          :key="item.key"
-          class="flex items-center gap-1.5"
-          :class="levelClass(item.key)"
-        >
-          <span class="h-1.5 w-1.5 rounded-full bg-current"></span>
-          <span class="uppercase tracking-wider opacity-70">{{ item.label }}</span>
-          <span class="font-bold tabular-nums">{{ item.count }}</span>
-        </span>
-        <button
-          type="button"
-          class="ml-auto text-[0.65rem] font-semibold uppercase tracking-wider transition-colors"
-          :class="
-            showSystemErrors
-              ? 'text-[var(--np-danger)]'
-              : 'text-[var(--np-text-dim)] hover:text-[var(--np-text)]'
-          "
-          @click="showSystemErrors = !showSystemErrors"
-        >
-          {{ showSystemErrors ? "Hide errors" : "Show errors" }}
-        </button>
       </div>
 
-      <!-- Filters -->
-      <div class="mt-3 flex flex-wrap items-center gap-2">
-        <select v-model="levelFilter" class="np-neon-input px-3 py-1.5 text-xs">
-          <option value="all">All levels</option>
-          <option value="debug">Debug</option>
-          <option value="info">Info</option>
-          <option value="warning">Warning</option>
-          <option value="error">Error</option>
-          <option value="critical">Critical</option>
-        </select>
-        <div class="relative min-w-[200px] flex-1">
-          <Search
-            class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
-            style="color: var(--np-text-dim)"
-            :stroke-width="1.7"
-          />
-          <input
-            v-model="searchQuery"
-            type="text"
-            placeholder="Filter loaded lines, or a regex (ERROR|WARN)…"
-            class="np-neon-input w-full py-1.5 pl-8 pr-8 text-xs"
-          />
-          <button
-            v-if="searchQuery"
-            type="button"
-            class="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--np-text-dim)]"
-            aria-label="Clear search"
-            @click="searchQuery = ''"
-          >
-            ×
-          </button>
-        </div>
-      </div>
-
-      <div v-if="error" class="np-level-error mt-3 rounded px-4 py-3 text-xs">
-        {{ error }}
-      </div>
-
-      <!-- Rows: keyed by server seq, so an appended line mounts one node. -->
-      <div
-        class="mt-3 max-h-[calc(100vh-26rem)] min-h-[16rem] overflow-y-auto rounded border"
-        style="border-color: var(--np-border-subtle); background: var(--np-surface)"
-      >
-        <div v-if="initialLoading" class="space-y-1.5 p-2">
-          <div v-for="i in 8" :key="i" class="np-skeleton h-9 rounded"></div>
-        </div>
-        <p
-          v-else-if="filteredLogs.length === 0"
-          class="p-10 text-center text-xs"
-          style="color: var(--np-text-dim)"
-        >
-          No log lines match this filter.
-        </p>
-        <div
-          v-for="log in filteredLogs"
-          v-else
-          :key="log.seq"
-          class="np-log-row flex items-start gap-3 border-b px-3 py-2 transition-colors hover:bg-[var(--np-surface-hover)]"
-          :class="{ 'np-log-row--new': log.isNew, 'cursor-pointer': isErrorLevel(log.level) }"
-          style="border-color: var(--np-border-subtle)"
-          @click="isErrorLevel(log.level) ? toggleRow(log.seq) : undefined"
-        >
-          <span
-            class="mt-0.5 shrink-0 font-mono text-[0.7rem] tabular-nums"
-            style="color: var(--np-text-muted)"
-            >{{ formatTimestamp(log.timestamp) }}</span
-          >
-          <span
-            class="mt-0.5 w-14 shrink-0 rounded px-1.5 py-0.5 text-center text-[0.6rem] font-bold uppercase"
-            :class="levelClass(log.level)"
-            >{{ log.level }}</span
-          >
-          <div class="min-w-0 flex-1">
-            <div class="flex items-baseline gap-2">
-              <span
-                class="truncate font-mono text-[0.65rem]"
-                style="color: var(--np-text-dim)"
-                >{{ log.logger }}</span
-              >
-              <span
-                v-if="isErrorLevel(log.level)"
-                class="shrink-0 font-mono text-[0.6rem]"
-                style="color: var(--np-text-dim)"
-              >
-                {{ expandedRows.has(log.seq) ? "collapse" : "details" }}
-              </span>
-            </div>
-            <p
-              class="font-mono text-xs leading-relaxed"
-              style="color: var(--np-text)"
-              :class="
-                isErrorLevel(log.level) && !expandedRows.has(log.seq)
-                  ? 'line-clamp-2'
-                  : 'break-words'
-              "
-            >
-              {{ log.message }}
-            </p>
-            <p
-              v-if="expandedRows.has(log.seq) && (log.module || log.function)"
-              class="mt-0.5 font-mono text-[0.6rem]"
-              style="color: var(--np-text-dim)"
-            >
-              <span v-if="log.module">{{ log.module }}</span>
-              <span v-if="log.function"> :: {{ log.function }}()</span>
-              <span v-if="log.line">:{{ log.line }}</span>
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <p class="mt-2 text-[0.65rem]" style="color: var(--np-text-dim)">
-        Showing {{ filteredLogs.length }} of {{ stats.total }} buffered entries ·
-        {{ autoRefresh ? `live every ${REFRESH_MS / 1000}s` : "refresh paused" }}
-      </p>
-    </section>
-
-    <!-- Syslog -->
-    <section v-else class="np-panel p-4">
-      <header class="np-panel-header -mx-4 -mt-4 mb-3 px-4">
-        <div class="flex flex-col">
-          <span class="np-panel-title">Syslog</span>
-          <span class="text-[0.7rem] text-[var(--np-text-dim)]/50">
-            UDP listener on port {{ syslogStatus.port }}.
-          </span>
-        </div>
-        <div class="flex items-center gap-2">
-          <span
-            class="flex items-center gap-2 rounded border px-2.5 py-1.5 text-[0.65rem]"
-            style="border-color: var(--np-border-subtle)"
-          >
-            <span
-              class="h-1.5 w-1.5 rounded-full"
-              :class="syslogStatus.running ? 'animate-pulse' : ''"
-              :style="{
-                background: syslogStatus.running
-                  ? 'var(--np-accent)'
-                  : 'var(--np-text-dim)',
-              }"
-            ></span>
-            <span style="color: var(--np-text-muted)">{{
-              syslogStatus.running ? "Listening" : "Stopped"
-            }}</span>
-            <span class="font-mono" style="color: var(--np-text)">{{
-              syslogStatus.message_count
-            }}</span>
-          </span>
-          <button
-            type="button"
-            class="np-cyber-btn disabled:opacity-40"
-            :class="syslogStatus.running ? 'np-level-error' : 'np-brand-border np-brand-text'"
-            :disabled="syslogToggling"
-            @click="toggleSyslogListener"
-          >
-            {{ syslogToggling ? "…" : syslogStatus.running ? "Stop" : "Start" }}
-          </button>
-          <button
-            type="button"
-            class="np-cyber-btn disabled:opacity-40"
-            @click="loadSyslogMessages"
-          >
-            Refresh
-          </button>
-          <button type="button" class="np-cyber-btn np-level-error" @click="clearSyslogMessages">
-            Clear
-          </button>
-        </div>
-      </header>
-
-      <div class="flex flex-wrap items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2 border-b border-[var(--np-border-subtle)] px-3 py-2">
         <select
           v-model="syslogSeverityFilter"
-          class="np-neon-input px-3 py-1.5 text-xs"
+          class="np-neon-input h-8 cursor-pointer px-2 text-[0.7rem]"
+          aria-label="Severity"
           @change="syslogApplyFilters"
         >
           <option value="">All severities</option>
@@ -663,91 +853,81 @@ onUnmounted(() => {
         <input
           v-model="syslogSourceFilter"
           type="text"
-          placeholder="Source IP…"
-          class="np-neon-input w-36 px-3 py-1.5 font-mono text-xs"
+          placeholder="Source IP"
+          class="np-neon-input h-8 w-36 px-2 font-mono text-[0.7rem]"
+          aria-label="Source IP"
           @keyup.enter="syslogApplyFilters"
         />
-        <div class="relative min-w-[160px] flex-1">
-          <input
-            v-model="syslogSearchFilter"
-            type="text"
-            placeholder="Search messages…"
-            class="np-neon-input w-full px-3 py-1.5 pr-8 text-xs"
-            @keyup.enter="syslogApplyFilters"
-          />
-          <button
-            v-if="syslogSearchFilter"
-            type="button"
-            class="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--np-text-dim)]"
-            aria-label="Clear search"
-            @click="
-              syslogSearchFilter = '';
-              syslogApplyFilters();
-            "
-          >
-            ×
-          </button>
-        </div>
-      </div>
-
-      <div v-if="syslogError" class="np-level-error mt-3 rounded px-4 py-3 text-xs">
-        {{ syslogError }}
+        <input
+          v-model="syslogSearchFilter"
+          type="text"
+          placeholder="Search messages"
+          class="np-neon-input h-8 min-w-[12rem] flex-1 px-2 text-[0.7rem]"
+          aria-label="Search syslog messages"
+          @keyup.enter="syslogApplyFilters"
+        />
+        <button
+          type="button"
+          class="rounded-md border border-[var(--np-border-subtle)] px-2.5 py-1 text-[0.65rem] font-semibold text-[var(--np-text-muted)] hover:text-[var(--np-text)]"
+          @click="syslogApplyFilters"
+        >
+          Apply
+        </button>
       </div>
 
       <div
-        class="mt-3 overflow-x-auto rounded border"
-        style="border-color: var(--np-border-subtle); background: var(--np-surface)"
+        v-if="syslogError"
+        class="border-b border-[var(--np-danger)]/30 bg-[var(--np-danger)]/10 px-3 py-2 text-xs text-[var(--np-danger)]"
       >
+        {{ syslogError }}
+      </div>
+
+      <div class="custom-scrollbar max-h-[calc(100vh-19rem)] overflow-auto">
         <p
           v-if="syslogMessages.length === 0 && !syslogLoading"
-          class="p-10 text-center text-xs"
-          style="color: var(--np-text-dim)"
+          class="px-6 py-16 text-center text-xs text-[var(--np-text-dim)]"
         >
-          Nothing received yet.
+          Nothing received yet. Point a device's syslog at UDP
+          {{ syslogStatus.port }} and its messages land here.
         </p>
-        <table v-else class="w-full text-left text-xs tabular-nums">
-          <thead>
-            <tr class="border-b" style="border-color: var(--np-border-subtle)">
+        <table v-else class="w-full text-left text-[0.7rem]">
+          <thead class="sticky top-0 bg-[var(--np-surface-elevated)]">
+            <tr class="border-b border-[var(--np-border-subtle)]">
               <th
                 v-for="head in ['Received', 'Source', 'Severity', 'Host', 'Message']"
                 :key="head"
-                class="px-3 py-2 text-[0.6rem] font-semibold uppercase tracking-wider"
-                style="color: var(--np-text-dim)"
+                class="px-3 py-2 text-[0.6rem] font-semibold text-[var(--np-text-dim)]"
               >
                 {{ head }}
               </th>
             </tr>
           </thead>
-          <tbody>
+          <tbody class="divide-y divide-[var(--np-border-subtle)]">
             <tr
               v-for="(msg, idx) in syslogMessages"
               :key="idx"
-              class="border-b transition-colors last:border-0 hover:bg-[var(--np-surface-hover)]"
-              style="border-color: var(--np-border-subtle)"
+              class="hover:bg-[var(--np-surface-hover)]/60"
             >
-              <td class="whitespace-nowrap px-3 py-1.5 font-mono" style="color: var(--np-text-muted)">
+              <td class="whitespace-nowrap px-3 py-1.5 font-mono tabular-nums text-[var(--np-text-dim)]">
                 {{ msg.timestamp }}
               </td>
-              <td
-                class="whitespace-nowrap px-3 py-1.5 font-mono"
-                style="color: var(--np-accent-secondary)"
-              >
+              <td class="whitespace-nowrap px-3 py-1.5 font-mono text-[var(--np-text-muted)]">
                 {{ msg.source_ip }}
               </td>
               <td class="whitespace-nowrap px-3 py-1.5">
-                <span
-                  class="rounded px-1.5 py-0.5 text-[0.6rem] font-bold uppercase"
-                  :class="getSeverityClass(msg.severity)"
-                >
+                <span class="flex items-center gap-1.5 text-[0.65rem]">
+                  <span
+                    class="h-1.5 w-1.5 rounded-full"
+                    :style="{ background: getSeverityColor(msg.severity) }"
+                  />
                   {{ msg.severity }}
                 </span>
               </td>
-              <td class="whitespace-nowrap px-3 py-1.5 font-mono" style="color: var(--np-text-dim)">
+              <td class="whitespace-nowrap px-3 py-1.5 font-mono text-[var(--np-text-dim)]">
                 {{ msg.hostname }}
               </td>
               <td
-                class="max-w-md truncate px-3 py-1.5 font-mono"
-                style="color: var(--np-text)"
+                class="max-w-md truncate px-3 py-1.5 font-mono text-[var(--np-text)]"
                 :title="msg.message"
               >
                 {{ msg.message }}
@@ -757,25 +937,23 @@ onUnmounted(() => {
         </table>
       </div>
 
-      <div class="mt-2 flex items-center justify-between">
-        <p class="text-[0.65rem]" style="color: var(--np-text-dim)">
-          Showing {{ syslogMessages.length }} of {{ syslogTotal }} messages
-        </p>
+      <div
+        class="flex items-center justify-between border-t border-[var(--np-border-subtle)] px-3 py-1.5 font-mono text-[0.6rem] text-[var(--np-text-dim)]"
+      >
+        <span>{{ syslogMessages.length }} of {{ syslogTotal }} messages</span>
         <div class="flex items-center gap-2">
           <button
             type="button"
-            class="np-cyber-btn px-2 py-1 text-xs disabled:opacity-30"
+            class="rounded px-2 py-0.5 hover:text-[var(--np-text)] disabled:opacity-30"
             :disabled="syslogPage === 0"
             @click="syslogPrevPage"
           >
             Prev
           </button>
-          <span class="font-mono text-xs" style="color: var(--np-text-dim)">
-            {{ syslogPage + 1 }} / {{ syslogTotalPages }}
-          </span>
+          <span>{{ syslogPage + 1 }} / {{ syslogTotalPages }}</span>
           <button
             type="button"
-            class="np-cyber-btn px-2 py-1 text-xs disabled:opacity-30"
+            class="rounded px-2 py-0.5 hover:text-[var(--np-text)] disabled:opacity-30"
             :disabled="syslogPage >= syslogTotalPages - 1"
             @click="syslogNextPage"
           >

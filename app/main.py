@@ -42,7 +42,6 @@ from app.db.session import engine, async_session_factory
 from app.services.passive_monitor import run_passive_monitor
 from app.services.logging_service import setup_logging
 from app.api.deps import get_password_hash
-from app.models.device import Device
 from app.models.user import User, UserRole
 
 import app.models  # noqa: F401 – ensure all models are registered with SQLAlchemy
@@ -77,6 +76,16 @@ _NETWORK_SCHEMA_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS ix_devices_network_id ON devices (network_id)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_devices_network_ip "
     "ON devices (network_id, ip_address)",
+)
+
+# Router verification arrived the same way: devices gain columns that
+# `create_all` cannot add to an existing table. Idempotent, and matching
+# migrations/20261025_add_device_verification.sql for scripted upgrades.
+_VERIFICATION_SCHEMA_STATEMENTS = (
+    "ALTER TABLE devices "
+    "ADD COLUMN IF NOT EXISTS verified BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE devices ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ",
+    "ALTER TABLE devices ADD COLUMN IF NOT EXISTS verified_source VARCHAR(32)",
 )
 
 
@@ -209,6 +218,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                         exc,
                     )
 
+            #     Verification columns are independent of the network ones, so a
+            #     failure in either group cannot stop the other from applying.
+            if engine.dialect.name == "postgresql":
+                try:
+                    from sqlalchemy import text
+
+                    async with engine.begin() as conn:
+                        for statement in _VERIFICATION_SCHEMA_STATEMENTS:
+                            await conn.execute(text(statement))
+                except Exception as exc:
+                    logger.warning(
+                        "Could not add the verification columns (%s). Apply "
+                        "migrations/20261025_add_device_verification.sql by hand.",
+                        exc,
+                    )
+
             # 2. TimescaleDB is optional. Only Postgres can carry the
             #    extension, and a plain Postgres install or a restricted user
             #    is a normal configuration, not an error worth a full SQL
@@ -274,23 +299,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # into the network this machine is on, otherwise an upgraded install would
     # show an empty inventory until every device happened to be swept again.
     try:
-        from sqlalchemy import update
-
-        from app.services.network_identity import resolve_current_network
+        from app.services.network_identity import (
+            adopt_orphan_devices,
+            resolve_current_network,
+        )
 
         async with async_session_factory() as session:  # type: ignore
             current_network = await resolve_current_network(session)
             if current_network is not None:
-                adopted = await session.execute(
-                    update(Device)
-                    .where(Device.network_id.is_(None))
-                    .values(network_id=current_network.id)
-                )
-                if adopted.rowcount:
-                    await session.commit()
+                # Fold-aware: a raw UPDATE broke on uq_devices_network_ip as
+                # soon as an orphan shared an address with a swept device.
+                adopted = await adopt_orphan_devices(session, current_network)
+                if adopted:
                     logger.info(
                         "Assigned %s pre-network device(s) to '%s'.",
-                        adopted.rowcount,
+                        adopted,
                         current_network.name,
                     )
     except Exception as exc:

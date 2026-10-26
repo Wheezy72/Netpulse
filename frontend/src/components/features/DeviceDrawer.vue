@@ -32,6 +32,11 @@ interface DeviceIdentity {
   zone?: string | null;
   last_seen?: string | null;
   created_at?: string | null;
+  // Router verification: the router's own tables listed this device, versus
+  // only this console having seen it.
+  verified?: boolean;
+  verified_at?: string | null;
+  verified_source?: string | null;
 }
 
 interface Vulnerability {
@@ -502,6 +507,26 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
                 <dt :style="{ color: 'var(--np-text-muted)' }">Last seen</dt>
                 <dd :title="absoluteTime(detail.device.last_seen)" :style="{ color: 'var(--np-text)' }">
                   {{ relativeTime(detail.device.last_seen) }}
+                </dd>
+              </div>
+              <div class="flex justify-between gap-3">
+                <dt :style="{ color: 'var(--np-text-muted)' }">Confirmed by</dt>
+                <dd class="text-right" :style="{ color: 'var(--np-text)' }">
+                  <span
+                    v-if="detail.device.verified"
+                    class="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[0.6rem] uppercase tracking-wide text-emerald-400"
+                    :title="`Router tables (${detail.device.verified_source || 'unknown source'}) at ${absoluteTime(detail.device.verified_at)}`"
+                  >
+                    Router · {{ detail.device.verified_source || 'verified' }}
+                  </span>
+                  <span
+                    v-else
+                    class="text-[0.6rem] uppercase tracking-wide"
+                    :style="{ color: 'var(--np-text-dim)' }"
+                    title="Only this console has seen it. The router did not list it on the last pull, so the row may be a stale probe answer."
+                  >
+                    Observed only
+                  </span>
                 </dd>
               </div>
             </dl>

@@ -6,30 +6,20 @@
  * scrollable canvas. On mobile the rail collapses into a slide-in drawer.
  */
 import { ref, computed, nextTick, onMounted, onUnmounted, watch } from "vue";
-import type { Component } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import axios from "axios";
 import { useMagicKeys } from "@vueuse/core";
 import {
   Bell,
   ChevronDown,
-  Fish,
-  LayoutDashboard,
   LoaderCircle,
   Menu,
-  Monitor,
   Moon,
-  Network,
-  Radar,
-  ScrollText,
-  Search,
-  Settings,
-  SquareTerminal,
   Sun,
-  Wrench,
   X,
 } from "lucide-vue-next";
 
+import AppGlyph from "./components/ui/AppGlyph.vue";
 import BrandLogo from "./components/ui/BrandLogo.vue";
 import CommandPalette from "./components/features/CommandPalette.vue";
 import Toast from "./components/ui/Toast.vue";
@@ -135,33 +125,18 @@ function showToast(type: "success" | "error" | "warning" | "info", message: stri
   notify(type, message);
 }
 
-// One icon family for the whole shell. Every glyph is Lucide at stroke-width
-// 1.7 so the rail, the header and the panels all sit at the same optical
-// weight — the previous hand-drawn set mixed 1.7, 1.8 and 2.
-const icons = {
-  dashboard: LayoutDashboard,
-  topology: Network,
-  devices: Monitor,
-  toolbox: Wrench,
-  logs: ScrollText,
-  settings: Settings,
-  // Rail actions: things you fire rather than places you go.
-  nmap: Radar,
-  sweep: Search,
-  terminal: SquareTerminal,
-  wireshark: Fish,
-} satisfies Record<string, Component>;
-
-// Pages. The header tabs show the four main ones; the mobile drawer lists all.
-type NavPage = { id: string; label: string; icon: Component };
+// One drawn glyph family for the whole shell (AppGlyph): navigation and the
+// rail actions share stroke weight, corner radius and motion language, so the
+// app reads as one piece of equipment rather than a Lucide sampler.
+type NavPage = { id: string; label: string; glyph: string };
 
 const navItems: NavPage[] = [
-  { id: "dashboard", label: "Dashboard", icon: icons.dashboard },
-  { id: "topology", label: "Topology", icon: icons.topology },
-  { id: "devices", label: "Devices", icon: icons.devices },
-  { id: "toolbox", label: "Toolbox", icon: icons.toolbox },
-  { id: "logs", label: "Logs", icon: icons.logs },
-  { id: "settings", label: "Settings", icon: icons.settings },
+  { id: "dashboard", label: "Dashboard", glyph: "dashboard" },
+  { id: "topology", label: "Topology", glyph: "topology" },
+  { id: "devices", label: "Devices", glyph: "devices" },
+  { id: "toolbox", label: "Toolbox", glyph: "toolbox" },
+  { id: "logs", label: "Logs", glyph: "logs" },
+  { id: "settings", label: "Settings", glyph: "settings" },
 ];
 
 // Header tabs: the navigation. The left rail never duplicates these.
@@ -188,11 +163,20 @@ function runRailActionFromDrawer(id: string) {
 // ---------------------------------------------------------------------------
 // Rail quick actions — things you *fire*, not places you go.
 // ---------------------------------------------------------------------------
-const railActions = [
-  { id: "scan", label: "Run a quick scan", icon: icons.nmap },
-  { id: "sweep", label: "Sweep the network for devices", icon: icons.sweep },
-  { id: "terminal", label: "Open MobaXterm", icon: icons.terminal },
-  { id: "wireshark", label: "Open Wireshark", icon: icons.wireshark },
+// Rail actions carry their own drawn glyphs rather than Lucide stand-ins: a
+// magnifier did not say "discover devices", and a fish did not say "capture
+// packets". Each glyph animates while it is hovered or running.
+type RailGlyphName = "scan" | "sweep" | "terminal" | "packets";
+
+const railActions: {
+  id: string;
+  label: string;
+  glyph: RailGlyphName;
+}[] = [
+  { id: "scan", label: "Run a quick scan", glyph: "scan" },
+  { id: "sweep", label: "Sweep the network for devices", glyph: "sweep" },
+  { id: "terminal", label: "Open MobaXterm", glyph: "terminal" },
+  { id: "wireshark", label: "Open Wireshark", glyph: "packets" },
 ];
 
 const activePanel = ref<"scan" | "sweep" | "terminal" | null>(null);
@@ -225,6 +209,7 @@ function runRailAction(id: string) {
     activePanel.value = activePanel.value === id ? null : id;
     if (activePanel.value === "terminal") void loadTerminalInfo();
     if (activePanel.value === "sweep") sweepMessage.value = null;
+    if (activePanel.value === "scan") void suggestScanTarget();
     return;
   }
   activePanel.value = null;
@@ -248,7 +233,24 @@ const scanProfiles = [
 const scanProfile = ref(scanProfiles[0].label);
 const scanTarget = ref("");
 const scanBusy = ref(false);
+const scanBusyTargets = ref(false);
 const lastScanId = ref<string | null>(null);
+
+// The target is almost always "the network I am on", so ask the backend and
+// fill the field in. Anything the operator has already typed wins; this only
+// removes the step of looking up your own subnet.
+async function suggestScanTarget() {
+  if (scanTarget.value.trim()) return;
+  scanBusyTargets.value = true;
+  try {
+    const { data } = await axios.get<{ cidr?: string | null }>("/api/networks/current");
+    if (data?.cidr && !scanTarget.value.trim()) scanTarget.value = data.cidr;
+  } catch {
+    // No detection (no route, no permissions): leave the field editable.
+  } finally {
+    scanBusyTargets.value = false;
+  }
+}
 
 // Conservative character allowlist — the backend validates again regardless.
 const TARGET_RE = /^[A-Za-z0-9.:/_-]{1,128}$/;
@@ -563,8 +565,10 @@ async function handleForcePasswordChange() {
             </RouterLink>
           </div>
 
-          <!-- Quick actions, vertically centered: things you fire, not page links -->
-          <nav class="flex flex-1 flex-col items-center justify-center gap-1.5 w-full px-2">
+          <!-- Quick actions, low on the rail: things you fire, not page links.
+               Sitting them just above the floor keeps the top of the rail for
+               the brand and leaves the middle empty rather than crowded. -->
+          <nav class="flex flex-1 flex-col items-center justify-end gap-1.5 w-full px-2 pb-6">
             <button
               v-for="item in railActions"
               :key="item.id"
@@ -579,7 +583,10 @@ async function handleForcePasswordChange() {
                   : 'border-transparent text-[var(--np-text-dim)] hover:border-[var(--np-border-subtle)] hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)]'
               "
             >
-              <component :is="item.icon" class="h-[18px] w-[18px]" :stroke-width="1.7" />
+              <AppGlyph
+                :name="item.glyph"
+                :active="(item.id === 'sweep' && discovering) || (item.id === 'scan' && scanBusy)"
+              />
               <span
                 v-if="item.id === 'sweep' && discovering"
                 class="absolute -right-0.5 -top-0.5 h-2 w-2 animate-ping rounded-full bg-[var(--np-accent)]"
@@ -593,7 +600,6 @@ async function handleForcePasswordChange() {
             </button>
           </nav>
 
-          <div class="pb-4 text-[0.5rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">v0.1</div>
         </aside>
 
         <!-- Dimmed backdrop. Quick actions are dialogs now: a floating card
@@ -634,7 +640,7 @@ async function handleForcePasswordChange() {
             ref="dialogInput"
             v-model="scanTarget"
             type="text"
-            placeholder="192.168.1.0/24 or one-host"
+            :placeholder="scanBusyTargets ? 'Detecting this network…' : '192.168.1.0/24 or one-host'"
             class="np-neon-input mt-1 w-full px-3 py-2 font-mono text-xs"
             @keyup.enter="runQuickScan"
           />
@@ -841,13 +847,14 @@ async function handleForcePasswordChange() {
                   :key="item.id"
                   type="button"
                   @click="navigateTo(item.id)"
-                  class="relative px-4 text-[0.72rem] font-semibold uppercase tracking-wider transition-colors"
+                  class="group relative flex items-center gap-2 px-4 text-[0.72rem] font-semibold uppercase tracking-wider transition-colors"
                   :class="
                     isActive(item.id)
                       ? 'text-[var(--np-text)]'
                       : 'text-[var(--np-text-dim)] hover:text-[var(--np-text)]'
                   "
                 >
+                  <AppGlyph :name="item.glyph as any" :active="isActive(item.id)" class="h-4 w-4" />
                   {{ item.label }}
               <span
                 v-if="isActive(item.id)"
@@ -870,7 +877,7 @@ async function handleForcePasswordChange() {
                   title="Settings"
                   aria-label="Settings"
                 >
-                  <Settings class="h-3.5 w-3.5" :stroke-width="1.7" />
+                  <AppGlyph name="settings" :active="isActive('settings')" class="h-4 w-4" />
                   <span class="hidden lg:inline">Settings</span>
                 </button>
 
@@ -978,7 +985,7 @@ async function handleForcePasswordChange() {
                       : 'text-[var(--np-text-dim)] hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)] border border-transparent'
                   "
                 >
-                  <component :is="item.icon" class="h-4 w-4 shrink-0" :stroke-width="1.7" />
+                  <AppGlyph :name="item.glyph as any" :active="isActive(item.id)" class="shrink-0" />
                   {{ item.label }}
                 </button>
               </nav>
@@ -998,7 +1005,7 @@ async function handleForcePasswordChange() {
                   @click="runRailActionFromDrawer(item.id)"
                   class="flex w-full items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 text-left text-xs font-semibold text-[var(--np-text-muted)] transition-colors hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)]"
                 >
-                  <component :is="item.icon" class="h-4 w-4 shrink-0" :stroke-width="1.7" />
+                  <AppGlyph :name="item.glyph" class="shrink-0" />
                   {{ item.label }}
                 </button>
                 <p class="px-3 pt-1 text-[0.6rem] leading-relaxed text-[var(--np-text-dim)]">
