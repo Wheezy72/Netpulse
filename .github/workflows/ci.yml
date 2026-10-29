@@ -59,7 +59,10 @@ jobs:
           # packages (python-nmap) that build from source.
           python -m pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio aiosqlite
+          # pymupdf is test-only: the PDF report tests assert on the actual
+          # bytes a report produces, so they need a PDF reader. It is kept out
+          # of requirements.txt because the app never parses a PDF itself.
+          pip install pytest pytest-asyncio aiosqlite "pymupdf>=1.25"
 
       - name: Run tests
         run: pytest tests/ -v

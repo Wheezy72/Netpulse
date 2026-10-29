@@ -42,7 +42,6 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
-      network: host
     container_name: netpulse-app
     restart: unless-stopped
     network_mode: host
@@ -57,7 +56,7 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
-      # Run as root in container to allow raw sockets and packet capture capabilities
+      # Run as root in the container so raw sockets work (ARP sweeps, SYN scans).
     user: "0"
     environment:
       DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@127.0.0.1:5432/netpulse
@@ -94,7 +93,6 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
-      network: host
     container_name: netpulse-worker
     restart: unless-stopped
     network_mode: host
