@@ -15,6 +15,8 @@ import { computed, onMounted, ref } from "vue";
 
 import { useAuthStore } from "../../stores/auth";
 import { describeRequestError } from "../../utils/requestError";
+import { avatarSeedFor } from "../../utils/avatar";
+import AppAvatar from "../ui/AppAvatar.vue";
 
 const auth = useAuthStore();
 
@@ -25,6 +27,8 @@ interface Account {
   full_name: string | null;
   role: string;
   created_at: string | null;
+  // DiceBear skin the account picked for itself; null renders the app default.
+  avatar_style?: string | null;
 }
 
 const accounts = ref<Account[]>([]);
@@ -56,6 +60,16 @@ const rowError = ref<{ id: number; message: string } | null>(null);
 
 function isSelf(account: Account): boolean {
   return auth.user?.id === account.id;
+}
+
+// One portrait per account, deterministic from its own identity — the same
+// face follows the account everywhere in the UI.
+function avatarSeed(account: Account): string {
+  return avatarSeedFor({
+    email: account.email,
+    username: account.username,
+    fullName: account.full_name,
+  });
 }
 
 async function deleteAccount(account: Account): Promise<void> {
@@ -310,7 +324,14 @@ onMounted(loadAccounts);
           :key="account.id"
           class="flex flex-wrap items-center justify-between gap-3 py-2.5 min-w-0"
         >
-          <div class="min-w-0">
+          <div class="flex min-w-0 items-center gap-3">
+            <AppAvatar
+              :seed="avatarSeed(account)"
+              :avatar-style="isSelf(account) ? auth.avatarStyle : (account.avatar_style ?? undefined)"
+              :label="account.username"
+              :size="36"
+            />
+            <div class="min-w-0">
             <p class="truncate text-[0.8rem] font-semibold text-[var(--np-text)]">
               {{ account.username }}
               <span v-if="isSelf(account)" class="ml-1 text-[0.6rem] font-bold uppercase tracking-wider text-[var(--np-accent)]">
@@ -328,6 +349,7 @@ onMounted(loadAccounts);
             <p v-if="rowError?.id === account.id" class="mt-1 text-[0.68rem] font-semibold text-[var(--np-danger)]">
               {{ rowError.message }}
             </p>
+            </div>
           </div>
 
           <div class="flex shrink-0 items-center gap-2">

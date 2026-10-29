@@ -10,22 +10,26 @@ import { useRouter, useRoute } from "vue-router";
 import axios from "axios";
 import { useMagicKeys } from "@vueuse/core";
 import {
-  Bell,
   ChevronDown,
   LoaderCircle,
+  LogOut,
   Menu,
   Moon,
   Sun,
   X,
 } from "lucide-vue-next";
 
+import AppAvatar from "./components/ui/AppAvatar.vue";
 import AppGlyph from "./components/ui/AppGlyph.vue";
+import Starfield from "./components/ui/Starfield.vue";
+import AvatarStylePicker from "./components/ui/AvatarStylePicker.vue";
 import BrandLogo from "./components/ui/BrandLogo.vue";
 import CommandPalette from "./components/features/CommandPalette.vue";
 import Toast from "./components/ui/Toast.vue";
 
 import { useAuthStore } from "./stores/auth";
 import { describeRequestError } from "./utils/requestError";
+import { avatarSeedFor } from "./utils/avatar";
 import { useUiStore } from "./stores/ui";
 import { useDeviceDiscovery } from "./composables/useDeviceDiscovery";
 
@@ -76,6 +80,13 @@ const profileInitial = computed(() => {
   const source = profileLabel.value.trim();
   return (source[0] || "U").toUpperCase();
 });
+// The portrait is seeded by the account, email first so two accounts that
+// share a username on different instances still get distinct faces.
+const avatarSeed = computed(() => avatarSeedFor({
+  email: auth.user?.email,
+  username: auth.user?.username,
+  fullName: auth.user?.full_name,
+}));
 
 function onDocumentPointerDown(event: PointerEvent): void {
   const target = event.target as HTMLElement | null;
@@ -459,11 +470,19 @@ async function handleForcePasswordChange() {
 
 <template>
   <div class="min-h-screen cyber-canvas canvas-glow relative text-[var(--np-text)]">
+    <!-- One starfield for the whole app: the console, sign-in, first-run setup
+         and password recovery all sit on this field. The wrapper owns the
+         fixed viewport position so the component stays a plain block that
+         fills whatever box it is given. -->
+    <div class="pointer-events-none fixed inset-0 z-0">
+      <Starfield fade="radial" />
+    </div>
     <!-- Command palette (global) -->
     <CommandPalette />
 
-    <!-- Unauthenticated: just render the router-view (Login / Register) -->
-    <template v-if="!auth.isAuthenticated || route.meta?.guest">
+    <!-- Unauthenticated (plus the self-contained password-recovery page,
+         which is reachable signed out and signed in): render the bare page. -->
+    <template v-if="!auth.isAuthenticated || route.meta?.guest || route.name === 'forgot-password'">
       <RouterView v-slot="{ Component }">
         <component
           :is="Component"
@@ -482,7 +501,7 @@ async function handleForcePasswordChange() {
       <!-- Force Password Change Mode -->
       <div
         v-if="auth.user?.force_password_change"
-        class="min-h-screen w-full flex items-center justify-center p-4 relative z-50 bg-[var(--np-bg)]"
+        class="min-h-screen w-full flex items-center justify-center p-4 relative z-50"
       >
         <div class="np-login-panel w-full max-w-md p-8 relative">
           <div class="text-center mb-6">
@@ -585,6 +604,7 @@ async function handleForcePasswordChange() {
             >
               <AppGlyph
                 :name="item.glyph"
+                :size="18"
                 :active="(item.id === 'sweep' && discovering) || (item.id === 'scan' && scanBusy)"
               />
               <span
@@ -616,13 +636,10 @@ async function handleForcePasswordChange() {
           class="np-dialog glass-card glass-card--static fixed z-[80] w-[min(26rem,calc(100vw-2rem))] p-5"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="quick-scan-title"
+          aria-label="Quick nmap scan"
         >
-          <header class="flex items-start justify-between gap-2">
-            <div>
-              <p class="text-[0.55rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Quick scan</p>
-              <h2 id="quick-scan-title" class="mt-0.5 text-sm font-bold text-[var(--np-text)]">nmap without leaving the page</h2>
-            </div>
+          <header class="flex items-center justify-between gap-2">
+            <p class="text-[0.55rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Quick scan</p>
             <button
               type="button"
               class="rounded-md p-1 text-[var(--np-text-dim)] transition-colors hover:text-[var(--np-text)]"
@@ -633,7 +650,7 @@ async function handleForcePasswordChange() {
             </button>
           </header>
 
-          <label class="mt-3 block text-[0.6rem] font-mono uppercase tracking-wider text-[var(--np-text-dim)]">
+          <label class="block text-[0.6rem] font-mono uppercase tracking-wider text-[var(--np-text-dim)]">
             Target
           </label>
           <input
@@ -821,8 +838,11 @@ async function handleForcePasswordChange() {
           </template>
         </section>
 
-        <!-- Content column, offset by the rail -->
-        <div class="flex min-h-screen flex-col md:pl-16">
+        <!-- Content column, offset by the rail. Positioned and lifted above the
+             z-0 starfield so every card, table and line of text composites over
+             the background: unpositioned content would otherwise paint beneath
+             a positioned layer and pick up dots across it. -->
+        <div class="relative z-10 flex min-h-screen flex-col md:pl-16">
           <!-- Sticky header: text tabs left, utilities right -->
           <header
             class="sticky top-0 z-30 w-full border-b border-[var(--np-border-subtle)] bg-[var(--np-glass-bg)] backdrop-blur-xl"
@@ -854,7 +874,7 @@ async function handleForcePasswordChange() {
                       : 'text-[var(--np-text-dim)] hover:text-[var(--np-text)]'
                   "
                 >
-                  <AppGlyph :name="item.glyph as any" :active="isActive(item.id)" class="h-4 w-4" />
+                  <AppGlyph :name="item.glyph as any" :active="isActive(item.id)" />
                   {{ item.label }}
               <span
                 v-if="isActive(item.id)"
@@ -877,7 +897,7 @@ async function handleForcePasswordChange() {
                   title="Settings"
                   aria-label="Settings"
                 >
-                  <AppGlyph name="settings" :active="isActive('settings')" class="h-4 w-4" />
+                  <AppGlyph name="settings" :active="isActive('settings')" :size="16" />
                   <span class="hidden lg:inline">Settings</span>
                 </button>
 
@@ -887,18 +907,19 @@ async function handleForcePasswordChange() {
                   class="relative flex h-9 w-9 items-center justify-center rounded-full border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)]/60 text-[var(--np-text-dim)] transition-all hover:text-[var(--np-text)]"
                   title="Notifications"
                 >
-                  <Bell class="h-4 w-4" :stroke-width="1.7" />
+                  <AppGlyph name="bell" :size="18" />
                   <span class="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]" />
                 </button>
 
                 <button
                   type="button"
                   @click="toggleTheme($event)"
-                  class="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)]/60 text-[var(--np-text-dim)] transition-all hover:text-[var(--np-text)]"
+                  class="np-theme-toggle flex h-9 w-9 items-center justify-center rounded-full border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)]/60 text-[var(--np-text-dim)] transition-all hover:text-[var(--np-text)]"
                   :title="isNightshade ? 'Switch to light' : 'Switch to dark'"
+                  :aria-label="isNightshade ? 'Switch to light theme' : 'Switch to dark theme'"
                 >
-                  <Moon v-if="isNightshade" class="h-4 w-4" :stroke-width="1.7" />
-                  <Sun v-else class="h-4 w-4" :stroke-width="1.7" />
+                  <Moon v-if="isNightshade" class="np-theme-toggle-icon h-4 w-4" :stroke-width="1.7" />
+                  <Sun v-else class="np-theme-toggle-icon h-4 w-4" :stroke-width="1.7" />
                 </button>
 
                 <!-- Profile menu (click to open, Escape/outside click to close) -->
@@ -911,29 +932,46 @@ async function handleForcePasswordChange() {
                     class="flex items-center gap-2 rounded-full border py-1 pl-1 pr-2 transition-all hover:border-[var(--np-border)]"
                     :class="profileOpen ? 'border-[var(--np-border)] bg-[var(--np-surface-hover)]' : 'border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)]/60'"
                   >
-                    <div class="np-brand-bg np-brand-border np-brand-text flex h-7 w-7 items-center justify-center rounded-full border text-[0.65rem] font-bold">
-                      {{ profileInitial }}
-                    </div>
+                    <AppAvatar
+                      :seed="avatarSeed"
+                      :avatar-style="auth.avatarStyle"
+                      :label="profileLabel"
+                      :size="28"
+                    />
                     <ChevronDown class="h-3 w-3 text-[var(--np-text-dim)]" :stroke-width="1.7" />
                   </button>
 
-                  <div
-                    v-if="profileOpen"
-                    role="menu"
-                    class="absolute right-0 top-full z-[100] mt-2 w-52 rounded-xl border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)] py-1 shadow-2xl"
-                  >
-                    <div class="border-b border-[var(--np-border-subtle)] px-4 py-2">
-                      <p class="text-[0.55rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Signed in as</p>
-                      <p class="mt-0.5 truncate text-xs font-bold text-[var(--np-text)]">{{ profileLabel }}</p>
-                      <p v-if="profileDetail" class="truncate text-[0.6rem] text-[var(--np-text-dim)]">{{ profileDetail }}</p>
-                      <p class="np-brand-text text-[0.55rem] font-mono uppercase tracking-wider">{{ auth.user?.role }}</p>
+                <div
+                  v-if="profileOpen"
+                  role="menu"
+                  class="absolute right-0 top-full z-[100] mt-2 w-[min(20rem,90vw)] overflow-hidden rounded-xl border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)] shadow-2xl"
+                >
+                  <div class="flex items-center gap-3 px-4 py-3.5">
+                    <AppAvatar :seed="avatarSeed" :avatar-style="auth.avatarStyle" :label="profileLabel" :size="44" />
+                    <div class="min-w-0 flex-1">
+                      <p class="truncate text-sm font-bold text-[var(--np-text)]">{{ profileLabel }}</p>
+                      <p v-if="profileDetail" class="truncate text-[0.65rem] text-[var(--np-text-dim)]">{{ profileDetail }}</p>
+                      <span
+                        class="mt-1 inline-block rounded-sm border border-[var(--np-accent-border)] bg-[var(--np-accent-soft)] px-1.5 py-px text-[0.5rem] font-mono uppercase tracking-widest text-[var(--np-accent)]"
+                      >
+                        {{ auth.user?.role }}
+                      </span>
                     </div>
+                  </div>
+                  <div class="border-t border-[var(--np-border-subtle)]">
+                    <AvatarStylePicker
+                      :seed="avatarSeed"
+                      :model-value="auth.avatarStyle"
+                      @update:model-value="auth.setAvatarStyle"
+                    />
+                  </div>
                     <button
                       type="button"
                       role="menuitem"
                       @click="closeProfile(); handleLogout()"
-                      class="flex w-full items-center gap-2.5 px-4 py-2 text-xs font-bold text-[var(--np-danger)] transition-colors hover:bg-[var(--np-surface-hover)]"
+                      class="flex w-full items-center gap-2.5 border-t border-[var(--np-border-subtle)] px-4 py-2.5 text-xs font-bold text-[var(--np-danger)] transition-colors hover:bg-[var(--np-surface-hover)]"
                     >
+                      <LogOut class="h-3.5 w-3.5" :stroke-width="1.8" />
                       Logout
                     </button>
                   </div>
@@ -985,7 +1023,7 @@ async function handleForcePasswordChange() {
                       : 'text-[var(--np-text-dim)] hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)] border border-transparent'
                   "
                 >
-                  <AppGlyph :name="item.glyph as any" :active="isActive(item.id)" class="shrink-0" />
+                  <AppGlyph :name="item.glyph as any" :active="isActive(item.id)" />
                   {{ item.label }}
                 </button>
               </nav>
@@ -1005,7 +1043,7 @@ async function handleForcePasswordChange() {
                   @click="runRailActionFromDrawer(item.id)"
                   class="flex w-full items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 text-left text-xs font-semibold text-[var(--np-text-muted)] transition-colors hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)]"
                 >
-                  <AppGlyph :name="item.glyph" class="shrink-0" />
+                  <AppGlyph :name="item.glyph" />
                   {{ item.label }}
                 </button>
                 <p class="px-3 pt-1 text-[0.6rem] leading-relaxed text-[var(--np-text-dim)]">
@@ -1014,9 +1052,12 @@ async function handleForcePasswordChange() {
               </div>
 
               <div class="mt-auto flex flex-col gap-3 border-t border-[var(--np-border-subtle)] pt-4">
-                <div class="px-1">
-                  <span class="block truncate text-xs font-bold text-[var(--np-text)]">{{ profileLabel }}</span>
-                  <span class="np-brand-text text-[0.55rem] font-mono uppercase tracking-wider">{{ auth.user?.role }}</span>
+                <div class="flex items-center gap-2 px-1">
+                  <AppAvatar :seed="avatarSeed" :avatar-style="auth.avatarStyle" :label="profileLabel" :size="30" />
+                  <div class="min-w-0">
+                    <span class="block truncate text-xs font-bold text-[var(--np-text)]">{{ profileLabel }}</span>
+                    <span class="np-brand-text text-[0.55rem] font-mono uppercase tracking-wider">{{ auth.user?.role }}</span>
+                  </div>
                 </div>
                 <button
                   type="button"

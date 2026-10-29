@@ -234,11 +234,150 @@ class TestDeviceFold:
         assert keep.is_gateway is True
 
 
-class TestDiscoverySignature:
-    def test_upsert_accepts_a_network_scope(self) -> None:
-        """The inventory merge is per network; the keyword must stay accepted."""
-        import inspect
+class TestDuplicateNetworkRows:
+    """Regression: the October 27 2026 dashboard "2 of everything" incident.
 
-        parameters = inspect.signature(_discovery.upsert_discovered_hosts).parameters
-        assert "network_id" in parameters
-        assert parameters["network_id"].default is None
+    The router answered from its second radio (8C:44:BB:07:6C:10, then
+    8C:44:BB:07:6C:30). The identity lookup — keyed on the gateway MAC alone —
+    created a second network row and discovery copied every device into it, so
+    the dashboard read "2 devices each". Same subnet + same gateway address +
+    a near-identical MAC is one router; a genuinely different site's router
+    still gets its own row even when the subnet and gateway IP look identical.
+    """
+
+    @staticmethod
+    def _network_row(number: int, **overrides) -> "identity.Network":
+        values = {
+            "id": None,
+            "key": f"net-{number}",
+            "name": f"Network {number}",
+            "cidr": "",
+            "gateway_ip": None,
+            "gateway_mac": None,
+            "interface": None,
+            "first_seen": None,
+            "last_seen": None,
+        }
+        values.update(overrides)
+        return identity.Network(**values)
+
+    async def test_the_same_router_on_a_new_radio_mac_is_adopted(self, db_session) -> None:
+        """The exact incident: MAC moved within the vendor block, same subnet."""
+        from sqlalchemy import select
+
+        from app.models.network import Network
+
+        home = self._network_row(
+            1,
+            key="mac:8C44BB076C10",
+            name="Home",
+            cidr="192.168.1.0/24",
+            gateway_ip="192.168.1.1",
+            gateway_mac="8C44BB076C10",
+        )
+        db_session.add(home)
+        await db_session.commit()
+
+        adopted = await identity._find_network(
+            db_session,
+            profile(gateway_mac="8C44BB076C30"),
+        )
+
+        assert adopted is not None
+        assert adopted.id == home.id
+        # Nothing was created; the row count still says one network.
+        rows = (await db_session.execute(select(Network))).scalars().all()
+        assert len(rows) == 1
+
+    async def test_a_genuinely_different_gateway_is_not_folded_in(self, db_session) -> None:
+        """Another site's router can share the subnet and gateway IP."""
+        office = self._network_row(
+            2,
+            key="mac:001122334455",
+            name="Office",
+            cidr="192.168.1.0/24",
+            gateway_ip="192.168.1.1",
+            gateway_mac="001122334455",
+        )
+        db_session.add(office)
+        await db_session.commit()
+
+        adopted = await identity._find_network(
+            db_session,
+            profile(gateway_mac="112233445566"),
+        )
+
+        assert adopted is None
+
+    async def test_duplicates_are_folded_even_after_the_mac_changed(self, db_session) -> None:
+        """_merge_duplicates still folds when the stored MACs differ."""
+        from sqlalchemy import select
+
+        from app.models.device import Device
+        from app.models.network import Network
+
+        home = self._network_row(
+            3,
+            key="mac:8C44BB076C10",
+            name="Home",
+            cidr="192.168.1.0/24",
+            gateway_ip="192.168.1.1",
+            gateway_mac="8C44BB076C10",
+        )
+        ghost = self._network_row(
+            4,
+            key="mac:8C44BB076C30",
+            name="192.168.1.0/24",
+            cidr="192.168.1.0/24",
+            gateway_ip="192.168.1.1",
+            gateway_mac="8C44BB076C30",
+        )
+        db_session.add_all([home, ghost])
+        await db_session.flush()
+
+        stale = Device(network_id=home.id, ip_address="192.168.1.101")
+        fresh = Device(
+            network_id=ghost.id,
+            ip_address="192.168.1.101",
+            hostname="Immortan",
+            verified=True,
+        )
+        solely_there = Device(network_id=ghost.id, ip_address="192.168.1.102", hostname="Other")
+        db_session.add_all([stale, fresh, solely_there])
+        await db_session.commit()
+
+        await identity._merge_duplicates(db_session, home, profile(gateway_mac="8C44BB076C30"))
+        await db_session.commit()
+
+        networks = (await db_session.execute(select(Network))).scalars().all()
+        assert [n.id for n in networks] == [home.id]
+        devices = (await db_session.execute(select(Device))).scalars().all()
+        assert len(devices) == 2  # one per address, not one per network
+        survivor = next(d for d in devices if d.ip_address == "192.168.1.101")
+        assert survivor.hostname == "Immortan"
+        assert survivor.network_id == home.id
+
+
+@pytest.fixture
+async def db_session():
+    """In-memory SQLite session, or skip when the async stack is not installed."""
+    pytest.importorskip("sqlalchemy")
+    pytest.importorskip("greenlet", reason="SQLAlchemy async needs greenlet")
+    pytest.importorskip("aiosqlite")
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db.base import Base
+    from app.models.device import Device  # noqa: F401 - registers the mapper
+    from app.models.network import Network  # noqa: F401 - registers the mapper
+    from app.models.script_job import ScriptJob  # noqa: F401 - registers the mapper
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as session:
+        yield session
+
+    await engine.dispose()

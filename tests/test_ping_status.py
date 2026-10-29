@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -117,3 +118,36 @@ class TestPingStatusWiring:
         assert classify(150.0, True) == "slow"
         assert classify(None, True) == "up"
         assert classify(1.0, False) == "down"
+
+    def test_console_adapters_are_one_row_per_network(self):
+        module = _load_devices_router()
+        devices = [
+            SimpleNamespace(id=1, mac_address="AA:00:00:00:00:01", network_id=7),
+            SimpleNamespace(id=2, mac_address="AA:00:00:00:00:02", network_id=7),
+            SimpleNamespace(id=3, mac_address="AA:00:00:00:00:01", network_id=8),
+            SimpleNamespace(id=4, mac_address="BB:00:00:00:00:01", network_id=7),
+        ]
+
+        groups = module._topology_device_groups(
+            devices,
+            {"AA0000000001", "AA0000000002"},
+        )
+
+        assert [[device.id for device in members] for _, members in groups] == [
+            [4], [1, 2], [3]
+        ]
+
+    def test_same_hostname_does_not_merge_an_unidentified_host(self):
+        module = _load_devices_router()
+        console = SimpleNamespace(
+            id=1, mac_address="AA:00:00:00:00:01", network_id=7,
+            hostname="Immortan", os="Windows 11", device_type="workstation", verified=True,
+        )
+        other_pc = SimpleNamespace(
+            id=2, mac_address="CC:00:00:00:00:02", network_id=7,
+            hostname="Immortan", os="Windows 11", device_type="workstation", verified=True,
+        )
+
+        groups = module._topology_device_groups([console, other_pc], {"AA0000000001"})
+
+        assert [[device.id for device in members] for _, members in groups] == [[2], [1]]

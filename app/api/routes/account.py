@@ -170,6 +170,10 @@ async def change_my_password(
     db_user.hashed_password = get_password_hash(payload.new_password)
     # A user who has just chosen their own password no longer needs a forced reset.
     db_user.force_password_change = False
+    # Also consumes the temporary-password marker from /forgot-password, so the
+    # 15-minute expiry no longer applies to the string that was just replaced.
+    db_user.reset_token = None
+    db_user.reset_token_expires = None
     await db.commit()
 
     return {"message": "Password updated."}

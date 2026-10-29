@@ -43,6 +43,9 @@ type TopologyNode = {
   vulnerability_count: number;
   last_seen?: string | null;
   verified?: boolean;
+  is_self?: boolean;
+  member_ids?: number[];
+  interface_ips?: string[];
 };
 
 type TopologyEdge = {
@@ -101,7 +104,7 @@ let pingTimer: number | null = null;
 async function refreshLiveStatus(): Promise<void> {
   try {
     const { data } = await axios.get<{
-      results: { id: number; status: "up" | "slow" | "down"; latency_ms: number | null }[];
+      results: { id: number; ip_address: string; status: "up" | "slow" | "down"; latency_ms: number | null }[];
       checked_at: string;
     }>("/api/devices/ping-status", { params: { limit: 64 } });
     const next: Record<number, PingState> = {};
@@ -116,7 +119,11 @@ async function refreshLiveStatus(): Promise<void> {
 }
 
 function nodeReachability(device: TopologyNode): PingState | null {
-  return liveStatus.value[device.id] ?? null;
+  const memberIds = device.member_ids?.length ? device.member_ids : [device.id];
+  const states = memberIds.map((id) => liveStatus.value[id]).filter((state): state is PingState => Boolean(state));
+  if (!states.length) return liveStatus.value[device.id] ?? null;
+  const rank = { up: 0, slow: 1, down: 2 };
+  return [...states].sort((a, b) => rank[a.status] - rank[b.status] || (a.latency_ms ?? Infinity) - (b.latency_ms ?? Infinity))[0];
 }
 const selectedNode = ref<TopologyNode | null>(null);
 const deviceDetail = ref<DeviceDetail | null>(null);
@@ -589,9 +596,23 @@ async function loadTopology(background = false): Promise<void> {
       params.network_id = selectedNetwork.value;
     }
 
-    const { data } = await axios.get<{ nodes: TopologyNode[]; edges: TopologyEdge[] }>("/api/devices/topology", { params });
-
-    const nodes: Node<DeviceNodeData>[] = data.nodes.map((n) => ({
+    const [topologyResponse, inventoryResponse] = await Promise.all([
+      axios.get<{ nodes: TopologyNode[]; edges: TopologyEdge[] }>("/api/devices/topology", { params }),
+      axios.get<Array<{ id: number; member_ids: number[]; interface_ips: string[]; is_self: boolean }>>(
+        "/api/devices",
+        { params },
+      ),
+    ]);
+    const data = topologyResponse.data;
+    const inventoryById = new Map(inventoryResponse.data.map((row) => [row.id, row]));
+    const nodes: Node<DeviceNodeData>[] = data.nodes.map((n) => {
+      const inventory = inventoryById.get(n.id);
+      if (inventory) {
+        n.is_self = inventory.is_self;
+        n.member_ids = inventory.member_ids;
+        n.interface_ips = inventory.interface_ips;
+      }
+      return ({
       id: String(n.id),
       type: "device",
       position: { x: 0, y: 0 },
@@ -600,7 +621,8 @@ async function loadTopology(background = false): Promise<void> {
       width: NODE_W,
       height: NODE_H,
       data: { device: n },
-    }));
+    });
+    });
 
     const edges: Edge[] = data.edges.map((e, index) => ({
       id: `e-${index}`,
@@ -856,7 +878,7 @@ onBeforeUnmount(() => {
                     class="np-status-dot"
                     :class="`np-status-dot--${nodeReachability(data.device)?.status}`"
                   />
-                  {{ data.device.ip_address }}
+                  {{ data.device.is_self && data.device.interface_ips?.length ? data.device.interface_ips.join(' · ') : data.device.ip_address }}
                 </span>
               </div>
             </div>

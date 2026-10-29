@@ -59,9 +59,5 @@ docker compose up -d --build
 echo
 echo "==> NetPulse should now be starting up."
 echo "   URL: http://localhost:8000"
-echo
-echo "Verify Zeek inside the app container:" 
-echo "  docker compose exec app zeek --version"
-echo
-echo "Verify readiness endpoint:" 
+echoecho "Verify readiness endpoint:"  
 echo "  curl -fsS http://localhost:8000/api/health/ready"

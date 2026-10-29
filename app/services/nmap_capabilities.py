@@ -417,15 +417,47 @@ def _linux_binary_has_cap_net_raw(path: str | None) -> bool:
     return bool((permitted_low >> _CAP_NET_RAW) & 1)
 
 
+def _npcap_can_enumerate_devices() -> bool:
+    """True when nmap can actually list the interfaces a raw scan would use.
+
+    The Npcap service can report RUNNING while its device list is unusable — a
+    half-installed driver fails ``PacketGetAdapterNames`` with error 259 — and
+    every raw scan then dies at run time with ``dnet: Failed to open device
+    eth<N>``. Checking the service alone therefore over-reports privilege, and
+    the failure surfaces in the UI as a scan that started and instantly failed
+    for no visible reason.
+
+    ``nmap --iflist`` is the authoritative answer: it exits non-zero and prints
+    QUITTING when pcap is unusable, and exits 0 on a working install.
+    """
+    try:
+        completed = subprocess.run(
+            ["nmap", "--iflist"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+
+    if completed.returncode != 0:
+        return False
+
+    output = f"{completed.stdout or ''}{completed.stderr or ''}"
+    return "pcap_findalldevs" not in output and "QUITTING" not in output
+
+
 def _has_raw_socket_privileges() -> bool:
     """True when nmap may open raw sockets.
 
     On Windows Npcap's driver handles raw sockets, so an ordinary user can run
-    SYN scans — provided the driver is running. On Linux it is EUID 0 or
-    CAP_NET_RAW, either on this process or on the nmap binary itself.
+    SYN scans — provided the driver is running *and* nmap can enumerate the
+    devices behind it. On Linux it is EUID 0 or CAP_NET_RAW, either on this
+    process or on the nmap binary itself.
     """
     if os.name == "nt":
-        return _npcap_driver_running()
+        return _npcap_driver_running() and _npcap_can_enumerate_devices()
 
     geteuid = getattr(os, "geteuid", None)
     if geteuid is not None:

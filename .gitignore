@@ -40,14 +40,11 @@ redis-data/
 rabbitmq-data/
 
 # ==========================================
-# APP DATA, PCAPS & SCANS
+# APP DATA & SCANS
 # ==========================================
-data/pcaps/*.pcap
-data/pcaps/*.pcapng
 data/scans/*.txt
 data/scans/*.xml
 !data/scans/.gitkeep
-!data/pcaps/.gitkeep
 
 # ==========================================
 # BACKGROUND WORKERS

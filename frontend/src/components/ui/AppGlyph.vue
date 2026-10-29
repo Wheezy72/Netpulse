@@ -21,6 +21,7 @@ type GlyphName =
   | "toolbox"
   | "logs"
   | "settings"
+  | "bell"
   | "scan"
   | "sweep"
   | "terminal"
@@ -31,13 +32,20 @@ withDefaults(
     name: GlyphName;
     /** Set while the action is busy or its page is open. */
     active?: boolean;
+    /** Edge length in px. Inline, so a utility class on the element can never
+     *  lose the specificity fight and render a 0px icon. */
+    size?: number;
   }>(),
-  { active: false }
+  { active: false, size: 16 }
 );
 </script>
 
 <template>
-  <span class="np-glyph" :class="[`np-glyph--${name}`, { 'is-active': active }]">
+  <span
+    class="np-glyph"
+    :class="[`np-glyph--${name}`, { 'is-active': active }]"
+    :style="{ width: `${size}px`, height: `${size}px` }"
+  >
     <!-- Dashboard: four panels that settle into place. -->
     <svg
       v-if="name === 'dashboard'"
@@ -140,6 +148,24 @@ withDefaults(
       <circle class="np-g-core" cx="12" cy="12" r="3" />
     </svg>
 
+    <!-- Notifications: the bell swings the way a bell answers a knock. -->
+    <svg
+      v-else-if="name === 'bell'"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.6"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <g class="np-g-bell">
+        <path d="M6 9.6a6 6 0 0 1 12 0c0 4.4 1.4 5.8 1.4 5.8H4.6S6 14 6 9.6Z" />
+        <path d="M10.4 18.8a2 2 0 0 0 3.2 0" />
+      </g>
+      <path class="np-g-ring" d="M18.6 4.6a5.4 5.4 0 0 0-1.6-1.5" />
+    </svg>
+
     <!-- Targeted port scan: a reticle that turns onto the target. -->
     <svg
       v-else-if="name === 'scan'"
@@ -212,12 +238,16 @@ withDefaults(
 </template>
 
 <style scoped>
+/* The span is an inline box: hovering it directly is unreliable, because most
+   of a nav button's area sits around it. Animations therefore trigger on the
+   *parent* (the button/link) too. This is why the gear moved while the nav
+   tabs never did. Size is set inline by the component (see the prop). */
 .np-glyph {
   display: inline-flex;
-  height: 18px;
-  width: 18px;
+  align-items: center;
+  justify-content: center;
+  flex: none;
 }
-
 .np-glyph svg {
   height: 100%;
   width: 100%;
@@ -229,13 +259,21 @@ withDefaults(
   transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .np-glyph:hover .np-g-panel--1,
-.np-glyph.is-active .np-g-panel--1 { transform: translate(-0.6px, -0.6px); }
+button:hover .np-glyph .np-g-panel--1,
+a:hover .np-glyph .np-g-panel--1,
+.np-glyph.is-active .np-g-panel--1 { transform: translate(-1.6px, -1.6px); opacity: 1; }
 .np-glyph:hover .np-g-panel--2,
-.np-glyph.is-active .np-g-panel--2 { transform: translate(0.6px, -0.6px); }
+button:hover .np-glyph .np-g-panel--2,
+a:hover .np-glyph .np-g-panel--2,
+.np-glyph.is-active .np-g-panel--2 { transform: translate(1.6px, -1.6px); }
 .np-glyph:hover .np-g-panel--3,
-.np-glyph.is-active .np-g-panel--3 { transform: translate(0.6px, 0.6px); }
+button:hover .np-glyph .np-g-panel--3,
+a:hover .np-glyph .np-g-panel--3,
+.np-glyph.is-active .np-g-panel--3 { transform: translate(1.6px, 1.6px); }
 .np-glyph:hover .np-g-panel--4,
-.np-glyph.is-active .np-g-panel--4 { transform: translate(-0.6px, 0.6px); }
+button:hover .np-glyph .np-g-panel--4,
+a:hover .np-glyph .np-g-panel--4,
+.np-glyph.is-active .np-g-panel--4 { transform: translate(-1.6px, 1.6px); }
 
 /* ── Topology: pulses travel along the links ───────────────────────────── */
 .np-g-link {
@@ -243,14 +281,22 @@ withDefaults(
   opacity: 0.7;
 }
 .np-glyph:hover .np-g-link,
+button:hover .np-glyph .np-g-link,
+a:hover .np-glyph .np-g-link,
 .np-glyph.is-active .np-g-link {
   animation: np-g-flow 1.4s linear infinite;
 }
 .np-glyph:hover .np-g-node--a,
+button:hover .np-glyph .np-g-node--a,
+a:hover .np-glyph .np-g-node--a,
 .np-glyph.is-active .np-g-node--a { animation: np-g-fade 1.4s ease-in-out infinite; }
 .np-glyph:hover .np-g-node--b,
+button:hover .np-glyph .np-g-node--b,
+a:hover .np-glyph .np-g-node--b,
 .np-glyph.is-active .np-g-node--b { animation: np-g-fade 1.4s ease-in-out infinite 0.35s; }
 .np-glyph:hover .np-g-node--trunk,
+button:hover .np-glyph .np-g-node--trunk,
+a:hover .np-glyph .np-g-node--trunk,
 .np-glyph.is-active .np-g-node--trunk { animation: np-g-fade 1.4s ease-in-out infinite 0.7s; }
 
 @keyframes np-g-flow {
@@ -267,6 +313,8 @@ withDefaults(
   stroke: var(--np-accent, currentColor);
 }
 .np-glyph:hover .np-g-scanline,
+button:hover .np-glyph .np-g-scanline,
+a:hover .np-glyph .np-g-scanline,
 .np-glyph.is-active .np-g-scanline {
   animation: np-g-scan 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
@@ -285,18 +333,28 @@ withDefaults(
   transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .np-glyph:hover .np-g-latch,
-.np-glyph.is-active .np-g-latch { transform: translateY(-1.1px); }
+button:hover .np-glyph .np-g-latch,
+a:hover .np-glyph .np-g-latch,
+.np-glyph.is-active .np-g-latch { transform: translateY(-2.4px); }
 .np-glyph:hover .np-g-lid,
-.np-glyph.is-active .np-g-lid { transform: translateY(-0.5px); }
+button:hover .np-glyph .np-g-lid,
+a:hover .np-glyph .np-g-lid,
+.np-glyph.is-active .np-g-lid { transform: translateY(-1.3px); }
 .np-glyph:hover .np-g-handle,
-.np-glyph.is-active .np-g-handle { transform: translateY(-0.7px); }
+button:hover .np-glyph .np-g-handle,
+a:hover .np-glyph .np-g-handle,
+.np-glyph.is-active .np-g-handle { transform: translateY(-1.9px); }
 
 /* ── Logs: lines scroll, as the viewer does ───────────────────────────── */
 .np-glyph:hover .np-g-lines,
+button:hover .np-glyph .np-g-lines,
+a:hover .np-glyph .np-g-lines,
 .np-glyph.is-active .np-g-lines {
   animation: np-g-scroll 1.6s ease-in-out infinite;
 }
 .np-glyph:hover .np-g-fold,
+button:hover .np-glyph .np-g-fold,
+a:hover .np-glyph .np-g-fold,
 .np-glyph.is-active .np-g-fold { opacity: 0.8; }
 
 @keyframes np-g-scroll {
@@ -310,6 +368,8 @@ withDefaults(
   transition: transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .np-glyph:hover .np-g-gear,
+button:hover .np-glyph .np-g-gear,
+a:hover .np-glyph .np-g-gear,
 .np-glyph.is-active .np-g-gear {
   animation: np-g-turn 5s linear infinite;
 }
@@ -324,11 +384,15 @@ withDefaults(
   opacity: 0.55;
 }
 .np-glyph:hover .np-g-sweep-hand,
+button:hover .np-glyph .np-g-sweep-hand,
+a:hover .np-glyph .np-g-sweep-hand,
 .np-glyph.is-active .np-g-sweep-hand {
   animation: np-g-turn 2.4s linear infinite;
   opacity: 0.9;
 }
 .np-glyph:hover .np-g-core,
+button:hover .np-glyph .np-g-core,
+a:hover .np-glyph .np-g-core,
 .np-glyph.is-active .np-g-core {
   animation: np-g-pulse 1.6s ease-in-out infinite;
 }
@@ -343,14 +407,22 @@ withDefaults(
   opacity: 0.35;
 }
 .np-glyph:hover .np-g-ping,
+button:hover .np-glyph .np-g-ping,
+a:hover .np-glyph .np-g-ping,
 .np-glyph.is-active .np-g-ping {
   animation: np-g-ping 1.8s ease-out infinite;
 }
 .np-glyph:hover .np-g-ping--2,
+button:hover .np-glyph .np-g-ping--2,
+a:hover .np-glyph .np-g-ping--2,
 .np-glyph.is-active .np-g-ping--2 { animation-delay: 0.45s; }
 .np-glyph:hover .np-g-ping--3,
+button:hover .np-glyph .np-g-ping--3,
+a:hover .np-glyph .np-g-ping--3,
 .np-glyph.is-active .np-g-ping--3 { animation-delay: 0.9s; }
 .np-glyph:hover .np-g-ping--4,
+button:hover .np-glyph .np-g-ping--4,
+a:hover .np-glyph .np-g-ping--4,
 .np-glyph.is-active .np-g-ping--4 { animation-delay: 1.35s; }
 
 @keyframes np-g-ping {
@@ -362,10 +434,14 @@ withDefaults(
 /* ── Terminal: caret blinks; the prompt nudges ────────────────────────── */
 .np-g-caret { opacity: 0.85; }
 .np-glyph:hover .np-g-caret,
+button:hover .np-glyph .np-g-caret,
+a:hover .np-glyph .np-g-caret,
 .np-glyph.is-active .np-g-caret {
   animation: np-g-blink 1.1s steps(1, end) infinite;
 }
 .np-glyph:hover .np-g-chevron,
+button:hover .np-glyph .np-g-chevron,
+a:hover .np-glyph .np-g-chevron,
 .np-glyph.is-active .np-g-chevron {
   animation: np-g-nudge 1.6s ease-in-out infinite;
 }
@@ -380,21 +456,62 @@ withDefaults(
   50% { transform: translateX(1px); }
 }
 
+/* ── Bell: swings from its mount, then settles ────────────────────────── */
+.np-g-bell {
+  transform-origin: 12px 4.6px;
+}
+.np-glyph:hover .np-g-bell,
+button:hover .np-glyph .np-g-bell,
+a:hover .np-glyph .np-g-bell,
+.np-glyph.is-active .np-g-bell {
+  animation: np-g-swing 1.2s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite;
+}
+.np-g-ring {
+  opacity: 0;
+}
+.np-glyph:hover .np-g-ring,
+button:hover .np-glyph .np-g-ring,
+a:hover .np-glyph .np-g-ring,
+.np-glyph.is-active .np-g-ring {
+  animation: np-g-ringfade 1.2s ease-out infinite;
+}
+
+@keyframes np-g-swing {
+  0%, 100% { transform: rotate(0deg); }
+  20% { transform: rotate(14deg); }
+  40% { transform: rotate(-10deg); }
+  60% { transform: rotate(6deg); }
+  80% { transform: rotate(-4deg); }
+}
+@keyframes np-g-ringfade {
+  0%, 45% { opacity: 0; }
+  65% { opacity: 0.9; }
+  100% { opacity: 0; }
+}
+
 /* ── Packets: a wave travels the wire, a packet rides it ──────────────── */
 .np-g-wave--2 { opacity: 0.45; }
 .np-g-particle { opacity: 0.5; }
 .np-glyph:hover .np-g-wave,
+button:hover .np-glyph .np-g-wave,
+a:hover .np-glyph .np-g-wave,
 .np-glyph.is-active .np-g-wave {
   animation: np-g-wave 2s ease-in-out infinite;
   stroke-dasharray: 22 6;
 }
 .np-glyph:hover .np-g-particle,
+button:hover .np-glyph .np-g-particle,
+a:hover .np-glyph .np-g-particle,
 .np-glyph.is-active .np-g-particle {
   animation: np-g-ride 2s ease-in-out infinite;
 }
 .np-glyph:hover .np-g-particle--2,
+button:hover .np-glyph .np-g-particle--2,
+a:hover .np-glyph .np-g-particle--2,
 .np-glyph.is-active .np-g-particle--2 { animation-delay: 0.25s; }
 .np-glyph:hover .np-g-particle--3,
+button:hover .np-glyph .np-g-particle--3,
+a:hover .np-glyph .np-g-particle--3,
 .np-glyph.is-active .np-g-particle--3 { animation-delay: 0.5s; }
 
 @keyframes np-g-wave {

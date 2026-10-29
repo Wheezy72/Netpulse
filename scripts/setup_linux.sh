@@ -87,7 +87,7 @@ install_packages_apt() {
   print_status "Updating package lists..."
   apt-get update -qq
   
-  local packages="python3 python3-venv python3-pip nodejs npm redis-server iputils-ping iproute2 curl openssl nmap tcpdump"
+  local packages="python3 python3-venv python3-pip nodejs npm redis-server iputils-ping iproute2 curl openssl nmap"
   
   if ! check_postgres_installed; then
     print_status "PostgreSQL not found. Installing system-wide..."
@@ -100,7 +100,7 @@ install_packages_apt() {
 }
 
 install_packages_dnf() {
-  local packages="python3 python3-pip nodejs npm redis iproute curl openssl nmap tcpdump"
+  local packages="python3 python3-pip nodejs npm redis iproute curl openssl nmap"
   
   if ! check_postgres_installed; then
     print_status "PostgreSQL not found. Installing system-wide..."
@@ -117,7 +117,7 @@ install_packages_dnf() {
 }
 
 install_packages_pacman() {
-  local packages="python python-pip nodejs npm redis iproute2 curl openssl nmap tcpdump"
+  local packages="python python-pip nodejs npm redis iproute2 curl openssl nmap"
   
   if ! check_postgres_installed; then
     print_status "PostgreSQL not found. Installing system-wide..."

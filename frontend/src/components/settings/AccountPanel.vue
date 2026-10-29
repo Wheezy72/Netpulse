@@ -8,9 +8,22 @@
  */
 import axios from "axios";
 import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 
 import { useAuthStore } from "../../stores/auth";
 import { describeRequestError } from "../../utils/requestError";
+
+const router = useRouter();
+
+/**
+ * Escape hatch for "I don't remember my current password". Requiring the old
+ * password is the right default (an unattended console must not hand its
+ * session away), but a user who forgot it had nowhere to go from this screen:
+ * the reset flow needs no old password, and this link walks to it.
+ */
+function goToRecovery(): void {
+  router.push("/forgot-password");
+}
 
 const auth = useAuthStore();
 
@@ -223,9 +236,16 @@ onMounted(async () => {
       </div>
 
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <p id="account-password-help" class="text-[0.65rem] text-[var(--np-text-dim)]">
-          Changing the password does not sign out other sessions.
-        </p>
+        <div id="account-password-help" class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.65rem] text-[var(--np-text-dim)]">
+          <span>Changing it does not sign out other sessions.</span>
+          <button
+            type="button"
+            class="font-semibold text-[var(--np-accent)] underline underline-offset-2 transition-opacity hover:opacity-80"
+            @click="goToRecovery"
+          >
+            Forgot the current password?
+          </button>
+        </div>
         <button
           type="button"
           class="np-cyber-btn px-4 py-2 text-[0.7rem]"

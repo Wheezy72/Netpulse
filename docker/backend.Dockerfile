@@ -52,14 +52,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iputils-ping \
     libpq5 \
     nmap \
-    tcpdump \
     traceroute \
     net-tools \
-    && . /etc/os-release \
-    && zeek_repo_ver="${VERSION_ID%%.*}" \
-    && echo "deb [signed-by=/usr/share/keyrings/zeek.gpg] https://download.opensuse.org/repositories/security:/zeek/Debian_${zeek_repo_ver}/ /" > /etc/apt/sources.list.d/security_zeek.list \
-    && curl -fsSL "https://download.opensuse.org/repositories/security:/zeek/Debian_${zeek_repo_ver}/Release.key" | gpg --dearmor -o /usr/share/keyrings/zeek.gpg \
-    && apt-get update && apt-get install -y --no-install-recommends zeek \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /var/cache/debconf/*
 

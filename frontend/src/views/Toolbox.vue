@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { CircleCheck, CircleX } from "lucide-vue-next";
 import LiveTerminal from "../components/features/LiveTerminal.vue";
 import { getStoredToken } from "../utils/token";
 

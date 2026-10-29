@@ -7,7 +7,7 @@
  * fleet, is it responding, and what is on it. Everything shown here is
  * derived from real data — no placeholder risks, platforms or health scores.
  */
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import axios from "axios";
 import { useDeviceDiscovery } from "../composables/useDeviceDiscovery";
@@ -30,9 +30,50 @@ interface DeviceRow {
   zone: string | null;
   is_gateway: boolean;
   last_seen: string | null;
+  is_self?: boolean;
+  interface_ips?: string[];
+  member_ids?: number[];
 }
 
 const devices = ref<DeviceRow[]>([]);
+
+interface PulseSnapshot {
+  internet_health: number | null;
+  latency_ms: number | null;
+  jitter_ms: number | null;
+  packet_loss_pct: number | null;
+  timestamp: string | null;
+}
+const pulseSnapshot = ref<PulseSnapshot | null>(null);
+const pulseError = ref(false);
+let pulseRefreshTimer: number | undefined;
+
+async function loadPulseSnapshot(): Promise<void> {
+  try {
+    const { data } = await axios.get<{ targets: {
+      label: string;
+      latency_ms: number | null;
+      jitter_ms: number | null;
+      packet_loss_pct: number | null;
+    }[] }>("/api/metrics/pulse-latest");
+    const targets = data.targets ?? [];
+    const usableLatency = targets.map((target) => target.latency_ms).filter((value): value is number => value !== null && Number.isFinite(value));
+    const usableJitter = targets.map((target) => target.jitter_ms).filter((value): value is number => value !== null && Number.isFinite(value));
+    const usableLoss = targets.map((target) => target.packet_loss_pct).filter((value): value is number => value !== null && Number.isFinite(value));
+    const { data: health } = await axios.get<{ points: { timestamp: string; value: number }[] }>("/api/metrics/internet-health-recent", { params: { limit: 1 } });
+    const latestHealth = health.points?.[health.points.length - 1];
+    pulseSnapshot.value = {
+      internet_health: latestHealth?.value ?? null,
+      latency_ms: usableLatency.length ? usableLatency.reduce((sum, value) => sum + value, 0) / usableLatency.length : null,
+      jitter_ms: usableJitter.length ? usableJitter.reduce((sum, value) => sum + value, 0) / usableJitter.length : null,
+      packet_loss_pct: usableLoss.length ? Math.max(...usableLoss) : null,
+      timestamp: latestHealth?.timestamp ?? null,
+    };
+    pulseError.value = false;
+  } catch {
+    pulseError.value = true;
+  }
+}
 
 // Resolve chart colours from the live theme tokens instead of hardcoding the
 // dark theme's emerald. Switching themes now re-reads the same variables the
@@ -82,6 +123,11 @@ interface PingResultRow {
   status: "up" | "slow" | "down";
   latency_ms: number | null;
   last_seen: string | null;
+  // True when this row is the machine running the console itself. It answers
+  // on every interface it holds (Wi-Fi + a USB adapter), so it appears once
+  // per address; those rows are one machine, not two devices.
+  is_self?: boolean;
+  interface_ips?: string[];
 }
 
 interface PingStatusResponse {
@@ -95,23 +141,73 @@ const pingError = ref<string | null>(null);
 const pingResults = ref<PingResultRow[]>([]);
 const pingSummary = ref<PingStatusResponse["summary"] | null>(null);
 
+const SELF_STATUS_RANK: Record<PingResultRow["status"], number> = { up: 0, slow: 1, down: 2 };
+
+// The console machine answers on every interface it holds (Wi-Fi plus a USB
+// adapter is common), so the ping check lists it once per address. Those rows
+// are one machine: collapse them into a single "This PC" bar instead of two
+// look-alike "Immortan" rows.
+const visiblePingRows = computed<PingResultRow[]>(() => {
+  const rows = pingResults.value;
+  const own = rows.filter((r) => r.is_self);
+  if (own.length === 0) return rows;
+  if (own.length === 1 && (own[0].interface_ips?.length ?? 0) <= 1) return rows;
+
+  const best = [...own].sort(
+    (a, b) =>
+      SELF_STATUS_RANK[a.status] - SELF_STATUS_RANK[b.status] ||
+      (a.latency_ms ?? Infinity) - (b.latency_ms ?? Infinity),
+  )[0];
+  const merged: PingResultRow = {
+    ...best,
+    id: -1,
+    hostname: "This PC",
+    ip_address: [...new Set(own.flatMap((r) => r.interface_ips?.length ? r.interface_ips : [r.ip_address]))].sort().join("  ·  "),
+  };
+  return [...rows.filter((r) => !r.is_self), merged];
+});
+
+// Interface twins must not inflate the headline numbers either: count the
+// collapsed rows, while "checked" stays the number of addresses actually
+// probed.
+const pingCounts = computed(() => {
+  if (!pingSummary.value) return null;
+  const rows = visiblePingRows.value;
+  return {
+    up: rows.filter((r) => r.status === "up").length,
+    slow: rows.filter((r) => r.status === "slow").length,
+    down: rows.filter((r) => r.status === "down").length,
+    total: rows.length,
+    checked: pingSummary.value.total,
+  };
+});
+
 const answering = computed(() =>
-  pingResults.value
+  visiblePingRows.value
     .filter((r) => r.status !== "down" && r.latency_ms !== null)
     .sort((a, b) => (b.latency_ms ?? 0) - (a.latency_ms ?? 0))
 );
-const notResponding = computed(() => pingResults.value.filter((r) => r.status === "down"));
+const notResponding = computed(() => visiblePingRows.value.filter((r) => r.status === "down"));
 const warningColor = ref("#f59e0b");
 
 async function checkPingStatus() {
   pingChecking.value = true;
   pingError.value = null;
   try {
-    const { data } = await axios.get<PingStatusResponse>("/api/devices/ping-status", {
-      params: { limit: 12 },
+    const [pingResponse, deviceResponse] = await Promise.all([
+      axios.get<PingStatusResponse>("/api/devices/ping-status", { params: { limit: 64 } }),
+      axios.get<DeviceRow[]>("/api/devices", currentNetwork.value ? { params: { network_id: String(currentNetwork.value.id) } } : undefined),
+    ]);
+    const devicesById = new Map(deviceResponse.data.map((device) => [device.id, device]));
+    pingResults.value = pingResponse.data.results.map((row) => {
+      const device = devicesById.get(row.id);
+      return {
+        ...row,
+        is_self: row.is_self ?? device?.is_self,
+        interface_ips: row.interface_ips?.length ? row.interface_ips : device?.interface_ips,
+      };
     });
-    pingResults.value = data.results;
-    pingSummary.value = data.summary;
+    pingSummary.value = pingResponse.data.summary;
   } catch {
     pingError.value = "The ping check could not run. Is the server reachable?";
   } finally {
@@ -341,6 +437,14 @@ onMounted(async () => {
   await loadCurrentNetwork();
   await Promise.all([loadDevices(), loadSegments()]);
   void checkPingStatus();
+  void loadPulseSnapshot();
+  pulseRefreshTimer = window.setInterval(() => {
+    if (document.visibilityState === "visible") void loadPulseSnapshot();
+  }, 30_000);
+});
+
+onBeforeUnmount(() => {
+  if (pulseRefreshTimer !== undefined) window.clearInterval(pulseRefreshTimer);
 });
 </script>
 
@@ -387,6 +491,20 @@ onMounted(async () => {
       </article>
     </section>
 
+    <!-- WAN measurements from the same periodic Pulse probe used by Pulse. -->
+    <section class="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Internet connection health">
+      <article v-for="metric in [
+        { id: 'health', label: 'Internet health', value: pulseSnapshot?.internet_health == null ? '—' : `${pulseSnapshot.internet_health.toFixed(0)}%`, detail: pulseError ? 'Pulse data unavailable' : 'WAN quality score' },
+        { id: 'latency', label: 'WAN latency', value: pulseSnapshot?.latency_ms == null ? '—' : `${pulseSnapshot.latency_ms.toFixed(1)} ms`, detail: 'Average probe response' },
+        { id: 'jitter', label: 'Jitter', value: pulseSnapshot?.jitter_ms == null ? '—' : `${pulseSnapshot.jitter_ms.toFixed(1)} ms`, detail: 'Average response variation' },
+        { id: 'loss', label: 'Packet loss', value: pulseSnapshot?.packet_loss_pct == null ? '—' : `${pulseSnapshot.packet_loss_pct.toFixed(1)}%`, detail: 'Highest WAN target loss' },
+      ]" :key="metric.id" class="rounded-xl border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)]/55 px-4 py-3">
+        <p class="text-[0.62rem] text-[var(--np-text-dim)]">{{ metric.label }}</p>
+        <p class="mt-1 text-xl font-semibold tracking-tight text-[var(--np-text)] tabular-nums">{{ metric.value }}</p>
+        <p class="mt-1 text-[0.62rem] text-[var(--np-text-muted)]">{{ metric.detail }}</p>
+      </article>
+    </section>
+
     <!-- Ping status + reachability, side by side -->
     <section class="grid grid-cols-1 gap-5 lg:grid-cols-3">
       <article class="glass-card glass-card--static flex flex-col p-5 lg:col-span-2">
@@ -407,11 +525,11 @@ onMounted(async () => {
           </button>
         </div>
 
-        <p v-if="pingSummary" class="mt-2 text-[0.7rem] text-[var(--np-text-muted)] tabular-nums">
-          {{ pingSummary.up }} answering
-          <template v-if="pingSummary.slow"> · {{ pingSummary.slow }} slow</template>
-          <template v-if="pingSummary.down"> · {{ pingSummary.down }} silent</template>
-          · checked {{ pingSummary.total }}
+        <p v-if="pingCounts" class="mt-2 text-[0.7rem] text-[var(--np-text-muted)] tabular-nums">
+          {{ pingCounts.up }} answering
+          <template v-if="pingCounts.slow"> · {{ pingCounts.slow }} slow</template>
+          <template v-if="pingCounts.down"> · {{ pingCounts.down }} silent</template>
+          · checked {{ pingCounts.checked }}
         </p>
 
         <div v-if="pingError" class="mt-3 rounded-xl border border-[var(--np-danger)]/30 bg-[var(--np-danger)]/10 px-3 py-2 text-xs text-[var(--np-danger)]">
@@ -515,10 +633,10 @@ onMounted(async () => {
             </span>
             <span class="shrink-0 font-mono text-[0.65rem] text-[var(--np-text-dim)] tabular-nums">{{ row.ip_address }}</span>
           </li>
-          <li v-if="notResponding.length === 0 && pingSummary" class="text-xs text-[var(--np-text-dim)]">
+          <li v-if="notResponding.length === 0 && pingCounts" class="text-xs text-[var(--np-text-dim)]">
             Every checked device answered.
           </li>
-          <li v-else-if="!pingSummary && !pingChecking" class="text-xs text-[var(--np-text-dim)]">
+          <li v-else-if="!pingCounts && !pingChecking" class="text-xs text-[var(--np-text-dim)]">
             Run a ping check to see which devices are silent.
           </li>
         </ul>

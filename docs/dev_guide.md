@@ -58,8 +58,8 @@ proxies `/api` to `127.0.0.1:8000` in development) → routers → services → 
 | Redis 7+ or Memurai | Throttling, sessions, Celery |
 | nmap | Discovery, port scans, vulnerability scripts |
 
-Optional: `tcpdump`/`npcap` for packet capture, `zeek` for PCAP summaries (both
-installed in the Docker images).
+Optional: `npcap` on Windows if you want scapy to use a capture driver for ARP
+sweeps; discovery also works through scapy's raw sockets without it.
 
 ---
 
@@ -203,13 +203,18 @@ file keeps working after an upgrade.
 | `ENABLE_LATENCY_MONITOR` | `true` | In-process latency sampling loop. |
 | `ENABLE_SCHEDULED_TASKS` | `true` | In-process vuln alerts and the daily scan reminder. |
 
-### Packet capture
+### Passive monitoring
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PCAP_STORAGE_DIR` | `<temp>/netpulse-pcaps` | Where `.pcap` files are written (`/app/data/pcaps` in Docker). |
 | `PASSIVE_MONITOR_IFACE` | `""` | Empty = the interface carrying the default route. |
-| `ENABLE_PASSIVE_MONITOR` | `false` | Start the passive sniffer at boot. |
+| `ENABLE_PASSIVE_MONITOR` | `false` | Start the passive ARP/DHCP sniffer at boot. |
+
+### Time-series storage
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ENABLE_TIMESCALEDB` | `false` | Convert the `metrics` table to a TimescaleDB hypertable at boot. Only set this on a database that already has the extension; ordinary PostgreSQL tables are used otherwise. |
 
 ### SSH console
 
@@ -415,6 +420,10 @@ CI (`.github/workflows/ci.yml`) runs ruff + vulture, the pytest suite and a
   psql "$DATABASE_URL" -f migrations/20261025_add_networks.sql
   ```
 
+- `migrations/20261029_drop_pcap_tables.sql` drops the four tables of the
+  retired packet-capture feature. It is optional — the app no longer reads them
+  — and guarded: transactional, `IF EXISTS` throughout, children dropped first,
+  and it reports how many rows it discarded before removing them.
 - `python scripts/apply_email_nullable.py` performs the one non-trivial data
   migration (making `users.email` nullable).
 - The `networks` table and `devices.network_id` are also added at startup when
@@ -445,7 +454,6 @@ endpoints and the login route needs a bearer token.
 | `/insights` | Derived summaries for the overview |
 | `/logs` | Application log ring buffer, PDF export |
 | `/syslog` | Start/stop the UDP collector, query stored events |
-| `/captures`, `/pcaps`, `/packets` | Packet capture, PCAP index, Zeek summaries |
 | `/playbooks` | Router drivers, config drift, isolation playbooks |
 | `/reports` | Device inventory, log and scan PDFs (see section 15) |
 | `/scripts` | Allowlisted scripts, jobs, logs |
@@ -470,8 +478,7 @@ Interactive documentation is served at `/docs` (OpenAPI at `/openapi.json`).
 | `frontend/dist/` | Production SPA served by the API |
 
 Paths are anchored to the checkout in `app/core/paths.py`, so starting the API
-from another directory no longer scatters files. Packet captures follow
-`PCAP_STORAGE_DIR` instead.
+from another directory no longer scatters files.
 
 ---
 

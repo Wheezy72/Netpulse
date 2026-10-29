@@ -388,7 +388,7 @@ async def execute_nmap(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         # Block active SYN scans against restricted/fragile VLAN segments.
-        # These segments must only be monitored passively (ARP / Zeek); the
+        # These segments must only be monitored passively (passive ARP); the
         # planner emits -sS only when raw-socket privileges are available.
         if _is_restricted_segment(request.target) and "-sS" in plan.argv:
             raise HTTPException(
@@ -412,7 +412,7 @@ async def execute_nmap(
         }
     else:
         # Block active SYN scans against restricted/fragile VLAN segments.
-        # These segments must only be monitored passively (ARP / Zeek).
+        # These segments must only be monitored passively (passive ARP).
         if _is_restricted_segment(request.target) and _contains_active_syn_flags(request.command or ""):
             raise HTTPException(
                 status_code=403,

@@ -18,6 +18,8 @@ let term: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let ws: WebSocket | null = null;
 let themeObserver: MutationObserver | null = null;
+let resizeObserver: ResizeObserver | null = null;
+let fitQueued = false;
 
 type Rgba = { r: number; g: number; b: number; a: number };
 
@@ -87,6 +89,54 @@ function disposeSocket(): void {
   ws = null;
 }
 
+/**
+ * Re-fit once the container has its real size.
+ *
+ * The drawer this sits in is revealed with a transform, and it is mounted
+ * before its final height settles — fitting only on mount left the terminal at
+ * 384px inside a 170px panel, so the last rows were cut off and the interior
+ * scrolled inside a box that already filled the screen. Fitting on every
+ * container resize (and once more after the first paint) keeps the terminal
+ * exactly the size of the space it is given.
+ */
+/**
+ * Fit the terminal to its box by measuring the grid xterm already drew.
+ *
+ * FitAddon reads cell metrics from xterm's private render service, and in this
+ * build that reports a zero cell size, so every fit() returned silently and the
+ * terminal stayed at its default 24 rows — taller than the drawer, with the
+ * last lines clipped. One rendered row gives the real cell height, and the rows
+ * container gives the width of a full line, so the grid can be derived from the
+ * DOM instead of a private API.
+ */
+function fitToBox(): void {
+  const host = container.value;
+  if (!host || !term) return;
+
+  // A rendered row gives the real cell height. Column count is left alone: the
+  // default 80 columns already fit the drawer's width, and deriving it from the
+  // rows container feeds back on itself (the container widens to the widest
+  // line, which inflates the estimate, which widens it again).
+  const firstRow = host.querySelector<HTMLElement>(".xterm-rows")?.firstElementChild;
+  const cellHeight = firstRow?.getBoundingClientRect().height ?? 0;
+  if (!cellHeight) return;
+
+  const rows = Math.max(1, Math.floor(host.clientHeight / cellHeight));
+  if (rows !== term.rows) {
+    term.resize(term.cols, rows);
+  }
+}
+
+function scheduleFit(): void {
+  if (fitQueued) return;
+  fitQueued = true;
+  window.requestAnimationFrame(() => {
+    fitQueued = false;
+    if (!container.value || !term) return;
+    fitToBox();
+  });
+}
+
 function initTerminal(): void {
   if (!container.value) return;
 
@@ -102,10 +152,18 @@ function initTerminal(): void {
   fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
   term.open(container.value);
-  fitAddon.fit();
   applyTerminalTheme();
 
   term.writeln("Ready. Start a scan to stream output here...");
+  // Fit after the first row exists: the row's height is the measurement this
+  // component relies on, and an empty grid has nothing to measure.
+  scheduleFit();
+
+  // The panel is resized by the drawer opening, by the window changing, and by
+  // the layout settling after a scan starts; one observer covers all three.
+  resizeObserver?.disconnect();
+  resizeObserver = new ResizeObserver(scheduleFit);
+  resizeObserver.observe(container.value);
 }
 
 function connect(url: string): void {
@@ -184,7 +242,7 @@ watch(
 );
 
 function handleResize(): void {
-  fitAddon?.fit();
+  scheduleFit();
   applyTerminalTheme();
 }
 
@@ -213,6 +271,9 @@ function startThemeObserver(): void {
 onMounted(() => {
   initTerminal();
   startThemeObserver();
+  // A second fit after the first paint catches a drawer that was still moving
+  // when the terminal opened.
+  window.setTimeout(scheduleFit, 260);
 
   window.addEventListener("resize", handleResize);
   if (props.streamUrl) {
@@ -224,6 +285,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", handleResize);
   themeObserver?.disconnect();
   themeObserver = null;
+  resizeObserver?.disconnect();
+  resizeObserver = null;
 
   disposeSocket();
   term?.dispose();
@@ -238,7 +301,10 @@ onBeforeUnmount(() => {
       <div class="text-[0.7rem]" style="color: var(--np-text-dim);">Live Stream</div>
     </div>
 
-    <div class="flex-1 p-3">
+    <!-- min-h-0 + overflow-hidden matter: without them this flex child keeps a
+         min-content height, so a terminal that was once fitted too large props
+         the whole drawer open instead of being contained by it. -->
+    <div class="flex-1 min-h-0 overflow-hidden p-3">
       <div
         ref="container"
         class="h-full w-full rounded-lg overflow-hidden"

@@ -15,7 +15,6 @@ Windows, Linux and macOS.
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -24,10 +23,6 @@ DATA_DIR = PROJECT_ROOT / "data"
 SCANS_DIR = DATA_DIR / "scans"
 BACKUP_DIR = DATA_DIR / "backups"
 LOGS_DIR = PROJECT_ROOT / "logs"
-
-# Writable location for packet captures. ``/tmp`` does not exist on Windows, so
-# fall back to the platform temp directory and let PCAP_STORAGE_DIR override it.
-DEFAULT_PCAP_DIR = Path(tempfile.gettempdir()) / "netpulse-pcaps"
 
 
 def ensure_dir(path: Path) -> Path:

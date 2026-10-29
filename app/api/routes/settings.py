@@ -13,6 +13,18 @@ from app.models.user_settings import UserSettings
 
 router = APIRouter()
 
+# The skins the frontend picker offers (see frontend/src/utils/avatar.ts).
+# Server-side validation keeps arbitrary strings out of the persisted blob.
+ALLOWED_AVATAR_STYLES = (
+    "fun-emoji",
+    "big-smile",
+    "avataaars",
+    "micah",
+    "dylan",
+    "notionists",
+)
+DEFAULT_AVATAR_STYLE = "fun-emoji"
+
 
 class NotificationSettings(BaseModel):
     email_enabled: bool = False
@@ -78,6 +90,45 @@ async def load_ai_settings(db: AsyncSession, user_id: int) -> AISettings | None:
         config.provider = "openai"
 
     return config
+
+
+# ---------------------------------------------------------------------------
+# Avatar (portrait) style
+# ---------------------------------------------------------------------------
+@router.get(
+    "/avatar-style",
+    summary="Get the account's avatar style",
+)
+async def get_avatar_style(
+    db: AsyncSession = Depends(db_session),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """The DiceBear skin this account picked for its portrait."""
+    row = await _get_user_settings(db, current_user.id)
+    style = row.avatar_style if row else None
+    return {"avatar_style": style or DEFAULT_AVATAR_STYLE}
+
+
+@router.put(
+    "/avatar-style",
+    summary="Set the account's avatar style",
+)
+async def update_avatar_style(
+    payload: dict[str, str],
+    db: AsyncSession = Depends(db_session),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Persist the portrait skin for this account.
+
+    Unknown skins fall back to the default rather than storing junk — a stale
+    client with an old picker must never poison every later render.
+    """
+    style = (payload or {}).get("style", "")
+    if style not in ALLOWED_AVATAR_STYLES:
+        style = DEFAULT_AVATAR_STYLE
+
+    await _upsert_user_settings(db, current_user.id, avatar_style=style)
+    return {"avatar_style": style}
 
 
 @router.get(

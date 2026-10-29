@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import logging
 
+# The worker never goes through setup_logging(), so scapy's route and
+# capture-driver chatter would still print here. It has to be silenced before
+# the first import below that can pull scapy in: constructing `settings` runs
+# the gateway autodetect, which imports scapy to read the routing table, and
+# scapy announces its capture driver at import time.
+for _name in ("scapy.runtime", "scapy.loading"):
+    logging.getLogger(_name).setLevel(logging.ERROR)
+
 from celery import Celery
 
 from app.core.config import settings
-
-# The worker never goes through setup_logging(), so scapy's route and
-# capture-driver chatter would still print here on every scheduled task. It is
-# the same noise the API silences, so both processes agree on one level.
-for _name in ("scapy.runtime", "scapy.loading"):
-    logging.getLogger(_name).setLevel(logging.ERROR)
 
 
 def create_celery_app() -> Celery:

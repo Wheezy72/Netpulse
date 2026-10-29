@@ -51,7 +51,7 @@ bash scripts/docker_reset.sh
 
 **What you get:**
 - PostgreSQL + Redis (auto-configured)
-- Backend API with nmap / Scapy / Zeek / packet capture
+- Backend API with nmap / Scapy discovery
 - Frontend ready to go
 
 ### First launch: there is no default account
@@ -69,12 +69,6 @@ There is no public sign-up and no `admin`/`changeme` pair baked in.
   first sign-in, and the setup screen is skipped.
 - Accounts an admin adds are **viewers** unless the admin picks the admin role.
   Their initial password is temporary and replaced on first sign-in.
-
-**Verify Zeek is available:**
-
-```bash
-docker compose exec app zeek --version
-```
 
 <details>
 <summary><b>Environment Variables</b></summary>
@@ -135,6 +129,12 @@ psql "$DATABASE_URL" -f migrations/20261020_users_role_admin_viewer.sql
 The `networks` table and `devices.network_id` (see below) are added at startup
 when they are missing, so that upgrade needs no extra step;
 `migrations/20261025_add_networks.sql` is the same change for scripted upgrades.
+
+Packet capture was removed, so `migrations/20261029_drop_pcap_tables.sql`
+drops the four tables it left behind (`pcap_packets`, `pcap_files`,
+`packet_headers`, `packet_captures`). Running it is optional — nothing reads
+them — and safe to re-run: it is transactional, guards every drop, and reports
+the row counts it discards before removing the tables.
 
 ---
 
@@ -343,6 +343,8 @@ pytest tests/ -v
 - The launcher console is quieter: repeated lines are collapsed, library chatter (scapy's route and pcap warnings, pip's upgrade notice) stays in the log files, and a single ready block prints the URLs. `.venv` setup messages are plain and only failures print a log.
 - The left rail's quick actions sit low rather than centred, the version label is gone, and the four actions carry animated glyphs (radar reticle, discovery ping, terminal caret, packet waveform). Quick-action dialogs are centred and no longer push the page down.
 - Removed the Threat Intelligence (AbuseIPDB) and WhatsApp integrations, along with their settings.
+- Removed packet capture entirely: the capture service, the `/captures`, `/pcaps` and `/packets` routes, the Celery pcap-indexing task, the Packet Browser view and the backend dependencies it needed (tcpdump, Zeek). Images are smaller and a fresh `docker compose build` no longer reaches a third-party apt repo. `migrations/20261029_drop_pcap_tables.sql` optionally drops the tables the feature left behind.
+- The scan console is a proper terminal panel: it fits its container, wraps long nmap lines instead of scrolling sideways, and reports the scan's exit status.
 - Bare-metal macOS support (`scripts/setup_macos.sh`), and every path the backend writes is now anchored to the checkout instead of the working directory.
 - Dropped unused frontend dependencies and modules; the TypeScript build now type-checks clean (`vue-tsc --noEmit`).
 - nmap is now a hard requirement; scan profiles are planned from the capabilities of the installed nmap, including which vulnerability scripts exist.
@@ -356,7 +358,7 @@ pytest tests/ -v
 ## Stack
 
 ```
-Backend      → FastAPI + PostgreSQL + Scapy + nmap (required) + Zeek
+Backend      → FastAPI + PostgreSQL + Scapy + nmap (required)
 Frontend     → Vue 3 + TypeScript + Tailwind
 AI           → OpenAI / Anthropic (optional)
 Deploy       → Docker Compose (recommended)

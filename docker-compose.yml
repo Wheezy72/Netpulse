@@ -75,7 +75,6 @@ services:
       PULSE_ISP_IP: ${PULSE_ISP_IP:-8.8.8.8}
       PULSE_CLOUDFLARE_IP: ${PULSE_CLOUDFLARE_IP:-1.1.1.1}
       SCRIPTS_BASE_DIR: /app/scripts
-      PCAP_STORAGE_DIR: /app/data/pcaps
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["http://localhost:8000"]}
 
       # Celery beat (embedded in netpulse-worker) owns every scheduled job in
@@ -85,9 +84,6 @@ services:
       ENABLE_SCHEDULED_TASKS: ${ENABLE_SCHEDULED_TASKS:-false}
     volumes:
       - app_data:/app/data
-      # PCAPs land on the host so they can be opened directly in Wireshark
-      # (e.g. data/pcaps/capture_xxxx.pcap).
-      - ./data/pcaps:/app/data/pcaps
     cap_add:
       - NET_RAW
       - NET_ADMIN
@@ -118,11 +114,8 @@ services:
       SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
       ENVIRONMENT: ${ENVIRONMENT:-production}
       SCRIPTS_BASE_DIR: /app/scripts
-      PCAP_STORAGE_DIR: /app/data/pcaps
     volumes:
       - app_data:/app/data
-      # The worker indexes PCAPs, so it needs the same host-visible directory.
-      - ./data/pcaps:/app/data/pcaps
     cap_add:
       - NET_RAW
       - NET_ADMIN

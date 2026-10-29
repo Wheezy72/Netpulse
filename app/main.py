@@ -34,6 +34,15 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from sqlalchemy import select
 
+# scapy narrates its own environment at *import* time, long before
+# setup_logging() runs, so its loggers have to be quieted ahead of the first app
+# import that pulls it in. On Windows it prints "No libpcap provider available"
+# whenever Npcap is absent — which says nothing about ARP discovery, the thing
+# scapy is actually here for, so the line only ever read as a fault. Real scapy
+# errors still come through at ERROR. This must stay above the imports below.
+for _noisy_logger in ("scapy.runtime", "scapy.loading"):
+    logging.getLogger(_noisy_logger).setLevel(logging.ERROR)
+
 from app.api.routes import api_router
 from app.core.config import settings
 from app.core.redis import close_pool, init_pool
@@ -86,6 +95,11 @@ _VERIFICATION_SCHEMA_STATEMENTS = (
     "ADD COLUMN IF NOT EXISTS verified BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE devices ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ",
     "ALTER TABLE devices ADD COLUMN IF NOT EXISTS verified_source VARCHAR(32)",
+)
+
+# Per-user portrait skins arrived after user_settings; same deal.
+_SETTINGS_SCHEMA_STATEMENTS = (
+    "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS avatar_style VARCHAR(32)",
 )
 
 
@@ -234,20 +248,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                         exc,
                     )
 
-            # 2. TimescaleDB is optional. Only Postgres can carry the
-            #    extension, and a plain Postgres install or a restricted user
-            #    is a normal configuration, not an error worth a full SQL
-            #    traceback on every boot.
             if engine.dialect.name == "postgresql":
+                try:
+                    from sqlalchemy import text
+
+                    async with engine.begin() as conn:
+                        for statement in _SETTINGS_SCHEMA_STATEMENTS:
+                            await conn.execute(text(statement))
+                except Exception as exc:
+                    logger.warning(
+                        "Could not add the user-settings columns (%s); "
+                        "avatar styles will stay on the default.",
+                        exc,
+                    )
+
+            # 2. TimescaleDB is opt-in. Ordinary PostgreSQL tables hold every
+            #    metric; the extension only changes how they are stored. So it
+            #    is not probed on a normal boot at all — an install without it
+            #    should not read a warning about a feature it never asked for.
+            if settings.enable_timescaledb and engine.dialect.name == "postgresql":
                 try:
                     async with engine.begin() as conn:
                         from sqlalchemy import text
                         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"))
                         await conn.execute(text("SELECT create_hypertable('metrics', 'timestamp', if_not_exists => TRUE);"))
+                    logger.info("TimescaleDB enabled: metrics are stored as a hypertable.")
                 except Exception as exc:
-                    logger.info(
-                        "TimescaleDB not used (%s); metrics stay in ordinary PostgreSQL tables.",
-                        type(exc).__name__,
+                    # Enabled but unavailable is worth one line at debug, not a
+                    # boot-time warning: the app runs fine on ordinary tables.
+                    logger.debug(
+                        "TimescaleDB requested but not used (%s); metrics stay in ordinary PostgreSQL tables.",
+                        exc,
                     )
 
             logger.info("Successfully connected to the database and initialized schema.")

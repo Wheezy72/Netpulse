@@ -63,6 +63,14 @@ type DeviceRow = {
   verified?: boolean;
   verified_at?: string | null;
   verified_source?: string | null;
+  // Multiple interface records belonging to this console are rendered as one
+  // computer row; each address remains available for probing/navigation.
+  interface_ips?: string[];
+  member_ids?: number[];
+  // True when the MAC belongs to the machine running this console. It answers
+  // on every interface it holds (Wi-Fi + a USB adapter is common), so turn
+  // those rows into a labelled fact instead of a "duplicate device" mystery.
+  is_self?: boolean;
 };
 
 function verificationLabel(device: DeviceRow): string {
@@ -637,8 +645,17 @@ onMounted(async () => {
               @contextmenu.prevent="openContextMenu($event, d)"
             >
               <td class="px-3" :class="'py-2.5'">
-                <div class="font-mono text-[var(--np-text)] font-semibold">{{ d.ip_address }}</div>
-                <div class="text-[0.65rem] text-[var(--np-text-dim)] mt-0.5">{{ d.hostname || d.mac_address || 'Unknown' }}</div>
+                <div class="font-mono text-[var(--np-text)] font-semibold">{{ d.is_self && d.interface_ips?.length ? d.interface_ips.join(' · ') : d.ip_address }}</div>
+                <div class="mt-0.5 flex flex-wrap items-center gap-1">
+                  <span class="text-[0.65rem] text-[var(--np-text-dim)]">{{ d.is_self ? 'This computer' : (d.hostname || d.mac_address || 'Unknown') }}</span>
+                  <span
+                    v-if="d.is_self"
+                    class="rounded px-1.5 py-0.5 text-[0.55rem] font-semibold uppercase tracking-wide border border-[var(--np-accent-border)] bg-[var(--np-accent-soft)] text-[var(--np-accent)]"
+                    title="This machine runs the NetPulse console. It answers on every interface it holds — Wi-Fi and a USB adapter (e.g. the Archer T2U) — so it shows one row per address."
+                  >
+                    This PC
+                  </span>
+                </div>
               </td>
               <td class="px-3 hidden sm:table-cell" :class="'py-2.5'">
                 <div class="flex flex-wrap items-center gap-1.5">

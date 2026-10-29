@@ -7,7 +7,7 @@ from typing import List, Any
 from pydantic import Field, model_validator, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.core.paths import DATA_DIR, DEFAULT_PCAP_DIR, PROJECT_ROOT
+from app.core.paths import DATA_DIR, PROJECT_ROOT
 
 
 def detect_default_gateway() -> str:
@@ -171,6 +171,10 @@ class Settings(BaseSettings):
     postgres_user: str = "netpulse"
     postgres_pass: str | None = Field(default=None, validation_alias="POSTGRES_PASSWORD")
     database_url_override: str | None = None
+    # TimescaleDB is optional and off by default: the extension only changes how
+    # the metrics table is stored, and every query works on ordinary PostgreSQL
+    # tables. Enable it only on a database that already has the extension.
+    enable_timescaledb: bool = False
 
     # Redis / Celery
     redis_url: str = "redis://redis:6379/0"
@@ -202,7 +206,7 @@ class Settings(BaseSettings):
 
     # Restricted / fragile VLAN protection.
     # List of CIDR ranges that must never receive active scanning (e.g., SYN probes).
-    # Passive ARP / Zeek sniffing is the only allowed discovery method for these ranges.
+    # Passive ARP sniffing is the only allowed discovery method for these ranges.
     # Example: RESTRICTED_VLAN_CIDRS='["10.20.0.0/16","192.168.50.0/24"]'
     restricted_vlan_cidrs: List[str] = Field(default_factory=list)
     # Legacy name for backward compatibility
@@ -214,9 +218,6 @@ class Settings(BaseSettings):
     scripts_uploads_subdir: str = "uploads"
     scripts_prebuilt_subdir: str = "prebuilt"
 
-    # Packet capture storage. Defaults to a directory under the platform temp
-    # root, because a literal /tmp does not exist on Windows.
-    pcap_storage_dir: str = str(DEFAULT_PCAP_DIR)
     # Empty means "the interface carrying the default route", resolved at run
     # time. A literal "eth0" is wrong on most laptops and on every USB Wi-Fi
     # adapter (wlan0 / wlx…), where capture would otherwise fail silently.

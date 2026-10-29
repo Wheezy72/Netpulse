@@ -43,112 +43,16 @@ const showField4 = ref(false);
 const showButton = ref(false);
 const showStatus = ref(false);
 
-const canvasRef = ref<HTMLCanvasElement | null>(null);
-let animationId: number | null = null;
 let cursorInterval: ReturnType<typeof setInterval> | null = null;
 let typingInterval: ReturnType<typeof setInterval> | null = null;
 
 const isNightshade = computed(() => props.theme === "nightshade");
-
-// Particle field hue follows the active theme's accent (emerald in dark,
-// indigo in light) instead of hardcoded amber/teal, so the background never
-// paints a colour that belongs to the other theme.
-const particleHue = computed(() => (isNightshade.value ? 158 : 243));
 
 const emit = defineEmits<{
   (e: "register-success", token: string): void;
   (e: "switch-to-login"): void;
   (e: "toggle-theme"): void;
 }>();
-
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  radius: number;
-  opacity: number;
-}
-
-function initParticles(canvas: HTMLCanvasElement): Particle[] {
-  const particles: Particle[] = [];
-  const count = 130;
-  for (let i = 0; i < count; i++) {
-    particles.push({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
-      vx: (Math.random() - 0.5) * 0.5,
-      vy: (Math.random() - 0.5) * 0.5,
-      radius: Math.random() * 1.8 + 0.6,
-      opacity: Math.random() * 0.35 + 0.1,
-    });
-  }
-  return particles;
-}
-
-function animateCanvas() {
-  const canvas = canvasRef.value;
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-
-  let particles = initParticles(canvas);
-  const connectionDist = 140;
-
-  function draw() {
-    if (!canvas || !ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    const hue = particleHue.value;
-    // The same alpha that reads as a glow on a dark surface reads as a
-    // smudge on a light one, so the field is painted deeper and stronger
-    // in the light theme. Without this the light pages look dead.
-    const strength = isNightshade.value ? 1 : 2.1;
-    const lightness = isNightshade.value ? 60 : 46;
-
-    for (let i = 0; i < particles.length; i++) {
-      const p = particles[i];
-      p.x += p.vx;
-      p.y += p.vy;
-
-      if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
-      if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
-
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fillStyle = `hsla(${hue}, 75%, ${lightness}%, ${Math.min(p.opacity * strength, 0.65)})`;
-      ctx.fill();
-
-      for (let j = i + 1; j < particles.length; j++) {
-        const p2 = particles[j];
-        const dx = p.x - p2.x;
-        const dy = p.y - p2.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < connectionDist) {
-          const alpha = (1 - dist / connectionDist) * (isNightshade.value ? 0.15 : 0.26);
-          ctx.beginPath();
-          ctx.moveTo(p.x, p.y);
-          ctx.lineTo(p2.x, p2.y);
-          ctx.strokeStyle = `hsla(${hue}, 65%, 55%, ${alpha})`;
-          ctx.lineWidth = 0.6;
-          ctx.stroke();
-        }
-      }
-    }
-
-    animationId = requestAnimationFrame(draw);
-  }
-
-  draw();
-}
-
-function handleResize() {
-  const canvas = canvasRef.value;
-  if (canvas) {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-  }
-}
 
 function typeTitle() {
   const title = "netpulse";
@@ -188,14 +92,6 @@ onMounted(async () => {
   await nextTick();
   void loadSetupState();
 
-  const canvas = canvasRef.value;
-  if (canvas) {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    animateCanvas();
-  }
-  window.addEventListener("resize", handleResize);
-
   cursorInterval = setInterval(() => {
     showCursor.value = !showCursor.value;
   }, 530);
@@ -213,10 +109,8 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  if (animationId !== null) cancelAnimationFrame(animationId);
   if (cursorInterval !== null) clearInterval(cursorInterval);
   if (typingInterval !== null) clearInterval(typingInterval);
-  window.removeEventListener("resize", handleResize);
 });
 
 async function handleSubmit(): Promise<void> {
@@ -280,18 +174,11 @@ async function handleSubmit(): Promise<void> {
 </script>
 
 <template>
+  <!-- Transparent on purpose: the app-root starfield and canvas glow are the
+       backdrop for every screen, this one included. -->
   <div
-    class="min-h-screen flex items-center justify-center relative overflow-hidden transition-colors duration-500"
-    :style="{ backgroundColor: 'var(--np-bg)' }"
+    class="min-h-screen flex items-center justify-center relative overflow-hidden"
   >
-    <canvas
-      ref="canvasRef"
-      class="absolute inset-0 w-full h-full"
-      style="z-index: 0; pointer-events: none;"
-    />
-
-    <div class="np-pulse-ring" />
-
     <button
       type="button"
       @click="emit('toggle-theme')"
@@ -531,22 +418,6 @@ async function handleSubmit(): Promise<void> {
 </template>
 
 <style scoped>
-.np-pulse-ring {
-  position: absolute;
-  width: 420px;
-  height: 420px;
-  border-radius: 50%;
-  pointer-events: none;
-  z-index: 1;
-  border: 1px solid color-mix(in srgb, var(--np-accent) 12%, transparent);
-  box-shadow: 0 0 60px color-mix(in srgb, var(--np-accent) 6%, transparent), inset 0 0 60px color-mix(in srgb, var(--np-accent) 4%, transparent);
-  animation: pulseRing 4s ease-in-out infinite;
-}
-@keyframes pulseRing {
-  0%, 100% { transform: scale(1); opacity: 0.35; }
-  50% { transform: scale(1.07); opacity: 0.6; }
-}
-
 .np-stagger-item {
   transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1), transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -599,7 +470,6 @@ async function handleSubmit(): Promise<void> {
   100% { left: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .np-pulse-ring,
   .np-status-dot,
   .np-stagger-item {
     animation: none;

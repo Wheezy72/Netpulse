@@ -90,12 +90,20 @@ class NetworkProfile:
         return f"{vendor} · {label}" if vendor else label
 
 
+def _compact_mac(mac: Optional[str]) -> Optional[str]:
+    """A MAC stripped of separators and upper-case (``AABBCCDDEEFF``), else None."""
+    if not mac:
+        return None
+    compact = re.sub(r"[^0-9a-fA-F]", "", mac).upper()
+    return compact if len(compact) == 12 else None
+
+
 def format_mac(mac: Optional[str]) -> Optional[str]:
     """Render a stored compact MAC (``AABBCCDDEEFF``) as ``aa:bb:cc:dd:ee:ff``."""
     if not mac:
         return None
-    compact = re.sub(r"[^0-9a-fA-F]", "", mac).upper()
-    if len(compact) != 12:
+    compact = _compact_mac(mac)
+    if compact is None:
         return mac
     return ":".join(compact[i : i + 2] for i in range(0, 12, 2)).lower()
 
@@ -271,13 +279,43 @@ async def _find_network(db: Any, profile: NetworkProfile) -> Optional[Network]:
     # The gateway's hardware address identifies the router even when the subnet
     # could not be read, which is exactly how duplicates were created.
     if profile.gateway_mac:
-        return (
+        mac_row = (
             await db.execute(
                 select(Network)
                 .where(func.upper(Network.gateway_mac) == profile.gateway_mac.upper())
                 .order_by(Network.first_seen)
             )
         ).scalars().first()
+        if mac_row is not None:
+            return mac_row
+
+    # A router can answer with a different interface MAC between sessions: the
+    # 2.4 GHz and 5 GHz radios, an alien-band bridge, or a fresh DHCP lease
+    # each present their own address. Same subnet, same gateway address and a
+    # near-identical MAC (same vendor block and same prefix: one router, a
+    # different antenna) is the same box — adopt it, and the refresh below
+    # moves the row onto the MAC the host is actually seeing now.
+    # A router somewhere else that also runs 192.168.1.0/24 keeps its own row:
+    # a genuinely different site never shares this prefix pair.
+    if profile.cidr and profile.gateway_ip and profile.gateway_mac:
+        sibling_mac = _compact_mac(profile.gateway_mac)
+        if sibling_mac:
+            sibling = (
+                await db.execute(
+                    select(Network)
+                    .where(
+                        Network.cidr == profile.cidr,
+                        Network.gateway_ip == profile.gateway_ip,
+                    )
+                    .order_by(Network.first_seen)
+                )
+            ).scalars().all()
+            for row in sibling:
+                stored = _compact_mac(row.gateway_mac)
+                # First five octets: the vendor block plus the unit's leading
+                # hardware bytes. Radio MACs differ in the last octet.
+                if stored and stored[:10] == sibling_mac[:10]:
+                    return row
 
     return None
 
@@ -412,8 +450,10 @@ async def _merge_duplicates(db: Any, keep: Network, profile: NetworkProfile) -> 
     """Fold other rows describing this same router into *keep*.
 
     Same gateway MAC means the same network no matter what the subnet read as
-    on the sweep that created the row. Duplicates carry devices, so they are
-    repointed rather than dropped.
+    on the sweep that created the row. A router presenting a different radio
+    MAC is still the same box when subnet, gateway address and the first five
+    MAC octets agree — one subnet with one gateway address stays one network.
+    Duplicates carry devices, so they are repointed rather than dropped.
     """
     if not profile.gateway_mac:
         return
@@ -430,6 +470,28 @@ async def _merge_duplicates(db: Any, keep: Network, profile: NetworkProfile) -> 
             )
         ).scalars().all()
     )
+    if not duplicates and profile.cidr and profile.gateway_ip:
+        # A duplicate can also carry an older MAC of the same router.
+        sibling_mac = _compact_mac(profile.gateway_mac)
+        if sibling_mac:
+            rows = list(
+                (
+                    await db.execute(
+                        select(Network).where(
+                            Network.cidr == profile.cidr,
+                            Network.gateway_ip == profile.gateway_ip,
+                            Network.id != keep.id,
+                        )
+                    )
+                ).scalars().all()
+            )
+            duplicates = [
+                row
+                for row in rows
+                if row.gateway_mac
+                and _compact_mac(row.gateway_mac)
+                and _compact_mac(row.gateway_mac)[:10] == sibling_mac[:10]
+            ]
     if not duplicates:
         return
 
@@ -487,6 +549,12 @@ async def resolve_current_network(db: Any, *, refresh: bool = False) -> Optional
             profile.gateway_ip or "unknown",
             f" / {format_mac(profile.gateway_mac)}" if profile.gateway_mac else "",
         )
+        # The create path used to skip the copy-existence round: a race or an
+        # identity change that slipped past _find_network then left two rows
+        # describing one router, each with a fresh copy of every device.
+        await _merge_duplicates(db, network, profile)
+        await db.commit()
+        await db.refresh(network)
         return network
 
     # Refresh what the host observes, but never overwrite the operator's name.

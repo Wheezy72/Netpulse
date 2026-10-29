@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from email_validator import EmailNotValidError, validate_email
 from jose import jwt
 from pydantic import BaseModel, field_validator
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -28,6 +28,7 @@ from app.api.deps import (
 from app.core.config import settings
 from app.core.redis import get_redis
 from app.models.user import User, UserRole
+from app.models.user_settings import UserSettings
 
 logger = logging.getLogger("netpulse.auth")
 
@@ -294,6 +295,24 @@ async def login(
             detail="Incorrect username or password",
         )
 
+    # A temporary password issued by /forgot-password works for 15 minutes,
+    # then refuses to sign anyone in. The sha256 stored in ``reset_token`` is
+    # the marker for "what is currently hashed IS a temp password", so the
+    # expiry check binds to exactly the string that was typed — a real
+    # password (marker already consumed by the forced change) is unaffected.
+    if user.reset_token is not None:
+        import hashlib
+
+        if hashlib.sha256(payload.password.encode()).hexdigest() == user.reset_token:
+            if (
+                user.reset_token_expires is None
+                or user.reset_token_expires < datetime.utcnow()
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="This temporary password has expired. Request a fresh one via 'Forgot password' — it only lasts 15 minutes.",
+                )
+
     access_token_expires = (
         timedelta(days=30)
         if payload.remember_me
@@ -469,6 +488,9 @@ class UserSummary(BaseModel):
     full_name: str | None = None
     role: str
     created_at: datetime | None = None
+    # The portrait skin this account picked, so the roster renders every row
+    # in its own DiceBear style. None renders in the app default.
+    avatar_style: str | None = None
 
 
 @router.get(
@@ -491,7 +513,11 @@ async def list_users(
             detail="Only an administrator can list accounts.",
         )
 
-    result = await db.execute(select(User).order_by(User.id))
+    result = await db.execute(
+        select(User, UserSettings.avatar_style)
+        .outerjoin(UserSettings, UserSettings.user_id == User.id)
+        .order_by(User.id)
+    )
     return [
         UserSummary(
             id=user.id,
@@ -500,8 +526,9 @@ async def list_users(
             full_name=user.full_name,
             role=user.role.value,
             created_at=user.created_at,
+            avatar_style=row_style,
         )
-        for user in result.scalars().all()
+        for user, row_style in result.all()
     ]
 
 
@@ -703,13 +730,16 @@ async def delete_user(
     )
 
 
-class ForgotPasswordRequest(EmailRequest):
-    pass
+# A temporary password issued by /forgot-password lives exactly this long.
+# It is never emailed out of the box — it is printed in the server console —
+# so a short window is cheap security and matches the "15 minutes, tops"
+# house rule for one-time secrets.
+_TEMP_PASSWORD_TTL = timedelta(minutes=15)
 
 
-class ResetPasswordRequest(BaseModel):
-    token: str
-    new_password: str
+class ForgotPasswordRequest(BaseModel):
+    # Username or email — whichever the user actually remembers.
+    identifier: str
 
 
 class UpdatePasswordRequest(BaseModel):
@@ -743,6 +773,10 @@ async def update_password(
 
     db_user.hashed_password = get_password_hash(payload.new_password)
     db_user.force_password_change = False
+    # Consumes the temporary-password marker: the stored hash is now a
+    # password the user chose, so the 15-minute expiry no longer applies.
+    db_user.reset_token = None
+    db_user.reset_token_expires = None
     await db.commit()
 
     # Invalidate Redis session cache so it updates with the new user profile state on next request
@@ -763,74 +797,69 @@ async def update_password(
 
 @router.post(
     "/forgot-password",
-    summary="Request a password reset token",
+    summary="Issue a temporary password (printed in the console, valid 15 minutes)",
     dependencies=[Depends(_enforce_reset_rate_limit)],
 )
 async def forgot_password(
     payload: ForgotPasswordRequest,
     db: AsyncSession = Depends(db_session),
 ) -> Dict[str, str]:
-    result = await db.execute(select(User).where(User.email == payload.email))
-    user = result.scalar_one_or_none()
+    """Replace a lost password with an unguessable temporary one.
 
-    # Accounts without a local password or without an address cannot recover by
-    # email. Return the same generic message so the response never reveals which
-    # accounts exist or which one is missing an address.
-    if user is None or user.auth_provider != "local" or not user.email:
-        # Return generic message to prevent user enumeration
-        return {"message": "If an account with that email exists, a reset code has been issued."}
+    Recovery on a self-hosted console has no email service to lean on: the
+    temporary secret is printed in the server console, where only the
+    operator can read it. The account keeps working straight away — sign in
+    with the temporary password and the app forces a change to a secret the
+    user actually chose.
 
-    token = secrets.token_urlsafe(32)
+    The plain identifier is matched as usernames are predictable and shown in
+    the UI anyway, but the response stays generic so nothing broadcasts which
+    accounts exist.
+    """
     import hashlib
-    hashed_token = hashlib.sha256(token.encode()).hexdigest()
 
-    user.reset_token = hashed_token
-    user.reset_token_expires = datetime.utcnow() + timedelta(hours=1)
-    await db.commit()
-
-    # Log the plaintext token to the console so the administrator can copy-paste it
-    logger.warning("PASSWORD RESET REQUESTED FOR %s. RESET TOKEN: %s", user.email, token)
-
-    return {"message": "If an account with that email exists, a reset code has been issued."}
-
-
-@router.post(
-    "/reset-password",
-    summary="Reset password using a valid reset token",
-    dependencies=[Depends(_enforce_reset_rate_limit)],
-)
-async def reset_password(
-    payload: ResetPasswordRequest,
-    db: AsyncSession = Depends(db_session),
-) -> Dict[str, str]:
-    if len(payload.new_password) < MIN_PASSWORD_LENGTH:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Password must be at least {MIN_PASSWORD_LENGTH} characters.",
-        )
-
-    import hashlib
-    hashed_token = hashlib.sha256(payload.token.encode()).hexdigest()
-
-    # Find the user with the matching, unexpired reset token
+    identifier = payload.identifier.strip()
     result = await db.execute(
         select(User).where(
-            User.reset_token == hashed_token,
-            User.reset_token_expires > datetime.utcnow()
+            (func.lower(User.email) == identifier.lower())
+            | (User.username == identifier)
         )
     )
     user = result.scalar_one_or_none()
 
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset token.",
-        )
+    # Accounts without a local password (or absent altogether) get the same
+    # generic answer, so the response never reveals which accounts exist.
+    generic = {
+        "message":
+        "If an account matches, a temporary password has been printed in the NetPulse "
+        "console. It expires in 15 minutes and you will be asked to choose your own "
+        "at first sign-in."
+    }
+    if user is None or user.auth_provider != "local":
+        # Log so the operator is not left guessing why nothing appeared.
+        logger.info("Password reset requested for %r: no matching local account.", identifier)
+        return generic
 
-    user.hashed_password = get_password_hash(payload.new_password)
-    user.reset_token = None
-    user.reset_token_expires = None
-    user.force_password_change = False
+    temp_password = secrets.token_urlsafe(12)
+    user.hashed_password = get_password_hash(temp_password)
+    # The sha256 of the temporary password marks what is currently stored and
+    # lets /login tie the 15-minute expiry to exactly the string that was
+    # typed. Cleared again as soon as the user sets their own password.
+    user.reset_token = hashlib.sha256(temp_password.encode()).hexdigest()
+    user.reset_token_expires = datetime.utcnow() + _TEMP_PASSWORD_TTL
+    user.force_password_change = True
     await db.commit()
 
-    return {"message": "Password has been reset successfully. You can now sign in."}
+    # Sessions minted under the old password must not survive the replacement.
+    revoked = await _revoke_user_sessions(user.id)
+
+    # Log the plaintext to the console so the operator can copy-paste it.
+    logger.warning(
+        "TEMP PASSWORD issued for %s (user=%s): %s — valid for 15 minutes. "
+        "Sign in with it, then set your own (%d existing session(s) revoked).",
+        user.email or user.username,
+        user.username,
+        temp_password,
+        revoked,
+    )
+    return generic

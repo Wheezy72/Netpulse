@@ -139,8 +139,8 @@
   --np-accent-muted: #475569;     /* Slate 600 */
 
   --np-text: #09090b;             /* Charcoal - high contrast text */
-  --np-text-muted: #1e293b;       /* Slate 800 - dark, highly readable secondary text */
-  --np-text-dim: #334155;         /* Slate 700 - dark, highly readable tertiary text */
+  --np-text-muted: #334155;       /* Slate 700 — readable secondary text */
+  --np-text-dim: #475569;         /* Slate 600 — captions stay comfortably legible */
 
   --np-border: rgba(15, 23, 42, 0.25);        /* Higher contrast border */
   --np-border-subtle: rgba(15, 23, 42, 0.15); /* More visible subtle border */
@@ -185,8 +185,8 @@
   --np-nav-active-bg: rgba(79, 70, 229, 0.12);
   --np-nav-active-text: #4338ca;
   --np-nav-active-border: rgba(79, 70, 229, 0.25);
-  --np-nav-inactive-text: #020617; /* Slate 950 - bold and black */
-  --np-nav-inactive-hover: #000000; /* Pure black on hover */
+  --np-nav-inactive-text: #334155;
+  --np-nav-inactive-hover: #0f172a;
 }
 
 /* Apply default font families to html/body */
@@ -329,6 +329,14 @@ body.theme-sysadmin .np-dialog-scrim {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
+  /* Bright page elements (the CHECK NOW button, stat numbers) used to smudge
+     through the glass surface as floating bright rectangles. A dialog holding
+     form inputs is a working surface, not a window: more opaque than cards so
+     what is behind stays decoration instead of leaking into the form. */
+  background: color-mix(in srgb, var(--np-surface-elevated) 92%, transparent);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  will-change: transform;
   /* The card's hover lift would replace this transform and throw the dialog
      off-centre the instant the pointer touched it. These dialogs also carry
      .glass-card, so the hover rule has to be pinned back to the centring
@@ -373,24 +381,42 @@ body.theme-sysadmin .np-dialog-scrim {
 .canvas-glow {
   background-image: var(--np-canvas-glow);
   background-size: 180% 180%;
-  background-position: 0% 0%;
-  animation: np-canvas-drift 90s ease-in-out infinite alternate;
+  background-position: 50% 45%;
 }
 
-@keyframes np-canvas-drift {
-  from {
-    background-position: 0% 0%;
-  }
-  to {
-    background-position: 100% 100%;
-  }
+/* ============================================
+   STARFIELD — the app-wide background
+
+   One canvas sits behind every screen — console, sign-in, first-run setup and
+   password recovery — so the app has a single backdrop rather than each page
+   inventing its own. The drawing lives in components/ui/Starfield.vue; this
+   rule only places the surface and supplies the ink.
+
+   A canvas, not a few hundred animated spans: every animated element over a
+   blurred glass panel forces that panel to re-composite every frame, which is
+   what made the console crawl while a bare login page ran fine.
+   ============================================ */
+.np-stars {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  /* The theme's own ink — near-white on Nightshade, near-black on SysAdmin —
+     which is what the shadcn field's `starColor: var(--foreground)` default
+     does. Tinting the field with the accent made it nearly invisible. */
+  color: var(--np-text);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .canvas-glow {
-    animation: none;
-  }
+body.theme-sysadmin .np-stars {
+  /* The same ink reads heavier on a light canvas than on a dark one, so the
+     light theme takes the identical colour at reduced strength rather than a
+     different one. At 0.72 the field vanished against the pale SysAdmin
+     canvas; 0.86 keeps the stars legible without the sky turning into noise. */
+  opacity: 0.86;
 }
+
 
 @media (prefers-reduced-motion: reduce) {
   .glass-card:hover { transform: none; }
@@ -507,6 +533,32 @@ body.theme-sysadmin .np-dialog-scrim {
 /* ============================================
    BUTTONS
    ============================================ */
+/* One motion language for every button in the shell: a 1px lift on hover and a
+   gentle press on click. The selector deliberately outranks Tailwind's
+   single-class utilities (``.transition-colors`` only) so colours and transform
+   share one timing, while real hover variants (``hover:-translate-y-0.5``)
+   still override locally. */
+button:not(:disabled) {
+  transition-property: transform, background-color, border-color, box-shadow, color, opacity, filter;
+  transition-duration: 180ms;
+  transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+button:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+button:not(:disabled):active {
+  transform: translateY(0) scale(0.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button:not(:disabled),
+  button:not(:disabled):hover,
+  button:not(:disabled):active {
+    transition: none;
+    transform: none;
+  }
+}
+
 .np-cyber-btn {
   position: relative;
   background: color-mix(in srgb, var(--np-accent-primary) 8%, transparent);
@@ -980,6 +1032,48 @@ tbody tr:hover {
   font-weight: 800 !important;
 }
 
+/* Avatar choices change border and fill only. Scaling a tile that holds an
+   inline SVG forces that SVG to re-rasterise on every frame of the transition,
+   which is what made the row shimmer while picking a style. */
+.avatar-style-option {
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+.avatar-style-option img,
+.avatar-style-option svg {
+  transition: opacity 140ms ease;
+}
+.avatar-style-option:not(.avatar-style-option--active) svg {
+  opacity: 0.82;
+}
+.avatar-style-option:hover svg,
+.avatar-style-option--active svg {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avatar-style-option,
+  .avatar-style-option svg {
+    transition: none !important;
+  }
+}
+
+/* Theme control gives the selected sun/moon a small, tactile turn on hover. */
+.np-theme-toggle-icon {
+  transform-origin: 50% 50%;
+  transition: transform 320ms cubic-bezier(0.2, 0.8, 0.2, 1), color 180ms ease;
+}
+.np-theme-toggle:hover .np-theme-toggle-icon {
+  transform: rotate(24deg) scale(1.12);
+}
+.np-theme-toggle:active .np-theme-toggle-icon {
+  transform: rotate(-12deg) scale(0.94);
+}
+@media (prefers-reduced-motion: reduce) {
+  .np-theme-toggle-icon { transition: none; }
+  .np-theme-toggle:hover .np-theme-toggle-icon,
+  .np-theme-toggle:active .np-theme-toggle-icon { transform: none; }
+}
+
 /* ============================================
    TOPOLOGY GRID — LIGHT THEME CONTRAST
    ============================================
@@ -990,6 +1084,11 @@ tbody tr:hover {
    it in the global sheet means the fix survives the view's own theming. */
 .np-map--light {
   --map-grid: rgba(0, 0, 0, 0.32) !important;
+}
+
+/* Keep the topology's radar grid quiet but visible on a white canvas. */
+.np-map--light {
+  --map-grid: rgba(15, 23, 42, 0.12) !important;
 }
 
 /* ============================================

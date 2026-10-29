@@ -48,7 +48,6 @@ RUN apt-get update \
        nmap \
        iputils-ping \
        traceroute \
-       tcpdump \
        curl \
        whois \
        dnsutils \
@@ -56,13 +55,6 @@ RUN apt-get update \
        snmp \
        net-tools \
        conntrack \
-    && . /etc/os-release \
-    && zeek_repo_version="${VERSION_ID%%.*}" \
-    && echo "deb [signed-by=/usr/share/keyrings/zeek.gpg] https://download.opensuse.org/repositories/security:/zeek/Debian_${zeek_repo_version}/ /" > /etc/apt/sources.list.d/security_zeek.list \
-    && curl -fsSL "https://download.opensuse.org/repositories/security:/zeek/Debian_${zeek_repo_version}/Release.key" | gpg --dearmor -o /usr/share/keyrings/zeek.gpg \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-       zeek \
     && rm -rf /var/lib/apt/lists/* \
     && setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap \
     && setcap cap_net_raw+eip /bin/ping

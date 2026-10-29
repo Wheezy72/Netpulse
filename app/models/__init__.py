@@ -7,8 +7,6 @@ from app.models.metric import Metric
 from app.models.network import Network
 from app.models.network_segment import NetworkSegment
 from app.models.security_telemetry import SecurityTelemetry
-from app.models.packet_capture import PacketCapture, PacketCaptureStatus, PacketHeader
-from app.models.pcap_meta import PcapFile, PcapPacket
 from app.models.router_config_baseline import RouterConfigBaseline
 from app.models.scan_job import ScanJob
 from app.models.script_job import ScriptJob
@@ -27,11 +25,6 @@ __all__ = [
     "Network",
     "NetworkSegment",
     "SecurityTelemetry",
-    "PacketCapture",
-    "PacketCaptureStatus",
-    "PacketHeader",
-    "PcapFile",
-    "PcapPacket",
     "RouterConfigBaseline",
     "ScanJob",
     "ScriptJob",

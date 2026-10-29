@@ -71,7 +71,9 @@ const routes: RouteRecordRaw[] = [
     path: "/forgot-password",
     name: "forgot-password",
     component: () => import("../views/ForgotPassword.vue"),
-    meta: { guest: true, title: "Reset password" },
+    // Reachable while signed in too — “Forgot the current password?” in
+    // Settings leads here. No guest/requiresAuth; the page manages itself.
+    meta: { title: "Reset password" },
   },
   {
     path: "/:pathMatch(.*)*",

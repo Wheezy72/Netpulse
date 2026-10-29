@@ -22,9 +22,10 @@ from app.models.scan_job import ScanJob
 from app.models.script_job import ScriptJob
 from app.models.vulnerability import Vulnerability, VulnerabilitySeverity
 from app.services.device_discovery import run_device_discovery
+from app.services.console_host import console_macs
 from app.services.device_enrichment import scan_device_ports, upsert_device_ports
 from app.services.router_source import describe_configuration, verify_devices as run_verification
-from app.services.oui import is_locally_administered
+from app.services.oui import is_locally_administered, normalize_mac
 from app.services.os_fingerprint import resolve_device_os
 
 # Device and topology endpoints. In this personal deployment, they are
@@ -50,6 +51,12 @@ class DeviceOut(BaseModel):
     verified_at: Optional[datetime] = None
     verified_source: Optional[str] = None
     created_at: Optional[datetime] = None
+    # True when the MAC belongs to the machine running the console itself.
+    # One machine with Wi-Fi plus a USB adapter answers on two addresses and
+    # shows as two rows; without this flag that reads as a duplicate bug.
+    is_self: bool = False
+    member_ids: List[int] = Field(default_factory=list)
+    interface_ips: List[str] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -145,6 +152,9 @@ class TopologyNode(BaseModel):
     vulnerability_count: int
     last_seen: Optional[datetime]
     verified: bool = False
+    is_self: bool = False
+    member_ids: List[int] = Field(default_factory=list)
+    interface_ips: List[str] = Field(default_factory=list)
 
 
 class TopologyEdge(BaseModel):
@@ -216,8 +226,24 @@ async def list_devices(
     if network_id is not None:
         stmt = stmt.where(Device.network_id == network_id)
     result = await db.execute(stmt)
-    devices = result.scalars().all()
-    return [DeviceOut.from_orm(d) for d in devices]
+    devices = list(result.scalars().all())
+
+    # The console host answers on every interface it holds (Wi-Fi + a USB
+    # adapter is common). Present that as one computer per network, retaining
+    # the member records for reachability and detail actions.
+    host_macs = await asyncio.to_thread(console_macs)
+    device_groups = _topology_device_groups(devices, host_macs)
+    rows: List[DeviceOut] = []
+    for representative, members in device_groups:
+        out = DeviceOut.from_orm(representative)
+        out.is_self = any(
+            member.mac_address and normalize_mac(member.mac_address) in host_macs
+            for member in members
+        )
+        out.member_ids = [member.id for member in members]
+        out.interface_ips = sorted({member.ip_address for member in members})
+        rows.append(out)
+    return rows
 
 
 @router.post(
@@ -342,6 +368,32 @@ async def list_zones(db: AsyncSession = Depends(db_session)) -> ZoneListResponse
     return ZoneListResponse(zones=zones)
 
 
+def _topology_device_groups(
+    devices: List[Device], host_macs: frozenset[str] | set[str]
+) -> List[tuple[Device, List[Device]]]:
+    """Collapse this console's multiple adapters to one node per network.
+
+    Only a MAC currently reported by this host proves interface ownership.
+    Hostnames, Windows fingerprints, and proximity in the address range are
+    deliberately not enough: two real computers can share all three.
+    """
+    groups: List[tuple[Device, List[Device]]] = []
+    console_by_network: Dict[Optional[int], List[Device]] = {}
+
+    for device in devices:
+        mac = normalize_mac(device.mac_address)
+        if mac and mac in host_macs:
+            console_by_network.setdefault(device.network_id, []).append(device)
+        else:
+            groups.append((device, [device]))
+
+    for members in console_by_network.values():
+        members.sort(key=lambda device: device.id)
+        groups.append((members[0], members))
+
+    return groups
+
+
 @router.get(
     "/topology",
     response_model=TopologyResponse,
@@ -364,6 +416,16 @@ async def get_topology(
 
     if not devices:
         return TopologyResponse(nodes=[], edges=[])
+
+    # A host with Wi-Fi + a USB adapter is one machine but has one inventory
+    # row per address. Collapse those only when their MAC belongs to this
+    # console, never merely because two devices share a hostname.
+    host_macs = await asyncio.to_thread(console_macs)
+    device_groups = _topology_device_groups(devices, host_macs)
+    topology_devices = [representative for representative, _members in device_groups]
+    group_by_id = {
+        representative.id: members for representative, members in device_groups
+    }
 
     # Basic severity aggregation per device
     severity_rank = {
@@ -389,7 +451,12 @@ async def get_topology(
 
     nodes: list[TopologyNode] = []
 
-    for d in devices:
+    for d in topology_devices:
+        members = group_by_id[d.id]
+        is_self = len(members) > 1 or (
+            bool(d.mac_address)
+            and normalize_mac(d.mac_address) in host_macs
+        )
         counts = severity_by_device.get(d.id, {})
         max_sev: Optional[VulnerabilitySeverity] = (
             max(counts, key=lambda s: severity_rank.get(s, 0)) if counts else None
@@ -399,9 +466,9 @@ async def get_topology(
         nodes.append(
             TopologyNode(
                 id=d.id,
-                label=d.hostname or d.ip_address,
+                label="This PC" if is_self else (d.hostname or d.ip_address),
                 ip_address=d.ip_address,
-                hostname=d.hostname,
+                hostname="This PC" if is_self else d.hostname,
                 device_type=d.device_type,
                 is_gateway=d.is_gateway,
                 zone=d.zone,
@@ -410,10 +477,17 @@ async def get_topology(
                 vulnerability_count=vuln_count,
                 last_seen=d.last_seen,
                 verified=d.verified,
+                is_self=is_self,
+                member_ids=[member.id for member in members],
+                interface_ips=sorted({member.ip_address for member in members}),
             )
         )
 
-    device_ip_to_id = {d.ip_address: d.id for d in devices}
+    device_ip_to_id = {
+        member.ip_address: representative.id
+        for representative, members in device_groups
+        for member in members
+    }
     edges: list[TopologyEdge] = []
 
     # Attempt to load discovered topology links from metrics
@@ -443,8 +517,8 @@ async def get_topology(
 
     # Fallback to star topology if no links discovered
     if not edges:
-        gateway = next((d for d in devices if d.is_gateway), devices[0])
-        for d in devices:
+        gateway = next((d for d in topology_devices if d.is_gateway), topology_devices[0])
+        for d in topology_devices:
             if d.id == gateway.id:
                 continue
             edges.append(TopologyEdge(source=gateway.id, target=d.id, kind="l3"))
@@ -849,6 +923,10 @@ async def get_ping_status(
     )
     devices = list(result.scalars().all())
 
+    # The console host answers on every interface it holds (Wi-Fi + a USB
+    # adapter is common); its MACs tell the widget which rows are this PC.
+    host_macs = await asyncio.to_thread(console_macs)
+
     semaphore = asyncio.Semaphore(_PING_CONCURRENCY)
 
     async def _probe(device: Device) -> Dict[str, Any]:
@@ -861,6 +939,19 @@ async def get_ping_status(
             "status": _classify_ping(outcome.latency_ms, outcome.reachable),
             "latency_ms": outcome.latency_ms,
             "last_seen": device.last_seen.isoformat() if device.last_seen else None,
+            # Same machine on two interfaces reads as "one device, two
+            # addresses" once the widget knows it is the console itself.
+            "is_self": bool(
+                device.mac_address
+                and normalize_mac(device.mac_address) in host_macs
+            ),
+            "interface_ips": sorted({
+                member.ip_address
+                for member in devices
+                if member.network_id == device.network_id
+                and member.mac_address
+                and normalize_mac(member.mac_address) in host_macs
+            }) if device.mac_address and normalize_mac(device.mac_address) in host_macs else [],
             "error": outcome.error,
         }
 

@@ -5,7 +5,7 @@ import { useRoute, useRouter } from "vue-router";
 import { Eye, EyeOff, LoaderCircle } from "lucide-vue-next";
 
 import { describeRequestError } from "../utils/requestError";
-import { computed, onMounted, onUnmounted, ref, nextTick } from "vue";
+import { onMounted, onUnmounted, ref, nextTick } from "vue";
 
 type Theme = "nightshade" | "sysadmin";
 
@@ -13,16 +13,12 @@ interface Props {
   theme: Theme;
 }
 
-const props = defineProps<Props>();
+// `theme` stays declared so the shell's binding is consumed rather than
+// falling through to the DOM as a stray attribute. Nothing on this page
+// branches on it any more: the field and the button follow the theme tokens.
+defineProps<Props>();
 const router = useRouter();
 const route = useRoute();
-
-const isNightshade = computed(() => props.theme === "nightshade");
-
-// Particle field hue follows the active theme's accent (emerald in dark,
-// indigo in light) instead of hardcoded purple, so the background never
-// paints a colour that belongs to the other theme.
-const particleHue = computed(() => (isNightshade.value ? 158 : 243));
 
 const username = ref("");
 const password = ref("");
@@ -48,8 +44,6 @@ const showField2 = ref(false);
 const showButton = ref(false);
 const showStatus = ref(false);
 
-const canvasRef = ref<HTMLCanvasElement | null>(null);
-let animationId: number | null = null;
 let cursorInterval: ReturnType<typeof setInterval> | null = null;
 let typingInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -58,95 +52,6 @@ const emit = defineEmits<{
   (e: "switch-to-register"): void;
   (e: "toggle-theme"): void;
 }>();
-
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  radius: number;
-  opacity: number;
-}
-
-function initParticles(canvas: HTMLCanvasElement): Particle[] {
-  const particles: Particle[] = [];
-  const count = 120;
-  for (let i = 0; i < count; i++) {
-    particles.push({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
-      vx: (Math.random() - 0.5) * 0.4,
-      vy: (Math.random() - 0.5) * 0.4,
-      radius: Math.random() * 1.8 + 0.5,
-      opacity: Math.random() * 0.3 + 0.1,
-    });
-  }
-  return particles;
-}
-
-function animateCanvas() {
-  const canvas = canvasRef.value;
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-
-  let particles = initParticles(canvas);
-  const connectionDist = 130;
-
-  function draw() {
-    if (!canvas || !ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    const hue = particleHue.value;
-    // The same alpha that reads as a glow on a dark surface reads as a
-    // smudge on a light one, so the field is painted deeper and stronger
-    // in the light theme. Without this the light pages look dead.
-    const strength = isNightshade.value ? 1 : 2.1;
-    const lightness = isNightshade.value ? 60 : 46;
-
-    for (let i = 0; i < particles.length; i++) {
-      const p = particles[i];
-      p.x += p.vx;
-      p.y += p.vy;
-
-      if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
-      if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
-
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fillStyle = `hsla(${hue}, 75%, ${lightness}%, ${Math.min(p.opacity * strength, 0.65)})`;
-      ctx.fill();
-
-      for (let j = i + 1; j < particles.length; j++) {
-        const p2 = particles[j];
-        const dx = p.x - p2.x;
-        const dy = p.y - p2.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < connectionDist) {
-          const alpha = (1 - dist / connectionDist) * (isNightshade.value ? 0.12 : 0.24);
-          ctx.beginPath();
-          ctx.moveTo(p.x, p.y);
-          ctx.lineTo(p2.x, p2.y);
-          ctx.strokeStyle = `hsla(${hue}, 65%, 55%, ${alpha})`;
-          ctx.lineWidth = 0.5;
-          ctx.stroke();
-        }
-      }
-    }
-
-    animationId = requestAnimationFrame(draw);
-  }
-
-  draw();
-}
-
-function handleResize() {
-  const canvas = canvasRef.value;
-  if (canvas) {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-  }
-}
 
 function typeTitle() {
   const title = "netpulse";
@@ -202,18 +107,8 @@ onMounted(async () => {
   // say so, otherwise the redirect looks like the app forgot the account.
   if (route.query.expired === "1") {
     errorMessage.value = "Your session expired — sign in again.";
-  }
-
-  void checkServer();
+  }  void checkServer();
   void checkSetup();
-
-  const canvas = canvasRef.value;
-  if (canvas) {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    animateCanvas();
-  }
-  window.addEventListener("resize", handleResize);
 
   cursorInterval = setInterval(() => {
     showCursor.value = !showCursor.value;
@@ -229,10 +124,8 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  if (animationId !== null) cancelAnimationFrame(animationId);
   if (cursorInterval !== null) clearInterval(cursorInterval);
   if (typingInterval !== null) clearInterval(typingInterval);
-  window.removeEventListener("resize", handleResize);
 });
 
 async function handleSubmit(): Promise<void> {
@@ -264,17 +157,9 @@ async function handleSubmit(): Promise<void> {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center relative overflow-hidden" :style="{ backgroundColor: 'var(--np-bg)' }">
-    <canvas
-      ref="canvasRef"
-      class="absolute inset-0 w-full h-full"
-      style="z-index: 0; pointer-events: none;"
-    />
-
-    <!-- Ambient purple glow rings -->
-    <div class="np-pulse-ring" />
-    <div class="np-pulse-ring np-pulse-ring--delayed" />
-
+  <!-- Transparent on purpose: the app-root starfield and canvas glow are the
+       backdrop for every screen, this one included. -->
+  <div class="min-h-screen flex items-center justify-center relative overflow-hidden">
     <div
       class="w-full max-w-md px-4 transition-all duration-700 transform relative"
       style="z-index: 10;"
@@ -370,7 +255,6 @@ async function handleSubmit(): Promise<void> {
             <button
               type="submit"
               class="np-login-btn w-full rounded-lg px-4 py-3 text-sm font-semibold flex items-center justify-center gap-2"
-              :class="theme === 'sysadmin' ? 'np-login-btn--solid' : ''"
               :disabled="isSubmitting"
             >
               <LoaderCircle v-if="isSubmitting" class="w-4 h-4 animate-spin" :stroke-width="1.7" />
@@ -420,55 +304,26 @@ async function handleSubmit(): Promise<void> {
 </template>
 
 <style scoped>
-.np-pulse-ring {
-  position: absolute;
-  width: 400px;
-  height: 400px;
-  border-radius: 50%;
-  pointer-events: none;
-  z-index: 1;
-  border: 1px solid color-mix(in srgb, var(--np-accent) 12%, transparent);
-  box-shadow: 0 0 60px color-mix(in srgb, var(--np-accent) 6%, transparent), inset 0 0 60px color-mix(in srgb, var(--np-accent) 4%, transparent);
-  animation: pulseRing 5s ease-in-out infinite;
-}
-.np-pulse-ring--delayed {
-  width: 550px;
-  height: 550px;
-  animation-delay: 2s;
-  opacity: 0.5;
-}
-@keyframes pulseRing {
-  0%, 100% { transform: scale(1); opacity: 0.3; }
-  50% { transform: scale(1.06); opacity: 0.6; }
-}
-
+/* One treatment in both themes, matching .np-primary-btn elsewhere in the app:
+   a solid accent fill with white type. The dark theme used a translucent pill
+   while the light theme used a solid fill, so the same button read as two
+   different designs depending on which theme was active. */
 .np-login-btn {
-  background: color-mix(in srgb, var(--np-accent) 18%, transparent);
-  border: 1px solid color-mix(in srgb, var(--np-accent) 45%, transparent);
-  color: var(--np-accent-strong);
+  background: var(--np-accent);
+  border: 1px solid var(--np-accent);
+  color: #ffffff;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--np-accent) 22%, transparent);
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
   position: relative;
   overflow: hidden;
 }
-/* Light theme: a pale indigo pill with indigo type reads as disabled.
-   A solid accent fill makes the primary action unmistakable. */
-.np-login-btn--solid {
-  background: var(--np-accent);
-  border-color: var(--np-accent);
-  color: #ffffff;
-  box-shadow: 0 6px 18px color-mix(in srgb, var(--np-accent) 22%, transparent);
-}
-.np-login-btn--solid:hover {
-  background: var(--np-accent-strong);
-  border-color: var(--np-accent-strong);
-}
 
 .np-login-btn:hover {
-  background: color-mix(in srgb, var(--np-accent) 30%, transparent);
-  border-color: color-mix(in srgb, var(--np-accent) 65%, transparent);
-  box-shadow: 0 0 30px color-mix(in srgb, var(--np-accent) 25%, transparent);
+  background: var(--np-accent-strong);
+  border-color: var(--np-accent-strong);
+  box-shadow: 0 0 30px color-mix(in srgb, var(--np-accent) 35%, transparent);
 }
 .np-login-btn:disabled {
   opacity: 0.5;

@@ -302,3 +302,90 @@ class TestLinuxRawSocketPrivileges:
             nmap_capabilities.os, "geteuid", lambda: 0, raising=False
         )
         assert nmap_capabilities._has_raw_socket_privileges() is True
+
+
+# ── Windows: the driver is only half the answer ─────────────────────────────
+
+
+def _completed(returncode: int, stdout: str = "", stderr: str = ""):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+class TestWindowsRawSocketPrivileges:
+    """A running Npcap service does not prove raw scans can open a device."""
+
+    def test_driver_running_and_devices_listed_is_privileged(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(nmap_capabilities.os, "name", "nt")
+        monkeypatch.setattr(nmap_capabilities, "_npcap_driver_running", lambda: True)
+        monkeypatch.setattr(
+            nmap_capabilities, "_npcap_can_enumerate_devices", lambda: True
+        )
+        assert nmap_capabilities._has_raw_socket_privileges() is True
+
+    def test_driver_running_but_pcap_devices_unusable_is_not_privileged(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The reported bug: the service says RUNNING, nmap cannot open a device,
+        # and every SYN scan died with "dnet: Failed to open device ethN".
+        monkeypatch.setattr(nmap_capabilities.os, "name", "nt")
+        monkeypatch.setattr(nmap_capabilities, "_npcap_driver_running", lambda: True)
+        monkeypatch.setattr(
+            nmap_capabilities, "_npcap_can_enumerate_devices", lambda: False
+        )
+        assert nmap_capabilities._has_raw_socket_privileges() is False
+
+    def test_driver_stopped_never_probes_nmap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(nmap_capabilities.os, "name", "nt")
+        monkeypatch.setattr(nmap_capabilities, "_npcap_driver_running", lambda: False)
+
+        def _boom() -> bool:
+            raise AssertionError("nmap must not be probed when the driver is stopped")
+
+        monkeypatch.setattr(nmap_capabilities, "_npcap_can_enumerate_devices", _boom)
+        assert nmap_capabilities._has_raw_socket_privileges() is False
+
+
+class TestNpcapDeviceProbe:
+    """`nmap --iflist` is the signal; the service state is not."""
+
+    def test_successful_listing_is_usable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            nmap_capabilities.subprocess,
+            "run",
+            lambda *a, **k: _completed(0, "DEV (SHORT) IP/MASK TYPE UP\neth0 (eth0) 192.0.2.5/24 ethernet up\n"),
+        )
+        assert nmap_capabilities._npcap_can_enumerate_devices() is True
+
+    def test_nmap_quitting_is_not_usable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            nmap_capabilities.subprocess,
+            "run",
+            lambda *a, **k: _completed(1, "pcap_findalldevs(): Cannot retrieve pcap interfaces\nQUITTING!\n"),
+        )
+        assert nmap_capabilities._npcap_can_enumerate_devices() is False
+
+    def test_adapter_names_error_is_not_usable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Exit 0 would be wrong to trust here: the error can arrive on stderr.
+        monkeypatch.setattr(
+            nmap_capabilities.subprocess,
+            "run",
+            lambda *a, **k: _completed(
+                0, "", "pcap_findalldevs(): PacketGetAdapterNames: No more data (259)\n"
+            ),
+        )
+        assert nmap_capabilities._npcap_can_enumerate_devices() is False
+
+    def test_missing_binary_is_not_usable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _raise(*_a, **_k):
+            raise FileNotFoundError("nmap")
+
+        monkeypatch.setattr(nmap_capabilities.subprocess, "run", _raise)
+        assert nmap_capabilities._npcap_can_enumerate_devices() is False
