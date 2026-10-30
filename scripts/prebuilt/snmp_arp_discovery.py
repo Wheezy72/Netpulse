@@ -16,10 +16,9 @@ Parameters (ctx.params):
 }
 
 This script assumes SNMPv2c and that the backend environment has access to
-the routers/switches and the appropriate community string. It uses pysnmp,
-which must be installed in the Python environment used by the worker:
-
-  pip install pysnmp
+the routers/switches and the appropriate community string. It reads the table
+through the in-repo SNMPv2c client (app.services.snmp_client), the same one
+router discovery uses, so no extra package has to be installed.
 
 Devices are inserted/updated by IP address; MAC, vendor and zone are
 populated where possible.
@@ -27,18 +26,10 @@ populated where possible.
 
 from typing import Any, Iterable, List, Optional, Tuple
 
-from pysnmp.hlapi import (  # type: ignore[import-untyped]
-    CommunityData,
-    ContextData,
-    ObjectIdentity,
-    ObjectType,
-    SnmpEngine,
-    UdpTransportTarget,
-    bulkCmd,
-)
 from sqlalchemy import select
 
 from app.db.session import async_session_factory
+from app.services import snmp_client
 from app.models.device import Device
 
 
@@ -51,66 +42,44 @@ def _walk_arp_table(
     """
     Walk the ARP table via SNMP and return a list of (ip, mac) tuples.
 
-    Uses ipNetToMediaPhysAddress / ipNetToMediaNetAddress OIDs.
+    Uses ipNetToMediaPhysAddress / ipNetToMediaNetAddress OIDs read through
+    app.services.snmp_client. This previously went through pysnmp, which is
+    not a dependency of this project, so the script raised ImportError before
+    it ever queried a router.
     """
-    engine = SnmpEngine()
-    community_data = CommunityData(community)
-    transport = UdpTransportTarget((target_ip, 161), timeout=timeout, retries=retries)
-    context = ContextData()
-
     # ipNetToMediaPhysAddress: 1.3.6.1.2.1.4.22.1.2
     # ipNetToMediaNetAddress: 1.3.6.1.2.1.4.22.1.3
-    phys_oid = ObjectIdentity("1.3.6.1.2.1.4.22.1.2")
-    net_oid = ObjectIdentity("1.3.6.1.2.1.4.22.1.3")
+    phys_oid = "1.3.6.1.2.1.4.22.1.2"
+    net_oid = "1.3.6.1.2.1.4.22.1.3"
+    kwargs = {"community": community, "timeout": timeout, "retries": retries}
 
-    # We'll walk both and correlate by index suffix
-    phys_table: dict[str, str] = {}
-    net_table: dict[str, str] = {}
+    # Raise SnmpError when the agent cannot be reached at all: run() reports
+    # that per target, which is better than claiming an empty ARP table.
+    phys = snmp_client.walk(target_ip, phys_oid, **kwargs)
+    net = snmp_client.walk(target_ip, net_oid, **kwargs)
 
-    # Walk phys
-    for errorIndication, errorStatus, errorIndex, varBinds in bulkCmd(
-        engine,
-        community_data,
-        transport,
-        context,
-        0,
-        25,
-        ObjectType(phys_oid),
-        lexicographicMode=False,
-    ):
-        if errorIndication or errorStatus:
-            break
-        for varBind in varBinds:
-            oid_str = str(varBind[0])
-            value = varBind[1]
-            suffix = oid_str.split(".1.2.", 1)[-1]
-            mac = ":".join(f"{b:02x}" for b in bytes(value))
-            phys_table[suffix] = mac
+    def _suffix(oid: str, root: str) -> Optional[str]:
+        prefix = f"{root}."
+        return oid[len(prefix) :] if oid.startswith(prefix) else None
 
-    # Walk net
-    for errorIndication, errorStatus, errorIndex, varBinds in bulkCmd(
-        engine,
-        community_data,
-        transport,
-        context,
-        0,
-        25,
-        ObjectType(net_oid),
-        lexicographicMode=False,
-    ):
-        if errorIndication or errorStatus:
-            break
-        for varBind in varBinds:
-            oid_str = str(varBind[0])
-            value = varBind[1]
-            suffix = oid_str.split(".1.3.", 1)[-1]
-            ip = str(value)
-            net_table[suffix] = ip
+    # Join the two columns on their shared table index. Matching on the walked
+    # root, not on ".1.2." appearing anywhere in the OID, keeps the join
+    # correct: the base OID itself contains it, and so does 10.0.2.15.
+    macs: dict[str, str] = {}
+    for oid, value in phys:
+        key = _suffix(oid, phys_oid)
+        mac = snmp_client.mac_to_str(value)
+        if key is not None and mac:
+            macs[key] = mac
 
     results: List[Tuple[str, str]] = []
-    for suffix, mac in phys_table.items():
-        ip = net_table.get(suffix)
-        if ip and mac:
+    for oid, value in net:
+        key = _suffix(oid, net_oid)
+        ip = snmp_client.to_ip(value)
+        if key is None or not ip:
+            continue
+        mac = macs.get(key)
+        if mac:
             results.append((ip, mac))
 
     return results

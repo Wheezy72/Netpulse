@@ -19,24 +19,10 @@ import socket
 from datetime import datetime
 from typing import Any, Dict, List, Set, Tuple
 
-try:
-    from pysnmp.hlapi import (  # type: ignore[import-untyped]
-        CommunityData,
-        ContextData,
-        ObjectIdentity,
-        ObjectType,
-        SnmpEngine,
-        UdpTransportTarget,
-        bulkCmd,
-    )
-except ImportError as exc:
-    raise RuntimeError(
-        "pysnmp is required to run snmp_topology_discovery.py. "
-        "Install it in the worker image (e.g. pip install pysnmp)."
-    ) from exc
-
 from sqlalchemy import select
+
 from app.db.session import async_session_factory
+from app.services import snmp_client
 from app.models.device import Device
 from app.models.metric import Metric
 
@@ -48,46 +34,28 @@ def _snmp_walk(
     timeout: int = 2,
     retries: int = 1,
 ) -> List[Tuple[str, Any]]:
-    """Perform a bulk SNMP walk on a given target IP and return (oid, value) tuples."""
-    results = []
-    try:
-        engine = SnmpEngine()
-        community_data = CommunityData(community)
-        transport = UdpTransportTarget((target_ip, 161), timeout=timeout, retries=retries)
-        context = ContextData()
-        oid = ObjectIdentity(oid_str)
+    """Walk *oid_str* on *target_ip* and return (oid, value) tuples.
 
-        for errorIndication, errorStatus, errorIndex, varBinds in bulkCmd(
-            engine,
-            community_data,
-            transport,
-            context,
-            0,
-            25,
-            ObjectType(oid),
-            lexicographicMode=False,
-        ):
-            if errorIndication or errorStatus:
-                break
-            for varBind in varBinds:
-                results.append((str(varBind[0]), varBind[1]))
-    except Exception:
-        pass
-    return results
+    Read through app.services.snmp_client rather than pysnmp, which the project
+    does not depend on -- the old import made this script fail before it ever
+    queried a switch. An agent that refuses SNMP yields an empty list here, so
+    an unreachable device and an empty table both simply report zero links.
+    """
+    try:
+        return snmp_client.walk(
+            target_ip,
+            oid_str,
+            community=community,
+            timeout=timeout,
+            retries=retries,
+        )
+    except snmp_client.SnmpError:
+        return []
 
 
 def _ip_bytes_to_str(val: Any) -> str | None:
-    """Parse raw bytes representing an IP address from SNMP response."""
-    try:
-        if isinstance(val, bytes) and len(val) == 4:
-            return ".".join(str(b) for b in val)
-        # Sometimes SNMP returns as a string with raw hex or integers
-        val_str = str(val)
-        if len(val_str.split(".")) == 4:
-            return val_str
-    except Exception:
-        pass
-    return None
+    """Parse a raw SNMP value that is supposed to carry an IPv4 address."""
+    return snmp_client.to_ip(val)
 
 
 async def _save_links(links: Set[Tuple[str, str, str]]) -> int:
@@ -177,7 +145,10 @@ def run(ctx: Any) -> dict:
         lldp_count = 0
         for oid, val in lldp_entries:
             # val is the remote system name (e.g. hostname or IP)
-            neighbor_label = str(val).strip()
+            # Octet strings arrive as raw bytes; str() would give "b'host'".
+            neighbor_label = (
+                val.decode("utf-8", "ignore") if isinstance(val, bytes) else str(val)
+            ).strip()
             if neighbor_label:
                 # Try to resolve neighbor label to an IP address
                 try:
