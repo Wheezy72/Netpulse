@@ -21,6 +21,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager, suppress
+from datetime import datetime
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -325,6 +326,35 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 )
                 session.add(bootstrap_user)
                 await session.commit()  # type: ignore
+
+    # Scans run as in-process background tasks, so a row still marked RUNNING
+    # when this process boots belongs to a process that no longer exists: the
+    # scan died with the old one and nothing will ever finish it. Left alone it
+    # strands the Toolbox on a console that never streams again and a history
+    # entry that says "running" for days, so close those rows out here.
+    try:
+        from app.models.scan_job import ScanJob, ScanJobStatus
+
+        async with async_session_factory() as session:  # type: ignore
+            stalled = (
+                await session.execute(
+                    select(ScanJob).where(ScanJob.status == ScanJobStatus.RUNNING)
+                )
+            ).scalars().all()
+            for job in stalled:
+                job.status = ScanJobStatus.FAILED
+                job.completed_at = datetime.utcnow()
+                job.result_summary = {
+                    "error": "interrupted",
+                    "detail": "The server restarted before this scan finished.",
+                }
+            if stalled:
+                await session.commit()
+                logger.info(
+                    "Closed %s scan(s) interrupted by the last shutdown.", len(stalled)
+                )
+    except Exception as exc:
+        logger.warning("Could not reconcile interrupted scans: %s", exc)
 
     # Devices discovered before networks existed carry no network_id. Adopt them
     # into the network this machine is on, otherwise an upgraded install would
