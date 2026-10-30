@@ -543,8 +543,11 @@ watch(
           class="np-cyber-btn flex items-center gap-1.5"
           :class="isTerminalOpen ? 'np-brand-border np-brand-text' : ''"
         >
-          <span class="w-1.5 h-1.5 rounded-full" :class="currentScanId ? 'np-brand-bg animate-pulse' : 'bg-[var(--np-text-dim)]/30'"></span>
-          Console {{ currentScanId ? '(running)' : '' }}
+          <!-- "Running" has to mean a live scan, not just "a scan is selected":
+               the id survives in localStorage, so a finished scan used to keep
+               this pulsing forever and read as a stuck job. -->
+          <span class="w-1.5 h-1.5 rounded-full" :class="scanRunning ? 'np-brand-bg animate-pulse' : 'bg-[var(--np-text-dim)]/30'"></span>
+          Console {{ scanRunning ? '(running)' : '' }}
         </button>
       </div>
     </header>
@@ -948,7 +951,7 @@ watch(
         class="h-10 px-6 flex items-center justify-between cursor-pointer border-b border-[var(--np-border-subtle)] select-none bg-[var(--np-surface-elevated)]"
       >
         <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">
-          <span class="w-1.5 h-1.5 rounded-full" :class="currentScanId ? 'np-brand-bg animate-pulse' : 'bg-[var(--np-text-dim)]/30'"></span>
+          <span class="w-1.5 h-1.5 rounded-full" :class="scanRunning ? 'np-brand-bg animate-pulse' : 'bg-[var(--np-text-dim)]/30'"></span>
           <span>Live Nmap &amp; Diagnostic Console</span>
         </div>
         <button class="text-[10px] font-mono text-[var(--np-text-dim)] hover:np-brand-text">
