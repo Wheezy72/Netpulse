@@ -10,6 +10,7 @@ import { use } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import { BarChart, GaugeChart, LineChart } from "echarts/charts";
 import { GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
+import { LegacyGridContainLabel } from "echarts/features";
 
 use([
   CanvasRenderer,
@@ -19,6 +20,9 @@ use([
   GridComponent,
   TooltipComponent,
   LegendComponent,
+  // echarts 6 stops honouring grid.containLabel unless this shim is installed;
+  // without it the axis labels overflow the plot area they used to fit inside.
+  LegacyGridContainLabel,
 ]);
 
 const app = createApp(App);
