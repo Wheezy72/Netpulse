@@ -46,6 +46,9 @@ data/scans/*.txt
 data/scans/*.xml
 !data/scans/.gitkeep
 
+# Runtime state: the launcher writes its PID here on every start.
+data/run/
+
 # ==========================================
 # BACKGROUND WORKERS
 # ==========================================
