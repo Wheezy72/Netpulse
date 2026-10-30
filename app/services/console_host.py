@@ -40,7 +40,7 @@ def _normalize(raw: str | None) -> str | None:
 
 def _macs_from_scapy() -> set[str]:
     """Working interfaces via scapy, which device discovery already uses."""
-    from scapy.interfaces import get_working_ifaces  # noqa: SC - lazy import
+    from scapy.interfaces import get_working_ifaces  # lazy import: scapy is slow to load
 
     macs = set()
     for iface in get_working_ifaces():
