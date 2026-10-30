@@ -12,6 +12,7 @@ from scapy.all import BOOTP, DHCP, Ether, IP, UDP, sniff  # type: ignore[import-
 from app.core.config import settings
 from app.db.session import async_session_factory
 from app.models.syslog_event import SyslogEvent
+from app.core.clock import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -334,7 +335,7 @@ class RogueDhcpDetector:
                     offered_ip = None
 
                 client_mac = _format_chaddr(getattr(pkt[BOOTP], "chaddr", None))
-                now = datetime.utcnow()
+                now = utcnow()
 
                 key = (server_mac, msg_type, offered_ip or "")
                 if key in seen:

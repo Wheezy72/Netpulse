@@ -7,6 +7,7 @@ from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.core.clock import utcnow
 
 
 class EnforcementAction(Base):
@@ -19,7 +20,7 @@ class EnforcementAction(Base):
     reason: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.utcnow,
+        default=utcnow,
         nullable=False,
         index=True,
     )

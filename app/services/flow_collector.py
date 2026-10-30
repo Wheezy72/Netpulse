@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.db.session import async_session_factory
 from app.models.device import Device
 from app.models.metric import Metric
+from app.core.clock import utcnow
 
 logger = logging.getLogger("netpulse.flow_collector")
 
@@ -102,7 +103,7 @@ class NetFlowProtocol(asyncio.DatagramProtocol):
 
                 metric = Metric(
                     device_id=src_device_id,
-                    timestamp=datetime.utcnow(),
+                    timestamp=utcnow(),
                     metric_type="traffic_flow",
                     value=float(bytes_count),
                     tags={
@@ -155,14 +156,14 @@ class NetFlowProtocol(asyncio.DatagramProtocol):
             device = Device(
                 ip_address=ip,
                 network_id=network_id,
-                last_seen=datetime.utcnow(),
+                last_seen=utcnow(),
                 device_type="host" # Default guess
             )
             session.add(device)
         else:
             if network_id is not None and device.network_id is None:
                 device.network_id = network_id
-            device.last_seen = datetime.utcnow()
+            device.last_seen = utcnow()
 
 
 async def start_flow_collector() -> None:

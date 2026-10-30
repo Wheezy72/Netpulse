@@ -19,6 +19,7 @@ from sqlalchemy.orm import sessionmaker
 from app.api.routes import auth
 from app.db.base import Base
 from app.models.user import User, UserRole
+from app.core.clock import utcnow
 
 
 @pytest.fixture
@@ -76,7 +77,7 @@ class TestForgotPasswordIssuesTempPassword:
         assert user.reset_token is not None, "temp marker missing"
         assert user.force_password_change is True
         assert user.reset_token_expires is not None
-        remaining = user.reset_token_expires - datetime.utcnow()
+        remaining = user.reset_token_expires - utcnow()
         assert timedelta(minutes=14) < remaining <= timedelta(minutes=15)
 
     async def test_matches_username_and_email_alike(self, db: AsyncSession):
@@ -116,9 +117,9 @@ class TestTempPasswordExpiryAtLogin:
         await _add(db, user)
         user.reset_token = hashlib.sha256(temp.encode()).hexdigest()
         user.reset_token_expires = (
-            datetime.utcnow() - timedelta(seconds=1)
+            utcnow() - timedelta(seconds=1)
             if expired
-            else datetime.utcnow() + timedelta(minutes=10)
+            else utcnow() + timedelta(minutes=10)
         )
         await db.commit()
         return user
@@ -170,7 +171,7 @@ class TestChangePasswordConsumesTheMarker:
         user.force_password_change = True
         await _add(db, user)
         user.reset_token = hashlib.sha256(temp.encode()).hexdigest()
-        user.reset_token_expires = datetime.utcnow() + timedelta(minutes=10)
+        user.reset_token_expires = utcnow() + timedelta(minutes=10)
         await db.commit()
 
         # /update-password resolves the caller through get_current_user; the

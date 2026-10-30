@@ -18,6 +18,9 @@ from enum import Enum
 from logging.handlers import RotatingFileHandler
 from typing import Any, Deque, Optional
 
+from app.core.clock import utcnow
+
+
 LOG_DIR = os.getenv("LOG_DIR", "./logs")
 MAX_LOG_SIZE = 10 * 1024 * 1024
 BACKUP_COUNT = 5
@@ -64,7 +67,7 @@ class LogEntry:
 class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         log_data = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": utcnow().isoformat() + "Z",
             "level": record.levelname.lower(),
             "logger": record.name,
             "message": record.getMessage(),
@@ -129,7 +132,7 @@ class MemoryLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         self._seq += 1
         entry = LogEntry(
-            timestamp=datetime.utcnow().isoformat() + "Z",
+            timestamp=utcnow().isoformat() + "Z",
             level=record.levelname.lower(),
             logger=record.name,
             message=record.getMessage(),

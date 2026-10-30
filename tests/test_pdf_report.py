@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from app.core.clock import utcnow
+
+
 
 class FakeDevice:
     def __init__(self, ip, hostname, mac, vendor, os_, kind, last_seen, gateway=False):
@@ -23,7 +26,7 @@ class FakeDevice:
 
 
 def _devices() -> list[FakeDevice]:
-    now = datetime.utcnow()
+    now = utcnow()
     return [
         FakeDevice("192.168.1.1", "router.lan", "a4:2b:8c:11:22:33", "TP-Link", "Linux/Unix", "Router", now, True),
         FakeDevice("192.168.1.10", "kali", "00:0c:29:aa:bb:cc", "VMware, Inc.", "Kali Linux (virtual machine)", "Workstation", now - timedelta(hours=2)),
@@ -32,7 +35,7 @@ def _devices() -> list[FakeDevice]:
 
 
 def _device_is_online(device, window_minutes=10) -> bool:
-    return (datetime.utcnow() - device.last_seen).total_seconds() <= window_minutes * 60
+    return (utcnow() - device.last_seen).total_seconds() <= window_minutes * 60
 
 
 def _page_text(raw: bytes) -> str:

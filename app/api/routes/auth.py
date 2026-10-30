@@ -29,6 +29,7 @@ from app.core.config import settings
 from app.core.redis import get_redis
 from app.models.user import User, UserRole
 from app.models.user_settings import UserSettings
+from app.core.clock import utcnow
 
 logger = logging.getLogger("netpulse.auth")
 
@@ -106,7 +107,7 @@ async def _enforce_rate_limit(
 
     redis_client = get_redis()
     rate_limit_key = f"{key_prefix}{client_ip}"
-    current_unix_time = datetime.utcnow().timestamp()
+    current_unix_time = utcnow().timestamp()
     window_start_time = current_unix_time - window_seconds
 
     try:
@@ -306,7 +307,7 @@ async def login(
         if hashlib.sha256(payload.password.encode()).hexdigest() == user.reset_token:
             if (
                 user.reset_token_expires is None
-                or user.reset_token_expires < datetime.utcnow()
+                or user.reset_token_expires < utcnow()
             ):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -347,7 +348,7 @@ async def logout(
                 options={"verify_exp": False},
             )
             exp = payload.get("exp", 0)
-            current_time = int(datetime.utcnow().timestamp())
+            current_time = int(utcnow().timestamp())
             ttl = max(exp - current_time, 0)
 
             if ttl > 0:
@@ -846,7 +847,7 @@ async def forgot_password(
     # lets /login tie the 15-minute expiry to exactly the string that was
     # typed. Cleared again as soon as the user sets their own password.
     user.reset_token = hashlib.sha256(temp_password.encode()).hexdigest()
-    user.reset_token_expires = datetime.utcnow() + _TEMP_PASSWORD_TTL
+    user.reset_token_expires = utcnow() + _TEMP_PASSWORD_TTL
     user.force_password_change = True
     await db.commit()
 

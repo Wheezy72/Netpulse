@@ -19,6 +19,7 @@ from app.models.router_config_baseline import RouterConfigBaseline
 from app.models.scan_job import ScanJob, ScanJobStatus
 from app.models.user import User
 from app.services.routers import create_router_driver
+from app.core.clock import utcnow
 
 router = APIRouter()
 
@@ -379,7 +380,7 @@ async def config_drift_check(
     old_hash = baseline.config_hash if baseline else None
     changed = old_hash != new_hash
 
-    now = datetime.utcnow()
+    now = utcnow()
     if baseline:
         baseline.config_hash = new_hash
         baseline.last_seen_at = now

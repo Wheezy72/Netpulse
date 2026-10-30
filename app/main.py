@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 """
 FastAPI application entrypoint.
 
@@ -34,6 +35,8 @@ from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from sqlalchemy import select
+
+from app.core.clock import utcnow
 
 # scapy narrates its own environment at *import* time, long before
 # setup_logging() runs, so its loggers have to be quieted ahead of the first app
@@ -343,7 +346,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             ).scalars().all()
             for job in stalled:
                 job.status = ScanJobStatus.FAILED
-                job.completed_at = datetime.utcnow()
+                job.completed_at = utcnow()
                 job.result_summary = {
                     "error": "interrupted",
                     "detail": "The server restarted before this scan finished.",

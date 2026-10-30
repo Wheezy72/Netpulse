@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.script_job import ScriptJob, ScriptJobStatus
 from app.services.proc import run_captured
+from app.core.clock import utcnow
 
 # Hard ceiling for a script job. The Celery task in front of this dies at 300s
 # anyway; failing here records why, with the log the operator needs to see.
@@ -263,7 +264,7 @@ async def execute_script(
         logs.append(message)
 
     job.status = ScriptJobStatus.RUNNING
-    job.started_at = datetime.utcnow()
+    job.started_at = utcnow()
     await db.commit()
     await db.refresh(job)
 
@@ -405,7 +406,7 @@ if __name__ == "__main__":
         existing_logs = (job.logs or "").strip()
         combined = "\n".join(logs)
         job.logs = f"{existing_logs}\n{combined}".strip() if existing_logs else combined
-        job.finished_at = datetime.utcnow()
+        job.finished_at = utcnow()
 
         await db.commit()
         await db.refresh(job)

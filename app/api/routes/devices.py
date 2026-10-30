@@ -27,6 +27,7 @@ from app.services.device_enrichment import scan_device_ports, upsert_device_port
 from app.services.router_source import describe_configuration, verify_devices as run_verification
 from app.services.oui import is_locally_administered, normalize_mac
 from app.services.os_fingerprint import resolve_device_os
+from app.core.clock import utcnow
 
 # Device and topology endpoints. In this personal deployment, they are
 # available to any authenticated user.
@@ -782,7 +783,7 @@ async def deep_scan_device(
 
     if os_label:
         device.os = os_label
-        device.updated_at = datetime.utcnow()
+        device.updated_at = utcnow()
         await db.commit()
 
     return DeepScanResponse(
@@ -965,7 +966,7 @@ async def get_ping_status(
     }
 
     return {
-        "checked_at": datetime.utcnow().isoformat(),
+        "checked_at": utcnow().isoformat(),
         "summary": summary,
         "results": results,
     }

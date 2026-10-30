@@ -24,6 +24,7 @@ from app.services.alerts import process_vulnerability_alerts, send_system_alert
 from app.services.latency_monitor import monitor_latency
 from app.services.recon import passive_arp_discovery
 from app.services.script_executor import execute_script
+from app.core.clock import utcnow
 
 logger = get_task_logger(__name__)
 
@@ -113,7 +114,7 @@ def uptime_monitor_task() -> None:
                 )
                 targets = list(result.scalars().all())
 
-                now = datetime.utcnow()
+                now = utcnow()
                 for target in targets:
                     if target.last_checked_at:
                         elapsed = (now - target.last_checked_at).total_seconds()

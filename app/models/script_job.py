@@ -8,6 +8,7 @@ from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Integer, JSON, Stri
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.core.clock import utcnow
 
 
 class ScriptJobStatus(str, Enum):
@@ -55,7 +56,7 @@ class ScriptJob(Base):
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.utcnow,
+        default=utcnow,
     )
     started_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),

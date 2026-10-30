@@ -14,6 +14,7 @@ from app.api.deps import db_session, get_current_user, require_admin
 from app.db.session import async_session_factory
 from app.models.syslog_event import SyslogEvent
 from app.models.user import User
+from app.core.clock import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ FACILITY_MAP = {
 def _parse_syslog_message(data: bytes, addr: tuple) -> Dict[str, Any]:
     raw = data.decode(errors="replace").strip()
     source_ip = addr[0]
-    timestamp = datetime.utcnow()
+    timestamp = utcnow()
     facility = "unknown"
     severity = "Info"
     hostname = source_ip

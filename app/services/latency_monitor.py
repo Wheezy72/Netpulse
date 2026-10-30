@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 """
 Latency and Internet Health monitoring.
 
@@ -24,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.metric import Metric
 from app.services.alerts import send_system_alert
+from app.core.clock import utcnow
 
 
 @dataclass
@@ -179,7 +181,7 @@ async def monitor_latency(db: AsyncSession) -> None:
 
     This is the core of the Pulse module and is invoked by a Celery task.
     """
-    timestamp = datetime.utcnow()
+    timestamp = utcnow()
     ping_tasks = [_ping_target(target) for target in settings.pulse_targets]
     results: List[PingResult] = await asyncio.gather(*ping_tasks)
 

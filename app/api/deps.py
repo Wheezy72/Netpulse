@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.redis import get_redis
 from app.db.session import async_session_factory
 from app.models.user import User, UserRole
+from app.core.clock import utcnow
 
 logger = logging.getLogger("netpulse.audit")
 
@@ -60,7 +61,7 @@ def create_access_token(
     expires_delta: Optional[timedelta] = None,
 ) -> str:
     to_encode = {"sub": subject, "role": role}
-    expire = datetime.utcnow() + (
+    expire = utcnow() + (
         expires_delta
         if expires_delta is not None
         else timedelta(minutes=settings.access_token_expire_minutes)
@@ -179,7 +180,7 @@ async def get_current_user(
         )
 
     exp: int = payload.get("exp", 0)
-    ttl = max(exp - int(datetime.utcnow().timestamp()), 60)
+    ttl = max(exp - int(utcnow().timestamp()), 60)
     try:
         await redis.setex(
             cache_key,

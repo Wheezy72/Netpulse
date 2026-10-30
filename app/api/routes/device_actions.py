@@ -20,6 +20,7 @@ from app.models.device import Device
 from app.models.enforcement_action import EnforcementAction
 from app.models.user import User
 from app.services.enforcement import isolate_host, isolate_switch_port, release_host
+from app.core.clock import utcnow
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -106,7 +107,7 @@ async def block_device(
             mac=None,
             action_type="block",
             reason=request.reason,
-            created_at=datetime.utcnow(),
+            created_at=utcnow(),
         )
         db.add(action)
         await db.commit()
@@ -114,7 +115,7 @@ async def block_device(
         timestamp = action.created_at.isoformat()
         state = action.action_type
     else:
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = utcnow().isoformat()
         state = current_state
         note = f"Device {request.ip} was already {current_state}"
 
@@ -151,7 +152,7 @@ async def unblock_device(
                 mac=None,
                 action_type="unblock",
                 reason=None,
-                created_at=datetime.utcnow(),
+                created_at=utcnow(),
             )
         )
         await db.commit()
@@ -215,7 +216,7 @@ async def quarantine_device(
         mac=request.mac,
         action_type="quarantine",
         reason=request.reason,
-        created_at=datetime.utcnow(),
+        created_at=utcnow(),
     )
     db.add(action)
     await db.commit()
@@ -369,7 +370,7 @@ async def isolate_node(
             mac=None,
             action_type="isolate",
             reason=request.reason,
-            created_at=datetime.utcnow(),
+            created_at=utcnow(),
         )
     )
     await db.commit()
@@ -400,7 +401,7 @@ async def release_node(
             mac=None,
             action_type="unblock",
             reason="isolation released",
-            created_at=datetime.utcnow(),
+            created_at=utcnow(),
         )
     )
     await db.commit()

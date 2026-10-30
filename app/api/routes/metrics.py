@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 """Metrics-related API endpoints.
 
 Exposes:
@@ -18,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import db_session, require_compliance_role
 from app.core.config import settings
 from app.models.metric import Metric
+from app.core.clock import utcnow
 
 router = APIRouter()
 
@@ -81,7 +83,7 @@ async def pulse_latest(
 ) -> PulseSummaryResponse:
     """Return the latest latency, jitter and packet loss metrics per configured Pulse target."""
     metric_types = {"latency_ms", "jitter_ms", "packet_loss_pct"}
-    now = datetime.utcnow()
+    now = utcnow()
     window_start = now - timedelta(minutes=15)
 
     result = await db.execute(

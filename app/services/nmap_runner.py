@@ -14,6 +14,7 @@ from app.models.scan_job import ScanJob, ScanJobStatus
 from app.services.nmap_capabilities import NMAP_INSTALL_HINT
 from app.services.nmap_results import parse_nmap_text
 from app.services.proc import EOF, ChildProcess
+from app.core.clock import utcnow
 
 SCANS_DIR = ensure_dir(SCANS_DIR_PATH)
 
@@ -56,7 +57,7 @@ async def run_scan_job(
             encoding="utf-8",
         )
         job.status = ScanJobStatus.FAILED
-        job.completed_at = datetime.utcnow()
+        job.completed_at = utcnow()
         job.result_summary = {"error": "nmap_missing"}
         job.artifact_path = str(artifact_path)
         await db.commit()
@@ -68,7 +69,7 @@ async def run_scan_job(
             f"Command: {' '.join(safe_args)}",
             f"Target: {job.target}",
             f"Profile: {job.profile}",
-            f"Time: {datetime.utcnow().isoformat()}Z",
+            f"Time: {utcnow().isoformat()}Z",
             "=" * 60,
             "",
         ]
@@ -76,7 +77,7 @@ async def run_scan_job(
     artifact_path.write_text(header)
 
     job.status = ScanJobStatus.RUNNING
-    job.started_at = job.started_at or datetime.utcnow()
+    job.started_at = job.started_at or utcnow()
     job.artifact_path = str(artifact_path)
     job.result_summary = None
     await db.commit()
@@ -133,7 +134,7 @@ async def run_scan_job(
             f.write(f"\n[timeout] Scan timed out after {timeout_seconds} seconds\n")
 
         job.status = ScanJobStatus.FAILED
-        job.completed_at = datetime.utcnow()
+        job.completed_at = utcnow()
         job.result_summary = {"error": "timeout", "timeout_seconds": timeout_seconds}
         await db.commit()
         return
@@ -151,7 +152,7 @@ async def run_scan_job(
     if elapsed is not None:
         summary["duration_seconds"] = round(elapsed, 2)
 
-    job.completed_at = datetime.utcnow()
+    job.completed_at = utcnow()
     job.result_summary = summary
 
     if returncode == 0:

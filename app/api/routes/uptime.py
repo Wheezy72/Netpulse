@@ -16,6 +16,7 @@ from app.api.deps import db_session, require_admin, require_compliance_role
 
 from app.models.uptime import UptimeCheck, UptimeTarget
 from app.services.icmp import ping as icmp_ping
+from app.core.clock import utcnow
 
 router = APIRouter(prefix="/uptime", tags=["uptime"])
 
@@ -250,7 +251,7 @@ async def run_manual_check(
 
 
 async def _perform_check(target: UptimeTarget) -> UptimeCheck:
-    now = datetime.utcnow()
+    now = utcnow()
 
     if target.check_type == "http":
         return await _http_check(target, now)

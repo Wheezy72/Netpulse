@@ -20,6 +20,7 @@ from app.services.pdf_report import (
     build_scan_pdf,
     fallback_pdf,
 )
+from app.core.clock import utcnow
 
 router = APIRouter()
 
@@ -69,13 +70,13 @@ def _device_is_online(device: Any, window_minutes: int = 10) -> bool:
     if last_seen.tzinfo is not None:
         now = datetime.now(last_seen.tzinfo)
     else:
-        now = datetime.utcnow()
+        now = utcnow()
     try:
         return (now - last_seen).total_seconds() <= window_minutes * 60
     except TypeError:
         # Mixed naive/aware datetimes — compare as naive UTC.
         return (
-            datetime.utcnow().replace(tzinfo=None) - last_seen.replace(tzinfo=None)
+            utcnow().replace(tzinfo=None) - last_seen.replace(tzinfo=None)
         ).total_seconds() <= window_minutes * 60
 
 
