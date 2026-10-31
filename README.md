@@ -402,6 +402,24 @@ discards before removing the tables.
 
 ## What changed recently
 
+- A discovery sweep is now authoritative for the identity it can derive. Vendor,
+  device type and OS from the network card answering now win over what is already
+  stored, so a description taken from a NIC that has since been unplugged can no
+  longer outlive the hardware. A shallow pass that learned nothing new still
+  leaves the row untouched, and a NIC change is logged.
+- The console is one IDE-style panel: a single title bar, a status bar, a
+  resizable top edge and a terminal that stays dark in both themes instead of
+  following the page. It starts where the rail ends and the page reserves its
+  height, so output is neither clipped nor covered.
+- Light mode had a measured pass rather than a guessed one. Diluted caption
+  colours were removed, the topology's edges, labels and legend were retuned for
+  a white canvas, and the smallest type in the app moved off 8.8-9.9px onto a
+  10.4px floor.
+- Security headers gained `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`
+  and HSTS over TLS; the obsolete `X-XSS-Protection` header is gone, since the
+  auditor behind it no longer exists in current browsers.
+- `scripts/uninstall.sh` and `scripts/windows_uninstall.bat` remove the generated
+  artefacts, with `--purge` also removing `.env` and the database.
 - PDF reports were rebuilt on one design system (`app/services/pdf_report.py`):
   the console's ink/emerald palette, a dark cover band, computed summaries and
   breakdown bars instead of placeholder figures, and page numbers.
