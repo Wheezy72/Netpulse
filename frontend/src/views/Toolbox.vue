@@ -529,7 +529,9 @@ watch(
 </script>
 
 <template>
-  <div class="flex flex-col h-full gap-5 relative">
+  <!-- pb-* when the console is open: the drawer is an overlay, so without it
+       the last rows of the page hide behind it. -->
+  <div class="flex flex-col h-full gap-5 relative" :class="{ 'pb-[352px]': isTerminalOpen }">
     
     <!-- Header Section -->
     <header class="flex items-end justify-between px-1 shrink-0">
@@ -943,7 +945,7 @@ watch(
     <!-- Collapsible Live Terminal Drawer at Bottom -->
     <div 
       class="fixed bottom-0 left-0 right-0 z-50 flex flex-col overflow-hidden border-t border-[var(--np-border)] bg-[var(--np-glass-bg)] shadow-2xl backdrop-blur-lg transition-transform duration-300"
-      :style="{ transform: isTerminalOpen ? 'translateY(0)' : 'translateY(calc(100% - 34px))', height: '340px' }"
+      :style="{ left: 'var(--np-rail-w)', transform: isTerminalOpen ? 'translateY(0)' : 'translateY(calc(100% - 34px))', height: '340px' }"
     >
       <!-- One title bar for the whole panel. The toggle is a real button
            rather than the entire strip, so selecting output text no longer

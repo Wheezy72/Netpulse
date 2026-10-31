@@ -1298,9 +1298,9 @@ onBeforeUnmount(() => {
 .np-map--light {
   /* Indigo, matching the light theme's accent. Teal here read as "green
      leaking" into light mode. */
-  --map-edge: #4f46e5;
+  --map-edge: #3730a3;
   --map-canvas: #ffffff;
-  --map-grid: rgba(15, 23, 42, 0.16);
+  --map-grid: rgba(15, 23, 42, 0.19);
   --map-ring: rgba(15, 23, 42, 0.22);
   --map-minimap-mask: rgba(244, 244, 245, 0.72);
   --map-node-fg: #09090b;
@@ -1310,7 +1310,7 @@ onBeforeUnmount(() => {
   --map-chip-bg: rgba(255, 255, 255, 0.9);
   --map-chip-fg: #3f3f46;
   --map-glow: rgba(79, 70, 229, 0.06);
-  --map-edge-opacity: 0.7;
+  --map-edge-opacity: 0.85;
 }
 
 /* Radar-style concentric backdrop */

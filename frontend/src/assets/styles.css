@@ -194,6 +194,24 @@ html, body {
   font-family: var(--np-sans-family);
 }
 
+/* ── Left rail footprint ──
+   One variable owns how much room the rail takes. The console drawer is ported
+   to the viewport (outside the content column, whose `relative z-10` traps its
+   stacking context), so without this it slid underneath the rail and its first
+   characters were painted over. Collapsing the rail sets this to zero and the
+   drawer takes the full width. */
+:root {
+  --np-rail-w: 0px;
+}
+@media (min-width: 768px) {
+  :root {
+    --np-rail-w: 64px;
+  }
+}
+body.np-rail-collapsed {
+  --np-rail-w: 0px !important;
+}
+
 /* ============================================
    CANVAS & GLASS
    ============================================ */

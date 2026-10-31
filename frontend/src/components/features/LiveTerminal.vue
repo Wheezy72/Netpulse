@@ -19,68 +19,40 @@ const container = ref<HTMLDivElement | null>(null);
 let term: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let ws: WebSocket | null = null;
-let themeObserver: MutationObserver | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let fitQueued = false;
 
-type Rgba = { r: number; g: number; b: number; a: number };
-
-function parseCssColor(value: string): Rgba | null {
-  if (!value) return null;
-  if (value === "transparent") return { r: 0, g: 0, b: 0, a: 0 };
-
-  const match = value
-    .replace(/\s+/g, "")
-    .match(/^rgba?\((\d+),(\d+),(\d+)(?:,(\d*\.?\d+))?\)$/);
-
-  if (!match) return null;
-
-  return {
-    r: Number(match[1]),
-    g: Number(match[2]),
-    b: Number(match[3]),
-    a: match[4] === undefined ? 1 : Number(match[4]),
-  };
-}
-
-function rgba({ r, g, b, a }: Rgba): string {
-  return `rgba(${r}, ${g}, ${b}, ${a})`;
-}
-
-function resolveEffectiveBackground(el: HTMLElement): string {
-  let node: HTMLElement | null = el;
-  while (node) {
-    const bg = getComputedStyle(node).backgroundColor;
-    const parsed = parseCssColor(bg);
-    if (parsed && parsed.a > 0.01) return bg;
-    node = node.parentElement;
-  }
-  return "transparent";
-}
-
-function buildXtermThemeFromContainer(el: HTMLElement): ITheme {
-  const computed = getComputedStyle(el);
-  const foreground = computed.color;
-  const background = resolveEffectiveBackground(el);
-
-  const fg = parseCssColor(foreground) || { r: 229, g: 231, b: 235, a: 1 };
-
-  return {
-    foreground,
-    background,
-    cursor: rgba({ ...fg, a: 0.9 }),
-    cursorAccent: background,
-    selectionBackground: rgba({ ...fg, a: 0.2 }),
-  };
-}
-
-function applyTerminalTheme(): void {
-  if (!term || !container.value) return;
-  term.options.theme = buildXtermThemeFromContainer(container.value);
-  if (term.rows > 0) {
-    term.refresh(0, term.rows - 1);
-  }
-}
+/**
+ * The console is a terminal, and terminals are dark.
+ *
+ * It used to derive its palette from the surrounding page, which meant light
+ * mode turned a black console white: nmap output in 12px monospace on a white
+ * field, and nothing like the dark IDE panels it sits beside. The surrounding
+ * chrome still follows the theme; the emulator inside does not.
+ */
+const TERMINAL_THEME: ITheme = {
+  background: "#0b0f14",
+  foreground: "#e5e7eb",
+  cursor: "#34d399",
+  cursorAccent: "#0b0f14",
+  selectionBackground: "rgba(16, 185, 129, 0.30)",
+  black: "#111827",
+  red: "#f87171",
+  green: "#34d399",
+  yellow: "#fbbf24",
+  blue: "#60a5fa",
+  magenta: "#c084fc",
+  cyan: "#22d3ee",
+  white: "#e5e7eb",
+  brightBlack: "#6b7280",
+  brightRed: "#fca5a5",
+  brightGreen: "#6ee7b7",
+  brightYellow: "#fcd34d",
+  brightBlue: "#93c5fd",
+  brightMagenta: "#d8b4fe",
+  brightCyan: "#67e8f9",
+  brightWhite: "#f9fafb",
+};
 
 function disposeSocket(): void {
   try {
@@ -91,16 +63,6 @@ function disposeSocket(): void {
   ws = null;
 }
 
-/**
- * Re-fit once the container has its real size.
- *
- * The drawer this sits in is revealed with a transform, and it is mounted
- * before its final height settles — fitting only on mount left the terminal at
- * 384px inside a 170px panel, so the last rows were cut off and the interior
- * scrolled inside a box that already filled the screen. Fitting on every
- * container resize (and once more after the first paint) keeps the terminal
- * exactly the size of the space it is given.
- */
 /**
  * Fit the terminal to its box by measuring the grid xterm already drew.
  *
@@ -149,12 +111,12 @@ function initTerminal(): void {
     cursorStyle: "bar",
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
     fontSize: 12,
+    theme: TERMINAL_THEME,
   });
 
   fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
   term.open(container.value);
-  applyTerminalTheme();
 
   term.writeln("Ready. Start a scan to stream output here...");
   // Fit after the first row exists: the row's height is the measurement this
@@ -234,45 +196,12 @@ watch(
   }
 );
 
-watch(
-  () => props.theme,
-  () => {
-    window.requestAnimationFrame(() => {
-      applyTerminalTheme();
-    });
-  }
-);
-
 function handleResize(): void {
   scheduleFit();
-  applyTerminalTheme();
-}
-
-function startThemeObserver(): void {
-  themeObserver?.disconnect();
-
-  if (!container.value) return;
-
-  themeObserver = new MutationObserver(() => {
-    window.requestAnimationFrame(() => {
-      applyTerminalTheme();
-    });
-  });
-
-  themeObserver.observe(document.body, {
-    attributes: true,
-    attributeFilter: ["class", "style"],
-  });
-
-  themeObserver.observe(container.value, {
-    attributes: true,
-    attributeFilter: ["class", "style"],
-  });
 }
 
 onMounted(() => {
   initTerminal();
-  startThemeObserver();
   // A second fit after the first paint catches a drawer that was still moving
   // when the terminal opened.
   window.setTimeout(scheduleFit, 260);
@@ -285,8 +214,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", handleResize);
-  themeObserver?.disconnect();
-  themeObserver = null;
   resizeObserver?.disconnect();
   resizeObserver = null;
 
@@ -311,10 +238,12 @@ onBeforeUnmount(() => {
          min-content height, so a terminal that was once fitted too large props
          the whole drawer open instead of being contained by it. -->
     <div class="flex-1 min-h-0 overflow-hidden p-3">
+      <!-- The frame is dark in both themes: a terminal with a white field is
+           the one place where following the theme hurts. -->
       <div
         ref="container"
         class="h-full w-full rounded-lg overflow-hidden"
-        style="border: 1px solid var(--np-border); background: var(--np-bg); color: var(--np-text);"
+        style="border: 1px solid rgba(255, 255, 255, 0.08); background: #0b0f14; color: #e5e7eb;"
       ></div>
     </div>
   </div>

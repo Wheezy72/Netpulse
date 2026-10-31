@@ -53,6 +53,18 @@ const toastRef = ref<InstanceType<typeof Toast> | null>(null);
 const mobileMenuOpen = ref(false);
 const profileOpen = ref(false);
 
+// The rail is 64px of chrome the console has to sit beside. It folds away so
+// wide nmap output gets the whole width — the same instinct as an IDE letting
+// you hide the activity bar. Persisted, because a layout choice should survive
+// a reload.
+const railCollapsed = ref(localStorage.getItem("np-rail-collapsed") === "true");
+
+function toggleRail(): void {
+  railCollapsed.value = !railCollapsed.value;
+  localStorage.setItem("np-rail-collapsed", String(railCollapsed.value));
+  document.body.classList.toggle("np-rail-collapsed", railCollapsed.value);
+}
+
 // The profile menu is click-driven. A hover-only menu broke as soon as the
 // pointer crossed the gap to the panel, so it could never be clicked.
 function toggleProfile(): void {
@@ -417,6 +429,7 @@ async function handleAuthSuccess(arg: string | { token: string; rememberMe?: boo
 }
 
 onMounted(async () => {
+  document.body.classList.toggle("np-rail-collapsed", railCollapsed.value);
   mobileQuery = window.matchMedia("(max-width: 767px)");
   syncIsMobile();
   mobileQuery.addEventListener("change", syncIsMobile);
@@ -569,6 +582,7 @@ async function handleForcePasswordChange() {
       <template v-else>
         <!-- Left: 64px icon rail (desktop) -->
         <aside
+          v-if="!railCollapsed"
           class="hidden md:flex fixed left-0 top-0 z-40 h-screen w-16 flex-col items-center border-r border-[var(--np-border-subtle)] bg-[var(--np-surface)]/85 backdrop-blur-xl"
         >
           <!-- Brand. A link, not decoration: the mark is the fastest way back
@@ -842,7 +856,10 @@ async function handleForcePasswordChange() {
              z-0 starfield so every card, table and line of text composites over
              the background: unpositioned content would otherwise paint beneath
              a positioned layer and pick up dots across it. -->
-        <div class="relative z-10 flex min-h-screen flex-col md:pl-16">
+        <div
+          class="relative z-10 flex min-h-screen flex-col"
+          :style="{ paddingLeft: 'var(--np-rail-w)' }"
+        >
           <!-- Sticky header: text tabs left, utilities right -->
           <header
             class="sticky top-0 z-30 w-full border-b border-[var(--np-border-subtle)] bg-[var(--np-glass-bg)] backdrop-blur-xl"
@@ -859,6 +876,19 @@ async function handleForcePasswordChange() {
                 </span>
                 <span class="text-xs uppercase tracking-widest font-semibold">NetPulse</span>
               </RouterLink>
+
+              <!-- Rail toggle. The console needs the width when output is
+                   wide, and 64px of icons is not worth a wrapped nmap line. -->
+              <button
+                type="button"
+                class="hidden md:flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--np-border-subtle)] text-[var(--np-text-dim)] transition-colors hover:border-[var(--np-border)] hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)]"
+                :title="railCollapsed ? 'Show the rail' : 'Hide the rail'"
+                :aria-label="railCollapsed ? 'Show the rail' : 'Hide the rail'"
+                :aria-pressed="railCollapsed"
+                @click="toggleRail"
+              >
+                <Menu class="h-4 w-4" :stroke-width="1.7" />
+              </button>
 
               <!-- Desktop text tabs with active underline -->
               <nav class="hidden md:flex h-16 items-stretch gap-1 overflow-x-auto">
