@@ -172,7 +172,7 @@ onMounted(async () => {
             {{ emailSaving ? "Saving…" : hasEmail ? "Update email" : "Add email" }}
           </button>
         </div>
-        <p id="account-email-help" class="text-[0.65rem] text-[var(--np-text-dim)]">
+        <p id="account-email-help" class="text-[0.7rem] text-[var(--np-text-dim)]">
           <template v-if="hasEmail">Currently on file: <span class="font-mono" :title="currentEmail">{{ maskedEmail }}</span></template>
           <template v-else>No email on file. Password recovery is unavailable until you add one.</template>
         </p>
@@ -236,7 +236,7 @@ onMounted(async () => {
       </div>
 
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <div id="account-password-help" class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.65rem] text-[var(--np-text-dim)]">
+        <div id="account-password-help" class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.7rem] text-[var(--np-text-dim)]">
           <span>Changing it does not sign out other sessions.</span>
           <button
             type="button"

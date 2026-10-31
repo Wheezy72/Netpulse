@@ -453,7 +453,7 @@ onBeforeUnmount(() => {
     <!-- Page heading -->
     <header class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <p class="text-[0.6rem] font-mono uppercase tracking-[0.35em] text-[var(--np-text-dim)]">
+        <p class="text-[0.68rem] font-mono uppercase tracking-[0.35em] text-[var(--np-text-dim)]">
           Overview
         </p>
         <h1 class="mt-1 text-2xl font-bold tracking-tight text-[var(--np-text)]">Network overview</h1>
@@ -462,7 +462,7 @@ onBeforeUnmount(() => {
         </p>
       </div>
       <button
-        class="np-cyber-btn self-start px-4 py-2 text-[0.65rem] uppercase tracking-wider sm:self-auto"
+        class="np-cyber-btn self-start px-4 py-2 text-[0.7rem] uppercase tracking-wider sm:self-auto"
         :disabled="loading"
         @click="loadDevices"
       >
@@ -481,13 +481,13 @@ onBeforeUnmount(() => {
         :key="stat.id"
         class="glass-card np-metric-tile p-5"
       >
-        <p class="text-[0.6rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">
+        <p class="text-[0.68rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">
           {{ stat.label }}
         </p>
         <p class="mt-2 text-3xl font-bold leading-none tracking-tight text-[var(--np-text)]">
           {{ stat.value }}
         </p>
-        <p class="mt-2 text-[0.65rem] text-[var(--np-text-muted)]">{{ stat.hint }}</p>
+        <p class="mt-2 text-[0.7rem] text-[var(--np-text-muted)]">{{ stat.hint }}</p>
       </article>
     </section>
 
@@ -499,9 +499,9 @@ onBeforeUnmount(() => {
         { id: 'jitter', label: 'Jitter', value: pulseSnapshot?.jitter_ms == null ? '—' : `${pulseSnapshot.jitter_ms.toFixed(1)} ms`, detail: 'Average response variation' },
         { id: 'loss', label: 'Packet loss', value: pulseSnapshot?.packet_loss_pct == null ? '—' : `${pulseSnapshot.packet_loss_pct.toFixed(1)}%`, detail: 'Highest WAN target loss' },
       ]" :key="metric.id" class="rounded-xl border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)]/55 px-4 py-3">
-        <p class="text-[0.62rem] text-[var(--np-text-dim)]">{{ metric.label }}</p>
+        <p class="text-[0.7rem] text-[var(--np-text-dim)]">{{ metric.label }}</p>
         <p class="mt-1 text-xl font-semibold tracking-tight text-[var(--np-text)] tabular-nums">{{ metric.value }}</p>
-        <p class="mt-1 text-[0.62rem] text-[var(--np-text-muted)]">{{ metric.detail }}</p>
+        <p class="mt-1 text-[0.7rem] text-[var(--np-text-muted)]">{{ metric.detail }}</p>
       </article>
     </section>
 
@@ -510,14 +510,14 @@ onBeforeUnmount(() => {
       <article class="glass-card glass-card--static flex flex-col p-5 lg:col-span-2">
         <div class="flex items-start justify-between gap-3">
           <div>
-            <p class="text-[0.6rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">
+            <p class="text-[0.68rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">
               Ping status
             </p>
             <h2 class="mt-1 text-sm font-bold text-[var(--np-text)]">Who is answering right now</h2>
           </div>
           <button
             type="button"
-            class="np-cyber-btn px-3 py-1.5 text-[0.6rem]"
+            class="np-cyber-btn px-3 py-1.5 text-[0.68rem]"
             :disabled="pingChecking"
             @click="checkPingStatus"
           >
@@ -554,13 +554,13 @@ onBeforeUnmount(() => {
 
       <article class="glass-card glass-card--static flex flex-col p-5">
         <div>
-          <p class="text-[0.6rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">
+          <p class="text-[0.68rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">
             Reachability
           </p>
           <h2 class="mt-1 text-sm font-bold text-[var(--np-text)]">Seen in the last 10 minutes</h2>
         </div>
         <v-chart class="mt-1 h-[190px] w-full" :option="gaugeOption" autoresize />
-        <div class="mt-auto flex items-center justify-between border-t border-[var(--np-border-subtle)] pt-3 text-[0.65rem]">
+        <div class="mt-auto flex items-center justify-between border-t border-[var(--np-border-subtle)] pt-3 text-[0.7rem]">
           <span class="font-mono uppercase tracking-wider text-[var(--np-text-dim)]">Online / total</span>
           <span class="font-mono font-bold text-[var(--np-text)] tabular-nums">{{ onlineDevices }} / {{ totalDevices }}</span>
         </div>
@@ -577,7 +577,7 @@ onBeforeUnmount(() => {
           background: `color-mix(in srgb, var(--np-accent) 7%, transparent)`,
         }"
       >
-        <p class="text-[0.6rem] font-mono uppercase tracking-[0.3em] text-[var(--np-accent)]">Status</p>
+        <p class="text-[0.68rem] font-mono uppercase tracking-[0.3em] text-[var(--np-accent)]">Status</p>
         <h2 class="mt-1 text-base font-bold text-[var(--np-text)]">
           {{ totalDevices === 0
             ? "Inventory is empty"
@@ -596,30 +596,30 @@ onBeforeUnmount(() => {
         </p>
         <div class="mt-4 flex flex-wrap gap-2">
           <button
-            class="np-cyber-btn px-4 py-2 text-[0.65rem] uppercase tracking-wider"
+            class="np-cyber-btn px-4 py-2 text-[0.7rem] uppercase tracking-wider"
             :disabled="discovering"
             @click="runDiscovery"
           >
             {{ discovering ? "Sweeping…" : "Run discovery sweep" }}
           </button>
           <button
-            class="np-cyber-btn px-4 py-2 text-[0.65rem] uppercase tracking-wider"
+            class="np-cyber-btn px-4 py-2 text-[0.7rem] uppercase tracking-wider"
             @click="router.push('/topology')"
           >
             Topology
           </button>
           <button
-            class="np-cyber-btn px-4 py-2 text-[0.65rem] uppercase tracking-wider"
+            class="np-cyber-btn px-4 py-2 text-[0.7rem] uppercase tracking-wider"
             @click="router.push('/devices')"
           >
             Inventory
           </button>
         </div>
-        <p v-if="sweepNote" class="mt-3 text-[0.65rem] text-[var(--np-text-muted)]">{{ sweepNote }}</p>
+        <p v-if="sweepNote" class="mt-3 text-[0.7rem] text-[var(--np-text-muted)]">{{ sweepNote }}</p>
       </article>
 
       <article class="glass-card glass-card--static p-5">
-        <p class="text-[0.6rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Attention</p>
+        <p class="text-[0.68rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Attention</p>
         <h2 class="mt-1 text-sm font-bold text-[var(--np-text)]">Not responding</h2>
         <ul class="mt-3 space-y-2">
           <li
@@ -631,7 +631,7 @@ onBeforeUnmount(() => {
               <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--np-danger)]" />
               <span class="truncate">{{ labelFor(row) }}</span>
             </span>
-            <span class="shrink-0 font-mono text-[0.65rem] text-[var(--np-text-dim)] tabular-nums">{{ row.ip_address }}</span>
+            <span class="shrink-0 font-mono text-[0.7rem] text-[var(--np-text-dim)] tabular-nums">{{ row.ip_address }}</span>
           </li>
           <li v-if="notResponding.length === 0 && pingCounts" class="text-xs text-[var(--np-text-dim)]">
             Every checked device answered.

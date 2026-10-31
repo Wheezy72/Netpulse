@@ -151,7 +151,7 @@ function hoverCmd(cmd: Command) {
               @keydown.enter.prevent="executeSelected"
               @keydown.escape="close"
             />
-            <kbd class="text-[0.6rem] px-1.5 py-0.5 rounded border font-mono" style="border-color: var(--np-border); color: var(--np-text-dim);">Esc</kbd>
+            <kbd class="text-[0.68rem] px-1.5 py-0.5 rounded border font-mono" style="border-color: var(--np-border); color: var(--np-text-dim);">Esc</kbd>
           </div>
 
           <!-- Grouped command list -->
@@ -162,7 +162,7 @@ function hoverCmd(cmd: Command) {
             <template v-else>
               <template v-for="[group, cmds] in groupedFiltered" :key="group">
                 <!-- Group header -->
-                <li class="px-4 pt-2 pb-1 text-[0.6rem] uppercase tracking-widest" style="color: var(--np-text-dim);">{{ group }}</li>
+                <li class="px-4 pt-2 pb-1 text-[0.68rem] uppercase tracking-widest" style="color: var(--np-text-dim);">{{ group }}</li>
                 <!-- Commands in group -->
                 <li
                   v-for="cmd in cmds"
@@ -196,7 +196,7 @@ function hoverCmd(cmd: Command) {
 
           <!-- Footer hint -->
           <div
-            class="px-4 py-2 text-[0.65rem] flex gap-4 border-t"
+            class="px-4 py-2 text-[0.7rem] flex gap-4 border-t"
             style="border-color: var(--np-glass-border); color: var(--np-text-dim);"
           >
             <span><kbd class="font-mono">↑↓</kbd> navigate</span>

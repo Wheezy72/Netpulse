@@ -17,7 +17,7 @@ const quickLinks = [
 
 <template>
   <div class="flex min-h-[70vh] flex-col items-center justify-center text-center">
-    <p class="np-brand-text font-mono text-[0.65rem] uppercase tracking-[0.4em]">Lost packet</p>
+    <p class="np-brand-text font-mono text-[0.7rem] uppercase tracking-[0.4em]">Lost packet</p>
 
     <h1 class="mt-3 font-mono text-6xl font-bold tracking-tight text-[var(--np-text)]">404</h1>
 
@@ -30,14 +30,14 @@ const quickLinks = [
     <div class="mt-8 flex flex-wrap items-center justify-center gap-2">
       <button
         type="button"
-        class="np-cyber-btn px-5 py-2.5 text-[0.65rem] uppercase tracking-wider"
+        class="np-cyber-btn px-5 py-2.5 text-[0.7rem] uppercase tracking-wider"
         @click="router.push('/')"
       >
         Back to dashboard
       </button>
       <button
         type="button"
-        class="rounded-xl border border-[var(--np-border-subtle)] px-4 py-2.5 text-[0.65rem] font-semibold uppercase tracking-wider text-[var(--np-text-muted)] transition-colors hover:text-[var(--np-text)]"
+        class="rounded-xl border border-[var(--np-border-subtle)] px-4 py-2.5 text-[0.7rem] font-semibold uppercase tracking-wider text-[var(--np-text-muted)] transition-colors hover:text-[var(--np-text)]"
         @click="router.back()"
       >
         Go back
@@ -45,7 +45,7 @@ const quickLinks = [
     </div>
 
     <div
-      class="mt-10 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 font-mono text-[0.6rem] uppercase tracking-wider text-[var(--np-text-dim)]"
+      class="mt-10 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 font-mono text-[0.68rem] uppercase tracking-wider text-[var(--np-text-dim)]"
     >
       <span>Try:</span>
       <router-link

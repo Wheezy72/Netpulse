@@ -804,7 +804,7 @@ onBeforeUnmount(() => {
     <!-- Page heading -->
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <p class="text-[0.65rem] font-mono uppercase tracking-[0.28em] text-[var(--np-text-dim)]">Network map</p>
+        <p class="text-[0.7rem] font-mono uppercase tracking-[0.28em] text-[var(--np-text-dim)]">Network map</p>
         <h1 class="mt-1 text-2xl font-bold tracking-tight text-[var(--np-text)]">Interactive topology</h1>
         <p class="mt-1 text-xs text-[var(--np-text-muted)]">
           Discovered hosts, drawn from the uplink outwards.
@@ -941,7 +941,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-if="topologyLoading" class="absolute inset-0 z-10 flex items-center justify-center bg-[var(--np-bg)]/55 backdrop-blur-[2px] pointer-events-none">
-          <span class="animate-pulse font-mono text-[0.65rem] uppercase tracking-[0.3em] text-[var(--np-accent)]">Resolving orbits…</span>
+          <span class="animate-pulse font-mono text-[0.7rem] uppercase tracking-[0.3em] text-[var(--np-accent)]">Resolving orbits…</span>
         </div>
         <div v-else-if="topologyError" class="absolute inset-0 z-10 flex items-center justify-center bg-[var(--np-bg)]/60 font-mono text-xs text-rose-400 pointer-events-none">
           {{ topologyError }}
@@ -958,7 +958,7 @@ onBeforeUnmount(() => {
           <div class="flex items-center justify-between border-b border-[var(--np-border-subtle)] pb-3 mb-4 shrink-0">
             <div class="flex flex-col">
               <span class="text-xs font-bold uppercase tracking-wider text-[var(--np-accent-primary)]">Node Interactive Console</span>
-              <span class="text-[0.65rem] font-mono text-[var(--np-text)] mt-0.5">{{ selectedNode.ip_address }}</span>
+              <span class="text-[0.7rem] font-mono text-[var(--np-text)] mt-0.5">{{ selectedNode.ip_address }}</span>
             </div>
             <span class="np-role-chip">
               {{ selectedNode.is_gateway ? 'Gateway' : 'Host' }}
@@ -1041,13 +1041,13 @@ onBeforeUnmount(() => {
               <!-- Real Vulnerabilities section -->
               <div class="space-y-2 pt-2 border-t border-[var(--np-border-subtle)]">
                 <div class="flex items-center justify-between gap-2">
-                  <span class="text-[0.55rem] uppercase tracking-widest text-[var(--np-text-dim)] font-bold block">
+                  <span class="text-[0.7rem] uppercase tracking-widest text-[var(--np-text-dim)] font-bold block">
                     Vulnerabilities ({{ deviceDetail?.vulnerabilities?.length || 0 }})
                   </span>
                   <button
                     v-if="isAdmin"
                     type="button"
-                    class="np-cyber-btn px-2.5 py-1 text-[0.6rem] uppercase tracking-wider"
+                    class="np-cyber-btn px-2.5 py-1 text-[0.68rem] uppercase tracking-wider"
                     :disabled="testingNode"
                     :title="`Run a targeted service scan against ${selectedNode.ip_address}`"
                     @click="testSelectedNode"
@@ -1057,7 +1057,7 @@ onBeforeUnmount(() => {
                 </div>
                 <p
                   v-if="testMessage"
-                  class="text-[0.6rem] font-mono leading-relaxed"
+                  class="text-[0.68rem] font-mono leading-relaxed"
                   :class="testMessageKind === 'ok' ? 'text-[var(--np-accent)]' : testMessageKind === 'warn' ? 'text-[var(--np-warning)]' : 'text-[var(--np-danger)]'"
                 >
                   {{ testMessage }}
@@ -1070,12 +1070,12 @@ onBeforeUnmount(() => {
                         vuln.severity === 'high' ? 'text-orange-500 font-bold' :
                         vuln.severity === 'medium' ? 'text-yellow-500 font-bold' :
                         'text-emerald-400'
-                      ]" class="font-mono text-[0.65rem] shrink-0">
+                      ]" class="font-mono text-[0.7rem] shrink-0">
                         [{{ vuln.severity.toUpperCase() }}]
                       </span>
-                      <span class="text-[0.65rem] text-[var(--np-text)] truncate max-w-[180px]">{{ vuln.title }}</span>
+                      <span class="text-[0.7rem] text-[var(--np-text)] truncate max-w-[180px]">{{ vuln.title }}</span>
                     </div>
-                    <span v-if="vuln.port" class="text-[0.65rem] font-mono text-[var(--np-text-dim)]">:{{ vuln.port }}</span>
+                    <span v-if="vuln.port" class="text-[0.7rem] font-mono text-[var(--np-text-dim)]">:{{ vuln.port }}</span>
                   </div>
                   <div v-if="!deviceDetail?.vulnerabilities?.length" class="text-xs font-mono py-2 text-[var(--np-text-dim)] text-center">No vulnerabilities detected.</div>
                 </div>
@@ -1083,17 +1083,17 @@ onBeforeUnmount(() => {
 
               <!-- Real Scripts execution section -->
               <div class="space-y-2 pt-2 border-t border-[var(--np-border-subtle)]">
-                <span class="text-[0.55rem] uppercase tracking-widest text-[var(--np-text-dim)] font-bold block">
+                <span class="text-[0.7rem] uppercase tracking-widest text-[var(--np-text-dim)] font-bold block">
                   Recent Script Jobs
                 </span>
                 <div class="space-y-1.5">
-                  <div v-for="s in deviceDetail?.scripts" :key="s.id" class="flex justify-between items-center rounded-lg p-2 bg-[var(--np-surface-elevated)] border border-[var(--np-border-subtle)] text-[0.65rem]">
+                  <div v-for="s in deviceDetail?.scripts" :key="s.id" class="flex justify-between items-center rounded-lg p-2 bg-[var(--np-surface-elevated)] border border-[var(--np-border-subtle)] text-[0.7rem]">
                     <span class="font-mono text-[var(--np-text)] truncate max-w-[180px]">{{ s.script_name }}</span>
                     <span :class="[
                       s.status === 'success' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
                       s.status === 'failed' ? 'text-red-400 bg-red-500/10 border-red-500/20' :
                       'text-yellow-400 bg-yellow-500/10 border-yellow-500/20'
-                    ]" class="px-1.5 py-0.5 rounded font-mono border text-[0.55rem] uppercase">
+                    ]" class="px-1.5 py-0.5 rounded font-mono border text-[0.7rem] uppercase">
                       {{ s.status }}
                     </span>
                   </div>
@@ -1106,7 +1106,7 @@ onBeforeUnmount(() => {
             <div v-else-if="activeTab === 'ssh'" class="h-full flex flex-col gap-4">
               <!-- Connection Credentials Form -->
               <div v-if="!sshConnected && !sshConnecting" class="space-y-4">
-                <div class="text-[0.65rem] font-mono text-[var(--np-text-dim)] uppercase tracking-wider mb-2">
+                <div class="text-[0.7rem] font-mono text-[var(--np-text-dim)] uppercase tracking-wider mb-2">
                   SSH Remote Login
                 </div>
 
@@ -1144,11 +1144,11 @@ onBeforeUnmount(() => {
 
                 <!-- Vendor Specific Helper / Guidelines -->
                 <div v-if="connectionGuidelines" class="p-3.5 rounded-xl border border-[var(--np-accent-border)] bg-[var(--np-accent-soft)] space-y-2">
-                  <div class="flex items-center gap-1.5 text-[0.65rem] font-bold text-[var(--np-accent)] uppercase tracking-wide">
+                  <div class="flex items-center gap-1.5 text-[0.7rem] font-bold text-[var(--np-accent)] uppercase tracking-wide">
                     <Lock class="h-3 w-3 shrink-0" :stroke-width="1.7" />
                     {{ connectionGuidelines.brand }} Security Guidelines
                   </div>
-                  <div class="text-[0.58rem] text-[var(--np-text-muted)] space-y-1 font-mono">
+                  <div class="text-[0.7rem] text-[var(--np-text-muted)] space-y-1 font-mono">
                     <p><span class="text-[var(--np-text-dim)]">Default credentials suggestion:</span> {{ connectionGuidelines.defaultUser }}</p>
                     <p><span class="text-[var(--np-text-dim)]">Intrusion Prevention advice:</span> {{ connectionGuidelines.securityNotice }}</p>
                   </div>
@@ -1175,13 +1175,13 @@ onBeforeUnmount(() => {
               <!-- Live Interactive Terminal -->
               <div v-else class="flex-1 flex flex-col min-h-[350px]">
                 <div class="flex items-center justify-between pb-2 mb-2 border-b border-[var(--np-border-subtle)]">
-                  <span class="text-[0.6rem] font-mono text-[var(--np-accent)] animate-pulse flex items-center gap-1.5">
+                  <span class="text-[0.68rem] font-mono text-[var(--np-accent)] animate-pulse flex items-center gap-1.5">
                     <span class="w-1.5 h-1.5 rounded-full bg-[var(--np-accent)] animate-ping" />
                     SSH LOGGED IN
                   </span>
                   <button
                     @click="disconnectSsh"
-                    class="px-2.5 py-1 text-[0.6rem] font-bold uppercase tracking-wider bg-red-500/10 text-red-400 border border-red-500/25 hover:bg-red-500/20 rounded-md transition-all"
+                    class="px-2.5 py-1 text-[0.68rem] font-bold uppercase tracking-wider bg-red-500/10 text-red-400 border border-red-500/25 hover:bg-red-500/20 rounded-md transition-all"
                   >
                     Disconnect
                   </button>
@@ -1199,12 +1199,12 @@ onBeforeUnmount(() => {
             <!-- Tab: Configs -->
             <div v-else-if="activeTab === 'configs'" class="space-y-4">
               <div class="flex items-center justify-between border-b border-[var(--np-border-subtle)] pb-2">
-                <span class="text-[0.65rem] font-mono text-[var(--np-text-dim)] uppercase tracking-wider">
+                <span class="text-[0.7rem] font-mono text-[var(--np-text-dim)] uppercase tracking-wider">
                   Device configuration archives
                 </span>
                 <button
                   @click="loadConfigs"
-                  class="text-[0.6rem] text-[var(--np-accent)] hover:underline uppercase tracking-widest"
+                  class="text-[0.68rem] text-[var(--np-accent)] hover:underline uppercase tracking-widest"
                   :disabled="configsLoading"
                 >
                   {{ configsLoading ? 'Reloading...' : 'Reload' }}
@@ -1220,13 +1220,13 @@ onBeforeUnmount(() => {
                 >
                   <div class="flex flex-col min-w-0">
                     <span class="font-mono text-xs text-[var(--np-text)] truncate max-w-[190px]">{{ cfg.filename }}</span>
-                    <span class="text-[0.55rem] font-mono text-[var(--np-text-dim)] mt-0.5">
+                    <span class="text-[0.7rem] font-mono text-[var(--np-text-dim)] mt-0.5">
                       {{ new Date(cfg.modified_at).toLocaleString() }} • {{ (cfg.size_bytes / 1024).toFixed(2) }} KB
                     </span>
                   </div>
                   <button
                     @click="viewConfig(cfg.filename)"
-                    class="px-2.5 py-1 text-[0.6rem] font-bold uppercase tracking-wider bg-[var(--np-accent-soft)] text-[var(--np-accent)] border border-[var(--np-accent-border)] hover:bg-[var(--np-accent-soft)] rounded-md transition-all shrink-0"
+                    class="px-2.5 py-1 text-[0.68rem] font-bold uppercase tracking-wider bg-[var(--np-accent-soft)] text-[var(--np-accent)] border border-[var(--np-accent-border)] hover:bg-[var(--np-accent-soft)] rounded-md transition-all shrink-0"
                   >
                     View
                   </button>
@@ -1239,18 +1239,18 @@ onBeforeUnmount(() => {
               <!-- Config Content View -->
               <div v-else class="space-y-3">
                 <div class="flex items-center justify-between">
-                  <span class="font-mono text-[0.6rem] text-[var(--np-text)] truncate max-w-[200px]">
+                  <span class="font-mono text-[0.68rem] text-[var(--np-text)] truncate max-w-[200px]">
                     {{ selectedConfigName }}
                   </span>
                   <button
                     @click="selectedConfigText = null; selectedConfigName = null"
-                    class="text-[0.6rem] text-rose-400 hover:underline uppercase tracking-wider"
+                    class="text-[0.68rem] text-rose-400 hover:underline uppercase tracking-wider"
                   >
                     Back to List
                   </button>
                 </div>
 
-                <div class="p-3.5 rounded-lg border border-[var(--np-glass-border)] bg-[#090d16] font-mono text-[0.65rem] text-[var(--np-text-muted)] overflow-x-auto whitespace-pre leading-relaxed custom-scrollbar max-h-[300px]">
+                <div class="p-3.5 rounded-lg border border-[var(--np-glass-border)] bg-[#090d16] font-mono text-[0.7rem] text-[var(--np-text-muted)] overflow-x-auto whitespace-pre leading-relaxed custom-scrollbar max-h-[300px]">
                   {{ selectedConfigText }}
                 </div>
               </div>
@@ -1577,7 +1577,7 @@ onBeforeUnmount(() => {
   background: var(--map-chip-bg);
   padding: 3px 9px;
   font-family: ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--map-chip-fg);

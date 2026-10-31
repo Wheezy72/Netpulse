@@ -231,7 +231,7 @@ async function handleSubmit(): Promise<void> {
               class="np-neon-input np-focus-glow w-full rounded-lg px-4 py-3 text-sm"
               placeholder="Setup token"
             />
-            <p class="mt-1.5 text-[0.65rem] leading-relaxed np-dim-text">
+            <p class="mt-1.5 text-[0.7rem] leading-relaxed np-dim-text">
               This server requires the setup token from its configuration.
             </p>
           </div>
@@ -300,7 +300,7 @@ async function handleSubmit(): Promise<void> {
               placeholder="you@example.com"
               aria-describedby="register-email-help"
             />
-            <p id="register-email-help" class="mt-1.5 text-[0.65rem] leading-relaxed np-dim-text">
+            <p id="register-email-help" class="mt-1.5 text-[0.7rem] leading-relaxed np-dim-text">
               You can add this later in Settings. It is only needed to reset a forgotten password.
             </p>
           </div>

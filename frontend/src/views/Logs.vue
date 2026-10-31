@@ -515,7 +515,7 @@ onUnmounted(() => {
       <div class="flex flex-wrap items-center gap-2 border-b border-[var(--np-border-subtle)] px-3 py-2">
         <button
           type="button"
-          class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[0.65rem] font-semibold transition-colors"
+          class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[0.7rem] font-semibold transition-colors"
           :class="
             autoRefresh
               ? 'border-[var(--np-accent-border)] bg-[var(--np-accent-soft)] text-[var(--np-accent)]'
@@ -541,7 +541,7 @@ onUnmounted(() => {
             v-for="chip in levelChips"
             :key="chip.key"
             type="button"
-            class="flex items-center gap-1.5 rounded-md px-2 py-1 text-[0.65rem] font-medium transition-colors"
+            class="flex items-center gap-1.5 rounded-md px-2 py-1 text-[0.7rem] font-medium transition-colors"
             :class="
               chipActive(chip.key)
                 ? 'bg-[var(--np-surface-hover)] text-[var(--np-text)]'
@@ -576,7 +576,7 @@ onUnmounted(() => {
             />
             <span
               v-if="!searchQuery"
-              class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-[var(--np-border-subtle)] px-1 font-mono text-[0.55rem] text-[var(--np-text-dim)]"
+              class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-[var(--np-border-subtle)] px-1 font-mono text-[0.7rem] text-[var(--np-text-dim)]"
               >/</span
             >
             <button
@@ -593,7 +593,7 @@ onUnmounted(() => {
           <div class="flex items-center gap-1">
             <button
               type="button"
-              class="flex h-8 items-center gap-1.5 rounded-md px-2 text-[0.65rem] font-medium text-[var(--np-text-dim)] transition-colors hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)]"
+              class="flex h-8 items-center gap-1.5 rounded-md px-2 text-[0.7rem] font-medium text-[var(--np-text-dim)] transition-colors hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)]"
               title="Reload from the server"
               @click="loadLogs()"
             >
@@ -602,7 +602,7 @@ onUnmounted(() => {
             </button>
             <button
               type="button"
-              class="flex h-8 items-center gap-1.5 rounded-md px-2 text-[0.65rem] font-medium text-[var(--np-text-dim)] transition-colors hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)]"
+              class="flex h-8 items-center gap-1.5 rounded-md px-2 text-[0.7rem] font-medium text-[var(--np-text-dim)] transition-colors hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)]"
               title="Download these logs as a PDF"
               @click="downloadLogsPDF"
             >
@@ -611,7 +611,7 @@ onUnmounted(() => {
             </button>
             <button
               type="button"
-              class="flex h-8 items-center gap-1.5 rounded-md px-2 text-[0.65rem] font-medium text-[var(--np-text-dim)] transition-colors hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-danger)]"
+              class="flex h-8 items-center gap-1.5 rounded-md px-2 text-[0.7rem] font-medium text-[var(--np-text-dim)] transition-colors hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-danger)]"
               title="Clear the in-memory buffer; files on disk are kept"
               @click="clearLogs"
             >
@@ -657,7 +657,7 @@ onUnmounted(() => {
           </p>
           <button
             type="button"
-            class="mt-1 rounded-md border border-[var(--np-border-subtle)] px-2.5 py-1 text-[0.65rem] font-semibold text-[var(--np-text-muted)] hover:text-[var(--np-text)]"
+            class="mt-1 rounded-md border border-[var(--np-border-subtle)] px-2.5 py-1 text-[0.7rem] font-semibold text-[var(--np-text-muted)] hover:text-[var(--np-text)]"
             @click="
               searchQuery = '';
               errorFocus = false;
@@ -688,7 +688,7 @@ onUnmounted(() => {
                 :style="{ background: levelColor(log.level) }"
                 :title="log.level"
               />
-              <span class="truncate font-mono text-[0.62rem] text-[var(--np-text-dim)]" :title="log.logger">
+              <span class="truncate font-mono text-[0.7rem] text-[var(--np-text-dim)]" :title="log.logger">
                 {{ log.logger }}
               </span>
               <p
@@ -729,7 +729,7 @@ onUnmounted(() => {
               class="border-l-2 bg-[var(--np-surface-elevated)]/40 px-3 py-2"
               :style="{ borderColor: levelColor(log.level) }"
             >
-              <dl class="grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-1 font-mono text-[0.62rem]">
+              <dl class="grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-1 font-mono text-[0.7rem]">
                 <dt class="text-[var(--np-text-dim)]">Level</dt>
                 <dd class="font-semibold" :style="{ color: levelColor(log.level) }">
                   {{ log.level }}
@@ -764,7 +764,7 @@ onUnmounted(() => {
 
       <!-- Status bar: how much of what, and how fresh. -->
       <div
-        class="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--np-border-subtle)] px-3 py-1.5 font-mono text-[0.6rem] text-[var(--np-text-dim)]"
+        class="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--np-border-subtle)] px-3 py-1.5 font-mono text-[0.68rem] text-[var(--np-text-dim)]"
       >
         <span>
           {{ filteredCount }} of {{ logs.length }} loaded
@@ -786,7 +786,7 @@ onUnmounted(() => {
     >
       <div class="flex flex-wrap items-center gap-2 border-b border-[var(--np-border-subtle)] px-3 py-2">
         <span
-          class="flex items-center gap-2 rounded-full border px-2.5 py-1 text-[0.65rem] font-semibold"
+          class="flex items-center gap-2 rounded-full border px-2.5 py-1 text-[0.7rem] font-semibold"
           :class="
             syslogStatus.running
               ? 'border-[var(--np-accent-border)] bg-[var(--np-accent-soft)] text-[var(--np-accent)]'
@@ -804,7 +804,7 @@ onUnmounted(() => {
         <div class="ml-auto flex items-center gap-1">
           <button
             type="button"
-            class="flex h-8 items-center rounded-md px-2.5 text-[0.65rem] font-semibold transition-colors disabled:opacity-40"
+            class="flex h-8 items-center rounded-md px-2.5 text-[0.7rem] font-semibold transition-colors disabled:opacity-40"
             :class="
               syslogStatus.running
                 ? 'text-[var(--np-text-dim)] hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-danger)]'
@@ -817,7 +817,7 @@ onUnmounted(() => {
           </button>
           <button
             type="button"
-            class="flex h-8 items-center gap-1.5 rounded-md px-2 text-[0.65rem] font-medium text-[var(--np-text-dim)] hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)]"
+            class="flex h-8 items-center gap-1.5 rounded-md px-2 text-[0.7rem] font-medium text-[var(--np-text-dim)] hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)]"
             @click="loadSyslogMessages"
           >
             <RefreshCw class="h-3.5 w-3.5" :stroke-width="1.7" />
@@ -825,7 +825,7 @@ onUnmounted(() => {
           </button>
           <button
             type="button"
-            class="flex h-8 items-center gap-1.5 rounded-md px-2 text-[0.65rem] font-medium text-[var(--np-text-dim)] hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-danger)]"
+            class="flex h-8 items-center gap-1.5 rounded-md px-2 text-[0.7rem] font-medium text-[var(--np-text-dim)] hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-danger)]"
             @click="clearSyslogMessages"
           >
             <Trash2 class="h-3.5 w-3.5" :stroke-width="1.7" />
@@ -868,7 +868,7 @@ onUnmounted(() => {
         />
         <button
           type="button"
-          class="rounded-md border border-[var(--np-border-subtle)] px-2.5 py-1 text-[0.65rem] font-semibold text-[var(--np-text-muted)] hover:text-[var(--np-text)]"
+          class="rounded-md border border-[var(--np-border-subtle)] px-2.5 py-1 text-[0.7rem] font-semibold text-[var(--np-text-muted)] hover:text-[var(--np-text)]"
           @click="syslogApplyFilters"
         >
           Apply
@@ -896,7 +896,7 @@ onUnmounted(() => {
               <th
                 v-for="head in ['Received', 'Source', 'Severity', 'Host', 'Message']"
                 :key="head"
-                class="px-3 py-2 text-[0.6rem] font-semibold text-[var(--np-text-dim)]"
+                class="px-3 py-2 text-[0.68rem] font-semibold text-[var(--np-text-dim)]"
               >
                 {{ head }}
               </th>
@@ -915,7 +915,7 @@ onUnmounted(() => {
                 {{ msg.source_ip }}
               </td>
               <td class="whitespace-nowrap px-3 py-1.5">
-                <span class="flex items-center gap-1.5 text-[0.65rem]">
+                <span class="flex items-center gap-1.5 text-[0.7rem]">
                   <span
                     class="h-1.5 w-1.5 rounded-full"
                     :style="{ background: getSeverityColor(msg.severity) }"
@@ -938,7 +938,7 @@ onUnmounted(() => {
       </div>
 
       <div
-        class="flex items-center justify-between border-t border-[var(--np-border-subtle)] px-3 py-1.5 font-mono text-[0.6rem] text-[var(--np-text-dim)]"
+        class="flex items-center justify-between border-t border-[var(--np-border-subtle)] px-3 py-1.5 font-mono text-[0.68rem] text-[var(--np-text-dim)]"
       >
         <span>{{ syslogMessages.length }} of {{ syslogTotal }} messages</span>
         <div class="flex items-center gap-2">

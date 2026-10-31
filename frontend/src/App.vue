@@ -509,14 +509,14 @@ async function handleForcePasswordChange() {
             <h1 class="np-brand-text animate-pulse text-xl font-bold tracking-wider mb-2 font-mono">
               Set a new password
             </h1>
-            <p class="text-[0.65rem] font-mono text-[var(--np-text-muted)] uppercase tracking-wider">
+            <p class="text-[0.7rem] font-mono text-[var(--np-text-muted)] uppercase tracking-wider">
               First login password reset required
             </p>
           </div>
 
           <form @submit.prevent="handleForcePasswordChange" class="space-y-4">
             <div>
-              <label class="block text-[0.65rem] uppercase tracking-wider mb-1.5 font-mono text-[var(--np-text-muted)]">
+              <label class="block text-[0.7rem] uppercase tracking-wider mb-1.5 font-mono text-[var(--np-text-muted)]">
                 New Password (min 6 characters)
               </label>
               <input
@@ -529,7 +529,7 @@ async function handleForcePasswordChange() {
             </div>
 
             <div>
-              <label class="block text-[0.65rem] uppercase tracking-wider mb-1.5 font-mono text-[var(--np-text-muted)]">
+              <label class="block text-[0.7rem] uppercase tracking-wider mb-1.5 font-mono text-[var(--np-text-muted)]">
                 Confirm New Password
               </label>
               <input
@@ -559,7 +559,7 @@ async function handleForcePasswordChange() {
 
           <div class="mt-6 pt-4 border-t border-[var(--np-border-subtle)] flex items-center justify-center gap-2">
             <span class="np-status-dot" />
-            <span class="text-[0.65rem] font-mono text-[var(--np-text-dim)] uppercase tracking-widest">
+            <span class="text-[0.7rem] font-mono text-[var(--np-text-dim)] uppercase tracking-widest">
               Signed in &bull; Netpulse
             </span>
           </div>
@@ -614,7 +614,7 @@ async function handleForcePasswordChange() {
               />
               <!-- Tooltip -->
               <span
-                class="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-md border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)] px-2 py-1 text-[0.6rem] font-mono uppercase tracking-wider text-[var(--np-text)] opacity-0 shadow-lg transition-opacity group-hover:opacity-100"
+                class="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-md border border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)] px-2 py-1 text-[0.68rem] font-mono uppercase tracking-wider text-[var(--np-text)] opacity-0 shadow-lg transition-opacity group-hover:opacity-100"
               >
                 {{ item.label }}
               </span>
@@ -640,7 +640,7 @@ async function handleForcePasswordChange() {
           aria-label="Quick nmap scan"
         >
           <header class="flex items-center justify-between gap-2">
-            <p class="text-[0.55rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Quick scan</p>
+            <p class="text-[0.7rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Quick scan</p>
             <button
               type="button"
               class="rounded-md p-1 text-[var(--np-text-dim)] transition-colors hover:text-[var(--np-text)]"
@@ -651,7 +651,7 @@ async function handleForcePasswordChange() {
             </button>
           </header>
 
-          <label class="block text-[0.6rem] font-mono uppercase tracking-wider text-[var(--np-text-dim)]">
+          <label class="block text-[0.68rem] font-mono uppercase tracking-wider text-[var(--np-text-dim)]">
             Target
           </label>
           <input
@@ -663,7 +663,7 @@ async function handleForcePasswordChange() {
             @keyup.enter="runQuickScan"
           />
 
-          <label class="mt-2.5 block text-[0.6rem] font-mono uppercase tracking-wider text-[var(--np-text-dim)]">
+          <label class="mt-2.5 block text-[0.68rem] font-mono uppercase tracking-wider text-[var(--np-text-dim)]">
             Profile
           </label>
           <select v-model="scanProfile" class="np-neon-input mt-1 w-full cursor-pointer px-2 py-2 text-xs">
@@ -673,7 +673,7 @@ async function handleForcePasswordChange() {
           <div class="mt-3 flex gap-2">
             <button
               type="button"
-              class="np-cyber-btn flex-1 py-2 text-[0.65rem] uppercase tracking-wider"
+              class="np-cyber-btn flex-1 py-2 text-[0.7rem] uppercase tracking-wider"
               :disabled="scanBusy || discovering"
               @click="runQuickScan"
             >
@@ -681,14 +681,14 @@ async function handleForcePasswordChange() {
             </button>
             <button
               type="button"
-              class="rounded-xl border border-[var(--np-border-subtle)] px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-wider text-[var(--np-text-muted)] transition-colors hover:text-[var(--np-text)]"
+              class="rounded-xl border border-[var(--np-border-subtle)] px-3 py-2 text-[0.7rem] font-semibold uppercase tracking-wider text-[var(--np-text-muted)] transition-colors hover:text-[var(--np-text)]"
               @click="navigateTo('toolbox'); closePanel()"
             >
               Toolbox
             </button>
           </div>
 
-          <p v-if="lastScanId" class="np-accent-text mt-2 font-mono text-[0.6rem]">
+          <p v-if="lastScanId" class="np-accent-text mt-2 font-mono text-[0.68rem]">
             Scan {{ lastScanId }} queued.
           </p>
         </section>
@@ -703,7 +703,7 @@ async function handleForcePasswordChange() {
         >
           <header class="flex items-start justify-between gap-2">
             <div>
-              <p class="text-[0.55rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Discovery</p>
+              <p class="text-[0.7rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Discovery</p>
               <h2 id="quick-sweep-title" class="mt-0.5 text-sm font-bold text-[var(--np-text)]">Sweep the network</h2>
             </div>
             <button
@@ -720,7 +720,7 @@ async function handleForcePasswordChange() {
             Adds every host that answers to the inventory. No port scan.
           </p>
 
-          <label class="mt-4 block text-[0.6rem] font-mono uppercase tracking-wider text-[var(--np-text-dim)]">
+          <label class="mt-4 block text-[0.68rem] font-mono uppercase tracking-wider text-[var(--np-text-dim)]">
             Target <span class="normal-case tracking-normal opacity-70">(optional)</span>
           </label>
           <input
@@ -731,7 +731,7 @@ async function handleForcePasswordChange() {
             class="np-neon-input mt-1 w-full px-3 py-2 font-mono text-xs"
             @keyup.enter="runSweep"
           />
-          <p class="mt-1.5 text-[0.65rem] text-[var(--np-text-dim)]">
+          <p class="mt-1.5 text-[0.7rem] text-[var(--np-text-dim)]">
             Leave blank to sweep the networks this host is attached to.
           </p>
 
@@ -758,7 +758,7 @@ async function handleForcePasswordChange() {
           <div class="mt-4 flex gap-2">
             <button
               type="button"
-              class="np-cyber-btn np-cyber-btn--solid flex-1 py-2 text-[0.65rem] uppercase tracking-wider"
+              class="np-cyber-btn np-cyber-btn--solid flex-1 py-2 text-[0.7rem] uppercase tracking-wider"
               :disabled="discovering || !auth.isAdmin"
               @click="runSweep"
             >
@@ -766,14 +766,14 @@ async function handleForcePasswordChange() {
             </button>
             <button
               type="button"
-              class="rounded-xl border border-[var(--np-border-subtle)] px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-wider text-[var(--np-text-muted)] transition-colors hover:text-[var(--np-text)]"
+              class="rounded-xl border border-[var(--np-border-subtle)] px-3 py-2 text-[0.7rem] font-semibold uppercase tracking-wider text-[var(--np-text-muted)] transition-colors hover:text-[var(--np-text)]"
               @click="goToDevices"
             >
               Devices
             </button>
           </div>
 
-          <p v-if="!auth.isAdmin" class="mt-2 text-[0.65rem] text-[var(--np-warning)]">
+          <p v-if="!auth.isAdmin" class="mt-2 text-[0.7rem] text-[var(--np-warning)]">
             Admin access is required to sweep the network.
           </p>
         </section>
@@ -788,7 +788,7 @@ async function handleForcePasswordChange() {
         >
           <header class="flex items-start justify-between gap-2">
             <div>
-              <p class="text-[0.55rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Desktop</p>
+              <p class="text-[0.7rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">Desktop</p>
               <h2 id="terminal-title" class="mt-0.5 text-sm font-bold text-[var(--np-text)]">Open MobaXterm</h2>
             </div>
             <button
@@ -814,9 +814,9 @@ async function handleForcePasswordChange() {
                 @click="openTerminal(opt.index)"
               >
                 <span>{{ opt.name }}</span>
-                <span class="np-accent-text font-mono text-[0.6rem]">Open</span>
+                <span class="np-accent-text font-mono text-[0.68rem]">Open</span>
               </button>
-              <p class="mt-1 text-[0.6rem] text-[var(--np-text-dim)]">
+              <p class="mt-1 text-[0.68rem] text-[var(--np-text-dim)]">
                 Opens on {{ hostLabel }}.
               </p>
             </div>
@@ -828,11 +828,11 @@ async function handleForcePasswordChange() {
                 :href="termInfo.download_url"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="np-cyber-btn mt-3 inline-block w-full py-2 text-center text-[0.65rem] uppercase tracking-wider"
+                class="np-cyber-btn mt-3 inline-block w-full py-2 text-center text-[0.7rem] uppercase tracking-wider"
               >
                 Download MobaXterm
               </a>
-              <p v-if="isMobile" class="mt-2 text-[0.65rem] leading-relaxed text-[var(--np-text-dim)]">
+              <p v-if="isMobile" class="mt-2 text-[0.7rem] leading-relaxed text-[var(--np-text-dim)]">
                 Install MobaXterm on {{ hostLabel }}.
               </p>
             </div>
@@ -889,7 +889,7 @@ async function handleForcePasswordChange() {
                 <button
                   type="button"
                   @click="router.push('/settings')"
-                  class="flex items-center gap-2 rounded-full border px-3 py-1.5 text-[0.65rem] font-semibold transition-all"
+                  class="flex items-center gap-2 rounded-full border px-3 py-1.5 text-[0.7rem] font-semibold transition-all"
                   :class="
                     isActive('settings')
                       ? 'border-[var(--np-accent-border)] bg-[var(--np-accent-soft)] text-[var(--np-accent)]'
@@ -951,9 +951,9 @@ async function handleForcePasswordChange() {
                     <AppAvatar :seed="avatarSeed" :avatar-style="auth.avatarStyle" :label="profileLabel" :size="44" />
                     <div class="min-w-0 flex-1">
                       <p class="truncate text-sm font-bold text-[var(--np-text)]">{{ profileLabel }}</p>
-                      <p v-if="profileDetail" class="truncate text-[0.65rem] text-[var(--np-text-dim)]">{{ profileDetail }}</p>
+                      <p v-if="profileDetail" class="truncate text-[0.7rem] text-[var(--np-text-dim)]">{{ profileDetail }}</p>
                       <span
-                        class="mt-1 inline-block rounded-sm border border-[var(--np-accent-border)] bg-[var(--np-accent-soft)] px-1.5 py-px text-[0.5rem] font-mono uppercase tracking-widest text-[var(--np-accent)]"
+                        class="mt-1 inline-block rounded-sm border border-[var(--np-accent-border)] bg-[var(--np-accent-soft)] px-1.5 py-px text-[0.7rem] font-mono uppercase tracking-widest text-[var(--np-accent)]"
                       >
                         {{ auth.user?.role }}
                       </span>
@@ -1034,7 +1034,7 @@ async function handleForcePasswordChange() {
                    work; MobaXterm and Wireshark only ever open on the host, so
                    the caption says that instead of failing silently. -->
               <div class="flex flex-col gap-1">
-                <span class="px-3 pb-1 text-[0.55rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">
+                <span class="px-3 pb-1 text-[0.7rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">
                   Actions
                 </span>
                 <button
@@ -1047,7 +1047,7 @@ async function handleForcePasswordChange() {
                   <AppGlyph :name="item.glyph" />
                   {{ item.label }}
                 </button>
-                <p class="px-3 pt-1 text-[0.6rem] leading-relaxed text-[var(--np-text-dim)]">
+                <p class="px-3 pt-1 text-[0.68rem] leading-relaxed text-[var(--np-text-dim)]">
                   Runs on {{ hostLabel }}.
                 </p>
               </div>
@@ -1057,7 +1057,7 @@ async function handleForcePasswordChange() {
                   <AppAvatar :seed="avatarSeed" :avatar-style="auth.avatarStyle" :label="profileLabel" :size="30" />
                   <div class="min-w-0">
                     <span class="block truncate text-xs font-bold text-[var(--np-text)]">{{ profileLabel }}</span>
-                    <span class="np-brand-text text-[0.55rem] font-mono uppercase tracking-wider">{{ auth.user?.role }}</span>
+                    <span class="np-brand-text text-[0.7rem] font-mono uppercase tracking-wider">{{ auth.user?.role }}</span>
                   </div>
                 </div>
                 <button

@@ -450,7 +450,7 @@ onMounted(async () => {
         style="border-color: var(--np-glass-border);"
         :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
       >
-        <div class="px-3 py-1.5 border-b text-[0.6rem] uppercase tracking-widest text-[var(--np-text-dim)]" style="border-color: var(--np-border-subtle);">
+        <div class="px-3 py-1.5 border-b text-[0.68rem] uppercase tracking-widest text-[var(--np-text-dim)]" style="border-color: var(--np-border-subtle);">
           {{ contextMenu.device.ip_address }}
         </div>
         <button
@@ -526,7 +526,7 @@ onMounted(async () => {
         :style="{ borderColor: 'var(--np-border)', background: 'var(--np-surface-elevated)' }"
       >
         <div class="flex-1">
-          <p class="text-[0.65rem] uppercase tracking-widest" :style="{ color: 'var(--np-text-dim)' }">
+          <p class="text-[0.7rem] uppercase tracking-widest" :style="{ color: 'var(--np-text-dim)' }">
             Find devices
           </p>
           <p class="mt-0.5 text-[0.7rem]" :style="{ color: 'var(--np-text-muted)' }">
@@ -647,10 +647,10 @@ onMounted(async () => {
               <td class="px-3" :class="'py-2.5'">
                 <div class="font-mono text-[var(--np-text)] font-semibold">{{ d.is_self && d.interface_ips?.length ? d.interface_ips.join(' · ') : d.ip_address }}</div>
                 <div class="mt-0.5 flex flex-wrap items-center gap-1">
-                  <span class="text-[0.65rem] text-[var(--np-text-dim)]">{{ d.is_self ? 'This computer' : (d.hostname || d.mac_address || 'Unknown') }}</span>
+                  <span class="text-[0.7rem] text-[var(--np-text-dim)]">{{ d.is_self ? 'This computer' : (d.hostname || d.mac_address || 'Unknown') }}</span>
                   <span
                     v-if="d.is_self"
-                    class="rounded px-1.5 py-0.5 text-[0.55rem] font-semibold uppercase tracking-wide border border-[var(--np-accent-border)] bg-[var(--np-accent-soft)] text-[var(--np-accent)]"
+                    class="rounded px-1.5 py-0.5 text-[0.7rem] font-semibold uppercase tracking-wide border border-[var(--np-accent-border)] bg-[var(--np-accent-soft)] text-[var(--np-accent)]"
                     title="This machine runs the NetPulse console. It answers on every interface it holds — Wi-Fi and a USB adapter (e.g. the Archer T2U) — so it shows one row per address."
                   >
                     This PC
@@ -661,7 +661,7 @@ onMounted(async () => {
                 <div class="flex flex-wrap items-center gap-1.5">
                   <span class="sp-badge">{{ d.is_gateway ? 'Gateway' : (d.device_type || 'Unknown') }}</span>
                   <span
-                    class="rounded px-1.5 py-0.5 text-[0.55rem] uppercase tracking-wide border"
+                    class="rounded px-1.5 py-0.5 text-[0.7rem] uppercase tracking-wide border"
                     :class="d.verified
                       ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
                       : 'border-[var(--np-border-subtle)] text-[var(--np-text-dim)]'"
@@ -683,7 +683,7 @@ onMounted(async () => {
                   <button
                     type="button"
                     @click="attemptKick(d.ip_address)"
-                    class="rounded px-1.5 py-0.5 text-[0.55rem] font-semibold uppercase border transition-colors disabled:opacity-50 border-red-500/40 bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                    class="rounded px-1.5 py-0.5 text-[0.7rem] font-semibold uppercase border transition-colors disabled:opacity-50 border-red-500/40 bg-red-500/10 text-red-400 hover:bg-red-500/20"
                     :disabled="kickLoadingIp === d.ip_address || !isAdmin"
                     title="Best-effort L2 disruption via ARP poisoning."
                   >

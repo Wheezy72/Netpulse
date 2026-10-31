@@ -268,7 +268,7 @@ onMounted(loadAccounts);
             <option value="viewer">Viewer — read-only</option>
             <option value="admin">Admin — full control</option>
           </select>
-          <p class="text-[0.65rem] text-[var(--np-text-dim)]">
+          <p class="text-[0.7rem] text-[var(--np-text-dim)]">
             Viewers can see everything but change nothing: no scans, scripts,
             backups or console sessions.
           </p>
@@ -309,7 +309,7 @@ onMounted(loadAccounts);
         <p class="text-[0.75rem] font-semibold text-[var(--np-danger)]">{{ loadError }}</p>
         <button
           type="button"
-          class="rounded border border-[var(--np-border-subtle)] px-2.5 py-1 text-[0.65rem] font-semibold text-[var(--np-text)] transition-colors hover:bg-[var(--np-surface-hover)]"
+          class="rounded border border-[var(--np-border-subtle)] px-2.5 py-1 text-[0.7rem] font-semibold text-[var(--np-text)] transition-colors hover:bg-[var(--np-surface-hover)]"
           @click="loadAccounts"
         >
           Retry
@@ -334,7 +334,7 @@ onMounted(loadAccounts);
             <div class="min-w-0">
             <p class="truncate text-[0.8rem] font-semibold text-[var(--np-text)]">
               {{ account.username }}
-              <span v-if="isSelf(account)" class="ml-1 text-[0.6rem] font-bold uppercase tracking-wider text-[var(--np-accent)]">
+              <span v-if="isSelf(account)" class="ml-1 text-[0.68rem] font-bold uppercase tracking-wider text-[var(--np-accent)]">
                 you
               </span>
               <span v-if="account.full_name" class="font-normal text-[var(--np-text-dim)]">
@@ -357,7 +357,7 @@ onMounted(loadAccounts);
                  remove the permissions of the person clicking. -->
             <select
               v-if="!isSelf(account)"
-              class="np-neon-input cursor-pointer rounded px-2 py-1 text-[0.62rem] font-semibold uppercase tracking-wider"
+              class="np-neon-input cursor-pointer rounded px-2 py-1 text-[0.7rem] font-semibold uppercase tracking-wider"
               :class="
                 account.role === 'admin'
                   ? 'text-[var(--np-accent)]'
@@ -373,7 +373,7 @@ onMounted(loadAccounts);
             </select>
             <span
               v-else
-              class="rounded-full border px-2 py-0.5 text-[0.6rem] font-bold uppercase tracking-wider"
+              class="rounded-full border px-2 py-0.5 text-[0.68rem] font-bold uppercase tracking-wider"
               :class="
                 account.role === 'admin'
                   ? 'border-[var(--np-accent-border)] text-[var(--np-accent)]'
@@ -387,14 +387,14 @@ onMounted(loadAccounts);
                  the button would only ever produce an error. -->
             <span
               v-if="isSelf(account)"
-              class="text-[0.62rem] font-semibold text-[var(--np-text-dim)]"
+              class="text-[0.7rem] font-semibold text-[var(--np-text-dim)]"
               title="Ask another admin to change your role"
             >
               signed in
             </span>
             <span
               v-else-if="roleSavingId === account.id"
-              class="text-[0.62rem] font-semibold text-[var(--np-text-dim)]"
+              class="text-[0.7rem] font-semibold text-[var(--np-text-dim)]"
             >
               Changing…
             </span>
@@ -402,7 +402,7 @@ onMounted(loadAccounts);
               <button
                 v-if="pendingDeleteId !== account.id"
                 type="button"
-                class="rounded border border-[var(--np-border-subtle)] px-2.5 py-1 text-[0.65rem] font-semibold text-[var(--np-text-muted)] transition-colors hover:border-[var(--np-danger)] hover:text-[var(--np-danger)]"
+                class="rounded border border-[var(--np-border-subtle)] px-2.5 py-1 text-[0.7rem] font-semibold text-[var(--np-text-muted)] transition-colors hover:border-[var(--np-danger)] hover:text-[var(--np-danger)]"
                 :disabled="deletingId === account.id"
                 @click="deleteAccount(account)"
               >
@@ -411,7 +411,7 @@ onMounted(loadAccounts);
               <template v-else>
                 <button
                   type="button"
-                  class="rounded border border-[var(--np-danger)] px-2.5 py-1 text-[0.65rem] font-bold text-[var(--np-danger)] transition-colors hover:bg-[var(--np-danger)]/10"
+                  class="rounded border border-[var(--np-danger)] px-2.5 py-1 text-[0.7rem] font-bold text-[var(--np-danger)] transition-colors hover:bg-[var(--np-danger)]/10"
                   :disabled="deletingId === account.id"
                   @click="deleteAccount(account)"
                 >
@@ -419,7 +419,7 @@ onMounted(loadAccounts);
                 </button>
                 <button
                   type="button"
-                  class="rounded px-2 py-1 text-[0.65rem] font-semibold text-[var(--np-text-dim)] transition-colors hover:text-[var(--np-text)]"
+                  class="rounded px-2 py-1 text-[0.7rem] font-semibold text-[var(--np-text-dim)] transition-colors hover:text-[var(--np-text)]"
                   @click="pendingDeleteId = null"
                 >
                   Cancel

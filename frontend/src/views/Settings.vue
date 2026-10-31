@@ -509,7 +509,7 @@ onMounted(async () => {
         <div class="space-y-4">
           <div class="flex flex-col gap-1 border-b border-[var(--np-border-subtle)] pb-2">
             <h4 class="text-xs uppercase tracking-wider font-bold text-[var(--np-text)]">Alert Destinations</h4>
-            <p class="text-[0.65rem] text-[var(--np-text-dim)]">Where alert dispatches will be routed.</p>
+            <p class="text-[0.7rem] text-[var(--np-text-dim)]">Where alert dispatches will be routed.</p>
           </div>
 
           <div class="space-y-4">
@@ -518,7 +518,7 @@ onMounted(async () => {
               <div class="flex items-center justify-between">
                 <div class="flex flex-col">
                   <span class="text-xs font-semibold text-[var(--np-text)]">Email</span>
-                  <span class="text-[0.65rem] text-[var(--np-text-dim)]">Send alert summaries by email</span>
+                  <span class="text-[0.7rem] text-[var(--np-text-dim)]">Send alert summaries by email</span>
                 </div>
                 <ToggleSwitch v-model="notifications.email_enabled" :theme="theme" />
               </div>
@@ -537,14 +537,14 @@ onMounted(async () => {
         <div class="space-y-4">
           <div class="flex flex-col gap-1 border-b border-[var(--np-border-subtle)] pb-2">
             <h4 class="text-xs uppercase tracking-wider font-bold text-[var(--np-text)]">Dispatch Policy</h4>
-            <p class="text-[0.65rem] text-[var(--np-text-dim)]">When alerts fire.</p>
+            <p class="text-[0.7rem] text-[var(--np-text-dim)]">When alerts fire.</p>
           </div>
 
           <div class="grid grid-cols-1 gap-4">
             <div class="flex items-center justify-between">
               <div class="flex flex-col">
                 <span class="text-xs font-semibold text-[var(--np-text)]">Critical Vulnerability Alerts</span>
-                <span class="text-[0.65rem] text-[var(--np-text-dim)]">Fire instantly on CVSS Score >= 9.0</span>
+                <span class="text-[0.7rem] text-[var(--np-text-dim)]">Fire instantly on CVSS Score >= 9.0</span>
               </div>
               <ToggleSwitch v-model="notifications.alert_on_critical" :theme="theme" />
             </div>
@@ -552,7 +552,7 @@ onMounted(async () => {
             <div class="flex items-center justify-between">
               <div class="flex flex-col">
                 <span class="text-xs font-semibold text-[var(--np-text)]">Warning Anomalies</span>
-                <span class="text-[0.65rem] text-[var(--np-text-dim)]">Fire on minor warnings or state changes</span>
+                <span class="text-[0.7rem] text-[var(--np-text-dim)]">Fire on minor warnings or state changes</span>
               </div>
               <ToggleSwitch v-model="notifications.alert_on_warning" :theme="theme" />
             </div>
@@ -560,7 +560,7 @@ onMounted(async () => {
             <div class="flex items-center justify-between">
               <div class="flex flex-col">
                 <span class="text-xs font-semibold text-[var(--np-text)]">Host Offline Detection</span>
-                <span class="text-[0.65rem] text-[var(--np-text-dim)]">Notify when an active host goes offline</span>
+                <span class="text-[0.7rem] text-[var(--np-text-dim)]">Notify when an active host goes offline</span>
               </div>
               <ToggleSwitch v-model="notifications.alert_on_device_down" :theme="theme" />
             </div>
@@ -568,7 +568,7 @@ onMounted(async () => {
             <div class="flex items-center justify-between">
               <div class="flex flex-col">
                 <span class="text-xs font-semibold text-[var(--np-text)]">Daily Console Digest</span>
-                <span class="text-[0.65rem] text-[var(--np-text-dim)]">Send daily network metrics summary</span>
+                <span class="text-[0.7rem] text-[var(--np-text-dim)]">Send daily network metrics summary</span>
               </div>
               <ToggleSwitch v-model="notifications.daily_digest" :theme="theme" />
             </div>
@@ -616,7 +616,7 @@ onMounted(async () => {
                   <h4 class="np-info-card-title truncate">{{ net.name }}</h4>
                   <span
                     v-if="net.is_current"
-                    class="rounded px-1.5 py-0.5 text-[0.6rem] uppercase tracking-wide border border-emerald-500/35 bg-emerald-500/15 text-emerald-400"
+                    class="rounded px-1.5 py-0.5 text-[0.68rem] uppercase tracking-wide border border-emerald-500/35 bg-emerald-500/15 text-emerald-400"
                   >Current</span>
                 </div>
                 <p class="np-info-card-value mt-1">{{ net.cidr || 'unknown subnet' }}</p>
@@ -656,7 +656,7 @@ onMounted(async () => {
               >
                 Forget
               </button>
-              <span v-else class="text-[0.6rem] text-[var(--np-text-dim)]">attached now</span>
+              <span v-else class="text-[0.68rem] text-[var(--np-text-dim)]">attached now</span>
             </div>
           </div>
         </div>
@@ -680,7 +680,7 @@ onMounted(async () => {
             <input v-model="newSegment.cidr" class="np-neon-input rounded pl-3 pr-24 py-2 text-[0.8rem] font-mono w-full" placeholder="192.168.1.0/24" />
             <button
               type="button"
-              class="absolute right-1 text-[0.65rem] px-2 py-1 rounded bg-[var(--np-surface-hover)] border border-[var(--np-border-subtle)] text-[var(--np-accent-primary)] hover:text-[var(--np-text)] transition-all font-semibold disabled:opacity-50"
+              class="absolute right-1 text-[0.7rem] px-2 py-1 rounded bg-[var(--np-surface-hover)] border border-[var(--np-border-subtle)] text-[var(--np-accent-primary)] hover:text-[var(--np-text)] transition-all font-semibold disabled:opacity-50"
               @click="detectGateway"
               :disabled="isDetectingGateway"
             >
@@ -721,7 +721,7 @@ onMounted(async () => {
             <div class="flex flex-col gap-2 items-end">
               <button
                 type="button"
-                class="rounded px-2 py-1 text-[0.65rem] uppercase tracking-wide font-medium transition-all border animate-none"
+                class="rounded px-2 py-1 text-[0.7rem] uppercase tracking-wide font-medium transition-all border animate-none"
                 :disabled="!isAdmin"
                 @click="toggleSegmentScan(seg)"
                 :class="[
@@ -737,7 +737,7 @@ onMounted(async () => {
               <button
                 v-if="isAdmin"
                 type="button"
-                class="rounded px-2 py-1 text-[0.65rem] uppercase tracking-wide font-medium transition-all border border-red-500/40 text-red-500 hover:bg-red-600/20"
+                class="rounded px-2 py-1 text-[0.7rem] uppercase tracking-wide font-medium transition-all border border-red-500/40 text-red-500 hover:bg-red-600/20"
                 @click="deleteSegment(seg)"
               >
                 Delete
@@ -851,11 +851,11 @@ onMounted(async () => {
             <div v-for="b in backups" :key="b.filename" class="flex items-center justify-between gap-3 py-2.5 border-b border-[var(--np-border-subtle)] last:border-b-0">
               <div class="min-w-0">
                 <p class="font-mono text-[0.75rem] truncate np-info-card-value">{{ b.filename }}</p>
-                <p class="text-[0.65rem] np-info-card-text mt-1">{{ formatFileSize(b.size) }} · {{ new Date(b.created_at).toLocaleString() }}</p>
+                <p class="text-[0.7rem] np-info-card-text mt-1">{{ formatFileSize(b.size) }} · {{ new Date(b.created_at).toLocaleString() }}</p>
               </div>
               <div class="flex gap-2">
-                <button type="button" class="rounded px-2.5 py-1 text-[0.65rem] font-medium border border-[var(--np-border-subtle)] text-[var(--np-text)] hover:bg-[var(--np-surface-hover)]" @click="downloadBackup(b.filename)">Download</button>
-                <button type="button" class="rounded px-2.5 py-1 text-[0.65rem] font-medium border border-rose-500/40 text-rose-500 hover:bg-rose-500/20" @click="deleteBackup(b.filename)">Delete</button>
+                <button type="button" class="rounded px-2.5 py-1 text-[0.7rem] font-medium border border-[var(--np-border-subtle)] text-[var(--np-text)] hover:bg-[var(--np-surface-hover)]" @click="downloadBackup(b.filename)">Download</button>
+                <button type="button" class="rounded px-2.5 py-1 text-[0.7rem] font-medium border border-rose-500/40 text-rose-500 hover:bg-rose-500/20" @click="deleteBackup(b.filename)">Delete</button>
               </div>
             </div>
           </div>

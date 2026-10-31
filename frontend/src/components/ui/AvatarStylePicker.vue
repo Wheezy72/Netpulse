@@ -26,7 +26,7 @@ const emit = defineEmits<{ (e: "update:modelValue", value: string): void }>();
 
 <template>
   <div class="px-3 py-2.5">
-    <p class="mb-2 px-0.5 text-[0.55rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">
+    <p class="mb-2 px-0.5 text-[0.7rem] font-mono uppercase tracking-widest text-[var(--np-text-dim)]">
       Avatar style
     </p>
     <div class="flex items-center gap-1.5">

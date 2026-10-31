@@ -333,7 +333,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
         >
           <div class="min-w-0">
             <p
-              class="text-[0.65rem] uppercase tracking-widest"
+              class="text-[0.7rem] uppercase tracking-widest"
               :style="{ color: 'var(--np-text-dim)' }"
             >
               Device
@@ -467,7 +467,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
           <!-- Facts -->
           <section>
             <h3
-              class="mb-3 text-[0.65rem] uppercase tracking-widest"
+              class="mb-3 text-[0.7rem] uppercase tracking-widest"
               :style="{ color: 'var(--np-text-dim)' }"
             >
               Identity
@@ -514,14 +514,14 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
                 <dd class="text-right" :style="{ color: 'var(--np-text)' }">
                   <span
                     v-if="detail.device.verified"
-                    class="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[0.6rem] uppercase tracking-wide text-emerald-400"
+                    class="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[0.68rem] uppercase tracking-wide text-emerald-400"
                     :title="`Router tables (${detail.device.verified_source || 'unknown source'}) at ${absoluteTime(detail.device.verified_at)}`"
                   >
                     Router · {{ detail.device.verified_source || 'verified' }}
                   </span>
                   <span
                     v-else
-                    class="text-[0.6rem] uppercase tracking-wide"
+                    class="text-[0.68rem] uppercase tracking-wide"
                     :style="{ color: 'var(--np-text-dim)' }"
                     title="Only this console has seen it. The router did not list it on the last pull, so the row may be a stale probe answer."
                   >
@@ -535,7 +535,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
           <!-- Services -->
           <section>
             <div class="mb-3 flex items-baseline justify-between gap-3">
-              <h3 class="text-[0.65rem] uppercase tracking-widest" :style="{ color: 'var(--np-text-dim)' }">
+              <h3 class="text-[0.7rem] uppercase tracking-widest" :style="{ color: 'var(--np-text-dim)' }">
                 Services
               </h3>
               <span v-if="scanned" class="text-[0.7rem]" :style="{ color: 'var(--np-text-muted)' }">
@@ -585,7 +585,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
           <!-- Findings -->
           <section>
             <div class="mb-3 flex items-baseline justify-between gap-3">
-              <h3 class="text-[0.65rem] uppercase tracking-widest" :style="{ color: 'var(--np-text-dim)' }">
+              <h3 class="text-[0.7rem] uppercase tracking-widest" :style="{ color: 'var(--np-text-dim)' }">
                 Findings
               </h3>
               <span v-if="totalFindings" class="text-[0.7rem]" :style="{ color: 'var(--np-text-muted)' }">
@@ -597,7 +597,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
               <span
                 v-for="row in severityRows"
                 :key="row.severity"
-                class="rounded border px-2 py-0.5 font-mono text-[0.65rem] uppercase tracking-wide"
+                class="rounded border px-2 py-0.5 font-mono text-[0.7rem] uppercase tracking-wide"
                 :style="{ color: row.color, borderColor: row.color }"
               >
                 {{ row.severity }} {{ row.count }}
@@ -637,7 +637,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
 
           <!-- Activity -->
           <section>
-            <h3 class="mb-3 text-[0.65rem] uppercase tracking-widest" :style="{ color: 'var(--np-text-dim)' }">
+            <h3 class="mb-3 text-[0.7rem] uppercase tracking-widest" :style="{ color: 'var(--np-text-dim)' }">
               Activity
             </h3>
 
@@ -690,7 +690,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
 
           <!-- Metrics -->
           <section v-if="detail.metrics.length">
-            <h3 class="mb-3 text-[0.65rem] uppercase tracking-widest" :style="{ color: 'var(--np-text-dim)' }">
+            <h3 class="mb-3 text-[0.7rem] uppercase tracking-widest" :style="{ color: 'var(--np-text-dim)' }">
               Metrics
             </h3>
             <div
