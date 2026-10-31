@@ -450,7 +450,7 @@ onMounted(async () => {
         style="border-color: var(--np-glass-border);"
         :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
       >
-        <div class="px-3 py-1.5 border-b text-[0.6rem] uppercase tracking-widest text-[var(--np-text-dim)]/50" style="border-color: var(--np-border-subtle);">
+        <div class="px-3 py-1.5 border-b text-[0.6rem] uppercase tracking-widest text-[var(--np-text-dim)]" style="border-color: var(--np-border-subtle);">
           {{ contextMenu.device.ip_address }}
         </div>
         <button
@@ -496,7 +496,7 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Devices</span>
-          <span class="text-[0.7rem] text-[var(--np-text-dim)]/50">
+          <span class="text-[0.7rem] text-[var(--np-text-dim)]">
             Inventory of discovered hosts. Right-click any row for quick actions.
           </span>
         </div>
@@ -671,7 +671,7 @@ onMounted(async () => {
                   </span>
                 </div>
               </td>
-              <td class="px-3 hidden md:table-cell text-[var(--np-text-dim)]/50" :class="'py-2.5'">
+              <td class="px-3 hidden md:table-cell text-[var(--np-text-dim)]" :class="'py-2.5'">
                 {{ d.zone || '—' }}
               </td>
               <td class="px-3 text-center" :class="'py-2.5'" @click.stop>
@@ -694,7 +694,7 @@ onMounted(async () => {
               </td>
             </tr>
             <tr v-if="filteredDevices.length === 0">
-              <td colspan="4" class="px-3 py-6 text-center text-[var(--np-text-dim)]/30">
+              <td colspan="4" class="px-3 py-6 text-center text-[var(--np-text-dim)]">
                 No devices found.
               </td>
             </tr>

@@ -35,7 +35,7 @@ instance beyond localhost, do at least this:
 |---|---|
 | Set `SECRET_KEY` | Sessions and tokens are signed with it; the placeholder is public knowledge. |
 | Set `SETUP_TOKEN` **before** first start | Otherwise whoever reaches the port first can claim the instance. |
-| Terminate TLS in front of it | Passwords and session cookies otherwise cross the network in clear text. |
+| Terminate TLS in front of it | Passwords and session cookies otherwise cross the network in clear text. HSTS is sent only when a request arrives over HTTPS. |
 | Keep `TRUST_PROXY_HEADERS=false` unless a proxy sets them | Otherwise `X-Forwarded-For` lets a client spoof its address past rate limiting. |
 | Give it a network account, not a domain admin | Discovery needs raw sockets, not credentials. Router and SNMP credentials are stored to run verification and playbooks; scope them narrowly. |
 
@@ -60,8 +60,9 @@ Worth knowing, because these are deliberate and not defects:
 - Password-reset tokens stored as SHA-256 hashes with a one-hour expiry.
 - Redis-backed rate limiting on authentication.
 - CSP without `unsafe-eval`, `X-Content-Type-Options: nosniff`,
-  `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy` and a restrictive
-  `Permissions-Policy`.
+  `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, a restrictive
+  `Permissions-Policy`, `Cross-Origin-Opener-Policy`,
+  `Cross-Origin-Resource-Policy`, and HSTS when the request arrives over TLS.
 - API responses are `no-store, private`; the SPA is the only HTML the server
   returns with a CSP.
 - No public sign-up: an admin creates accounts, and invited users must change

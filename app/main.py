@@ -161,9 +161,29 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
+        # X-XSS-Protection is deliberately absent: the legacy auditor it
+        # switches on is gone from current browsers, and where it survives
+        # its "block" mode can be abused to break the page. The CSP below is
+        # what actually prevents script injection.
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        response.headers["Permissions-Policy"] = (
+            "geolocation=(), microphone=(), camera=(), payment=(), usb=(), "
+            "serial=(), midi=(), interest-cohort=()"
+        )
+        # Cheap isolation: neither another origin retaining a handle on this
+        # window nor embedding these responses as subresources.
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+        # HSTS on a plain-HTTP dev server would pin the browser to a scheme
+        # it does not speak, so it is sent only when the request already
+        # arrived over TLS (directly or through a reverse proxy).
+        if (
+            request.url.scheme == "https"
+            or request.headers.get("x-forwarded-proto", "").lower() == "https"
+        ):
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains"
+            )
 
         # Only the document needs a policy; API payloads are not a browsing
         # context, and attaching it to downloads does nothing.

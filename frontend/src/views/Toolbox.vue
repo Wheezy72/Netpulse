@@ -577,7 +577,7 @@ watch(
         <div v-if="activeTab === 'scanning'" class="space-y-5">
           <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
             <div class="md:col-span-2">
-              <label class="block text-[0.7rem] uppercase tracking-widest text-[var(--np-text-dim)]/50 mb-1.5">Target Address</label>
+              <label class="block text-[0.7rem] uppercase tracking-widest text-[var(--np-text-dim)] mb-1.5">Target Address</label>
               <input
                 v-model="target"
                 type="text"
@@ -586,10 +586,10 @@ watch(
               />
             </div>
             <div>
-              <label class="block text-[0.7rem] uppercase tracking-widest text-[var(--np-text-dim)]/50 mb-1.5">Settings</label>
+              <label class="block text-[0.7rem] uppercase tracking-widest text-[var(--np-text-dim)] mb-1.5">Settings</label>
               <div class="flex items-center gap-2 mt-2">
                 <input id="save" v-model="saveResults" type="checkbox" class="rounded accent-[var(--np-accent)]" style="border-color: var(--np-border); background: var(--np-surface)" />
-                <label for="save" class="text-xs text-[var(--np-text-dim)]/60">Log results to database</label>
+                <label for="save" class="text-xs text-[var(--np-text-dim)]">Log results to database</label>
               </div>
             </div>
           </div>
@@ -601,10 +601,10 @@ watch(
               <div class="flex items-start justify-between gap-3">
                 <div>
                   <h3 class="text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">Last scan findings</h3>
-                  <p v-if="scanMeta" class="mt-1 font-mono text-[0.65rem] text-[var(--np-text-dim)]/70">
+                  <p v-if="scanMeta" class="mt-1 font-mono text-[0.65rem] text-[var(--np-text-dim)]">
                     {{ scanMeta.target }} · {{ scanMeta.scan_type }}
                   </p>
-                  <p v-else class="mt-1 text-[0.65rem] text-[var(--np-text-dim)]/60">
+                  <p v-else class="mt-1 text-[0.65rem] text-[var(--np-text-dim)]">
                     No scan loaded. Pick one from the list on the right.
                   </p>
                 </div>
@@ -628,18 +628,18 @@ watch(
                 </span>
               </div>
 
-              <p v-if="scanMeta && scanRunning" class="text-[0.65rem] text-[var(--np-text-dim)]/70 animate-pulse">
+              <p v-if="scanMeta && scanRunning" class="text-[0.65rem] text-[var(--np-text-dim)] animate-pulse">
                 Running — findings appear here as soon as nmap finishes.
               </p>
 
-              <div v-else-if="scanMeta && scanHosts.length === 0" class="text-[0.65rem] text-[var(--np-text-dim)]/70">
+              <div v-else-if="scanMeta && scanHosts.length === 0" class="text-[0.65rem] text-[var(--np-text-dim)]">
                 No hosts answered. That is a finding too: nothing on this target responded to the probe.
               </div>
 
               <div v-else-if="scanHosts.length" class="overflow-x-auto custom-scrollbar">
                 <table class="w-full text-[0.65rem] font-mono text-left">
                   <thead>
-                    <tr class="text-[0.55rem] uppercase tracking-wider text-[var(--np-text-dim)]/60 border-b border-[var(--np-border-subtle)]">
+                    <tr class="text-[0.55rem] uppercase tracking-wider text-[var(--np-text-dim)] border-b border-[var(--np-border-subtle)]">
                       <th class="py-1.5 pr-2">Host</th>
                       <th class="py-1.5 pr-2">Name</th>
                       <th class="py-1.5 pr-2 text-right">Latency</th>
@@ -663,15 +663,15 @@ watch(
                       </tr>
                       <tr v-if="expandedHost === host.address">
                         <td colspan="4" class="pb-2">
-                          <p v-if="host.ports.length === 0" class="text-[0.6rem] text-[var(--np-text-dim)]/60">
+                          <p v-if="host.ports.length === 0" class="text-[0.6rem] text-[var(--np-text-dim)]">
                             No port detail (ping sweep).
                           </p>
                           <ul v-else class="space-y-0.5">
                             <li v-for="p in host.ports" :key="p.port + p.protocol" class="flex gap-2 text-[0.6rem]">
                               <span class="w-14 shrink-0 text-[var(--np-text)]">{{ p.port }}/{{ p.protocol }}</span>
-                              <span class="w-14 shrink-0" :class="p.state === 'open' ? 'np-brand-text' : 'text-[var(--np-text-dim)]/60'">{{ p.state }}</span>
+                              <span class="w-14 shrink-0" :class="p.state === 'open' ? 'np-brand-text' : 'text-[var(--np-text-dim)]'">{{ p.state }}</span>
                               <span class="text-[var(--np-text-muted)]">{{ p.service }}</span>
-                              <span class="truncate text-[var(--np-text-dim)]/60" :title="p.version">{{ p.version }}</span>
+                              <span class="truncate text-[var(--np-text-dim)]" :title="p.version">{{ p.version }}</span>
                             </li>
                           </ul>
                         </td>
@@ -689,7 +689,7 @@ watch(
                   {{ historyLoading ? '…' : 'Refresh' }}
                 </button>
               </div>
-              <p v-if="scanHistory.length === 0" class="text-[0.65rem] text-[var(--np-text-dim)]/60">
+              <p v-if="scanHistory.length === 0" class="text-[0.65rem] text-[var(--np-text-dim)]">
                 No scans yet.
               </p>
               <ul v-else class="max-h-64 overflow-y-auto custom-scrollbar space-y-1">
@@ -705,7 +705,7 @@ watch(
                         {{ job.status }}
                       </span>
                     </div>
-                    <div class="text-[0.55rem] font-mono uppercase tracking-wider text-[var(--np-text-dim)]/60">
+                    <div class="text-[0.55rem] font-mono uppercase tracking-wider text-[var(--np-text-dim)]">
                       {{ job.scan_type }} · {{ job.result_summary?.hosts_up ?? 0 }} up ·
                       {{ job.result_summary?.open_ports ?? 0 }} ports
                     </div>
@@ -721,7 +721,7 @@ watch(
             <div class="p-4 rounded-xl bg-[var(--np-thead-bg)] border border-[var(--np-border-subtle)] space-y-4">
               <h3 class="text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">Targeted scans</h3>
               <div>
-                <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)]/50 mb-1.5">Preset</label>
+                <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)] mb-1.5">Preset</label>
                 <select v-model="preset" class="np-neon-input w-full px-3 py-2 text-sm bg-transparent outline-none">
                   <option value="ping">Ping Sweep (-sn)</option>
                   <option value="quick">Quick Ports (-F)</option>
@@ -733,7 +733,7 @@ watch(
               </div>
 
               <div v-if="preset === 'custom'">
-                <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)]/50 mb-1.5">Custom Nmap Flags</label>
+                <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)] mb-1.5">Custom Nmap Flags</label>
                 <input v-model="customCommand" type="text" class="np-neon-input w-full px-3 py-2 text-sm font-mono" />
               </div>
 
@@ -752,7 +752,7 @@ watch(
             <div class="p-4 rounded-xl bg-[var(--np-thead-bg)] border border-[var(--np-border-subtle)] space-y-4">
               <h3 class="text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">Playbooks</h3>
               <div>
-                <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)]/50 mb-1.5">Playbook</label>
+                <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)] mb-1.5">Playbook</label>
                 <select v-model="selectedPlaybookId" class="np-neon-input w-full px-3 py-2 text-sm bg-transparent outline-none" :disabled="playbooksLoading">
                   <option v-for="pb in playbooks" :key="pb.id" :value="pb.id">
                     {{ pb.category }} — {{ pb.name }}
@@ -765,8 +765,8 @@ watch(
                   <span class="font-bold text-[var(--np-text)]">{{ selectedPlaybook.name }}</span>
                   <span class="font-mono np-brand-text uppercase">{{ selectedPlaybook.risk_level }} RISK</span>
                 </div>
-                <p class="text-[var(--np-text-dim)]/50 mt-1">{{ selectedPlaybook.description }}</p>
-                <p class="font-mono mt-2 text-[10px] text-[var(--np-text-muted)]/60">Args: {{ selectedPlaybook.nmap_args }}</p>
+                <p class="text-[var(--np-text-dim)] mt-1">{{ selectedPlaybook.description }}</p>
+                <p class="font-mono mt-2 text-[10px] text-[var(--np-text-muted)]">Args: {{ selectedPlaybook.nmap_args }}</p>
               </div>
 
               <div class="flex justify-end pt-2">
@@ -793,16 +793,16 @@ watch(
             <div class="p-4 rounded-xl bg-[var(--np-thead-bg)] border border-[var(--np-border-subtle)] space-y-4">
               <div>
                 <h3 class="text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">TCP Handshake Probe</h3>
-                <p class="text-[0.65rem] text-[var(--np-text-dim)]/50 mt-1">Measures exact TCP connection response times to verify port accessibility.</p>
+                <p class="text-[0.65rem] text-[var(--np-text-dim)] mt-1">Measures exact TCP connection response times to verify port accessibility.</p>
               </div>
 
               <div class="grid grid-cols-3 gap-3">
                 <div class="col-span-2">
-                  <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)]/50 mb-1">Host / IP</label>
+                  <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)] mb-1">Host / IP</label>
                   <input v-model="tcpHost" type="text" placeholder="10.0.0.1" class="np-neon-input w-full px-3 py-2 text-xs" />
                 </div>
                 <div>
-                  <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)]/50 mb-1">Port</label>
+                  <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)] mb-1">Port</label>
                   <input v-model.number="tcpPort" type="number" min="1" max="65535" class="np-neon-input w-full px-3 py-2 text-xs" />
                 </div>
               </div>
@@ -832,7 +832,7 @@ watch(
               <div class="flex items-center justify-between">
                 <div>
                   <h3 class="text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">Live MTR Traceroute</h3>
-                  <p class="text-[0.65rem] text-[var(--np-text-dim)]/50 mt-1">Real-time hop latency analysis.</p>
+                  <p class="text-[0.65rem] text-[var(--np-text-dim)] mt-1">Real-time hop latency analysis.</p>
                 </div>
                 <div class="flex gap-2">
                   <input v-model="mtrTarget" type="text" placeholder="8.8.8.8" class="np-neon-input px-3 py-1.5 text-xs w-36 font-mono" :disabled="mtrActive" />
@@ -857,11 +857,11 @@ watch(
                     <tr v-for="hop in mtrHops" :key="hop.hop" class="hover:bg-[var(--np-surface-elevated)]">
                       <td class="px-2 py-1.5 text-[var(--np-text-dim)]">{{ hop.hop }}</td>
                       <td class="px-2 py-1.5 text-[var(--np-text)] truncate max-w-[120px]" :title="hop.host">{{ hop.host }}</td>
-                      <td class="px-2 py-1.5 text-right" :class="hop.loss_pct > 0 ? 'text-red-400' : 'text-[var(--np-text-muted)]/60'">{{ hop.loss_pct }}%</td>
+                      <td class="px-2 py-1.5 text-right" :class="hop.loss_pct > 0 ? 'text-red-400' : 'text-[var(--np-text-muted)]'">{{ hop.loss_pct }}%</td>
                       <td class="px-2 py-1.5 text-right np-brand-text font-bold">{{ hop.avg_ms }}</td>
                     </tr>
                     <tr v-if="mtrHops.length === 0 && !mtrActive">
-                      <td colspan="4" class="text-center py-4 text-[var(--np-text-dim)]/30">Traceroute idle. Press Start.</td>
+                      <td colspan="4" class="text-center py-4 text-[var(--np-text-dim)]">Traceroute idle. Press Start.</td>
                     </tr>
                     <tr v-else-if="mtrHops.length === 0 && mtrActive">
                       <td colspan="4" class="text-center py-4 np-brand-text/50 animate-pulse">Running traceroute sweep…</td>
@@ -885,7 +885,7 @@ watch(
               <h3 class="text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">Automation scripts</h3>
               
               <div>
-                <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)]/50 mb-1.5">Script</label>
+                <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)] mb-1.5">Script</label>
                 <select v-model="selectedScript" class="np-neon-input w-full px-3 py-2 text-sm bg-transparent outline-none">
                   <option v-for="s in availableScripts" :key="s.name" :value="s.name">{{ s.name }}</option>
                   <option v-if="availableScripts.length === 0" disabled>No scripts allowed</option>
@@ -893,7 +893,7 @@ watch(
               </div>
 
               <div>
-                <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)]/50 mb-1.5">Parameters (JSON)</label>
+                <label class="block text-[0.65rem] uppercase tracking-wider text-[var(--np-text-dim)] mb-1.5">Parameters (JSON)</label>
                 <textarea
                   v-model="scriptParams"
                   rows="4"
@@ -901,7 +901,7 @@ watch(
                   placeholder='{ "target": "192.168.1.10" }'
                   spellcheck="false"
                 ></textarea>
-                <p class="mt-1 text-[0.6rem] text-[var(--np-text-dim)]/70">
+                <p class="mt-1 text-[0.6rem] text-[var(--np-text-dim)]">
                   Optional JSON arguments, for example {"target": "192.168.1.10"}.
                 </p>
               </div>
@@ -942,31 +942,64 @@ watch(
 
     <!-- Collapsible Live Terminal Drawer at Bottom -->
     <div 
-      class="fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 bg-[var(--np-glass-bg)] border-t border-[var(--np-border)] backdrop-blur-lg shadow-2xl flex flex-col"
-      :style="{ transform: isTerminalOpen ? 'translateY(0)' : 'translateY(calc(100% - 40px))', height: '280px' }"
+      class="fixed bottom-0 left-0 right-0 z-50 flex flex-col overflow-hidden border-t border-[var(--np-border)] bg-[var(--np-glass-bg)] shadow-2xl backdrop-blur-lg transition-transform duration-300"
+      :style="{ transform: isTerminalOpen ? 'translateY(0)' : 'translateY(calc(100% - 34px))', height: '340px' }"
     >
-      <!-- Drag/Toggle strip -->
-      <div 
-        @click="isTerminalOpen = !isTerminalOpen" 
-        class="h-10 px-6 flex items-center justify-between cursor-pointer border-b border-[var(--np-border-subtle)] select-none bg-[var(--np-surface-elevated)]"
+      <!-- One title bar for the whole panel. The toggle is a real button
+           rather than the entire strip, so selecting output text no longer
+           folds the console shut. -->
+      <div
+        class="flex h-[34px] shrink-0 items-center justify-between gap-3 border-b border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)] px-3 select-none"
       >
-        <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">
-          <span class="w-1.5 h-1.5 rounded-full" :class="scanRunning ? 'np-brand-bg animate-pulse' : 'bg-[var(--np-text-dim)]/30'"></span>
-          <span>Live Nmap &amp; Diagnostic Console</span>
+        <div class="flex min-w-0 items-center gap-2">
+          <span class="flex shrink-0 items-center gap-[3px]" aria-hidden="true">
+            <span class="h-2 w-2 rounded-full bg-[var(--np-danger)]/70"></span>
+            <span class="h-2 w-2 rounded-full bg-[var(--np-warning)]/70"></span>
+            <span class="h-2 w-2 rounded-full bg-[var(--np-success)]/70"></span>
+          </span>
+          <span class="truncate font-mono text-[0.7rem] text-[var(--np-text)]">{{ terminalTitle }}</span>
+          <span
+            class="shrink-0 rounded px-1.5 py-px font-mono text-[0.55rem] uppercase tracking-[0.15em]"
+            :class="scanRunning ? 'np-brand-soft np-brand-text' : 'bg-[var(--np-text-dim)]/10 text-[var(--np-text-dim)]'"
+          >
+            {{ scanRunning ? 'running' : 'idle' }}
+          </span>
         </div>
-        <button class="text-[10px] font-mono text-[var(--np-text-dim)] hover:np-brand-text">
-          {{ isTerminalOpen ? '[ Minimize Console ]' : '[ Expand Console ]' }}
+        <button
+          type="button"
+          class="flex h-6 shrink-0 items-center gap-1 rounded px-2 font-mono text-[0.6rem] uppercase tracking-[0.15em] text-[var(--np-text-dim)] transition-colors hover:bg-[var(--np-surface-hover)] hover:text-[var(--np-text)]"
+          :title="isTerminalOpen ? 'Collapse console' : 'Expand console'"
+          @click.stop="isTerminalOpen = !isTerminalOpen"
+        >
+          {{ isTerminalOpen ? 'Collapse' : 'Expand' }}
+          <span class="transition-transform duration-200" :class="isTerminalOpen ? 'rotate-180' : ''">&#9662;</span>
         </button>
       </div>
 
-      <!-- Real-time terminal output component -->
-      <div class="flex-1 min-h-0 bg-[var(--np-surface)]">
+      <!-- Real-time terminal output component. chromeless: the bar above is
+           this panel's only header. -->
+      <div class="min-h-0 flex-1 overflow-hidden bg-[var(--np-surface)] px-2 pb-1 pt-1">
         <LiveTerminal
           :title="terminalTitle"
           :stream-url="terminalStreamUrl"
           :theme="props.theme"
           :token="terminalToken"
+          chromeless
         />
+      </div>
+
+      <!-- Status bar, the way a terminal panel reports itself. -->
+      <div
+        class="flex h-6 shrink-0 items-center justify-between gap-3 border-t border-[var(--np-border-subtle)] bg-[var(--np-surface-elevated)] px-3 font-mono text-[0.55rem] uppercase tracking-[0.15em] text-[var(--np-text-dim)]"
+      >
+        <span class="truncate">nmap &middot; websocket stream</span>
+        <span class="flex shrink-0 items-center gap-1.5">
+          <span
+            class="h-1.5 w-1.5 rounded-full"
+            :class="scanRunning ? 'np-brand-bg animate-pulse' : 'bg-[var(--np-text-dim)]'"
+          ></span>
+          {{ scanRunning ? 'receiving' : 'idle' }}
+        </span>
       </div>
     </div>
 
@@ -979,13 +1012,13 @@ watch(
   height: 5px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.01);
+  background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(168, 85, 247, 0.2);
+  background: color-mix(in srgb, var(--np-text-dim) 35%, transparent);
   border-radius: 4px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(168, 85, 247, 0.4);
+  background: color-mix(in srgb, var(--np-text-dim) 60%, transparent);
 }
 </style>

@@ -11,6 +11,8 @@ const props = defineProps<{
   theme: "nightshade" | "sysadmin";
   /** Sent as the WebSocket subprotocol so it stays out of URLs and logs. */
   token?: string | null;
+  /** Let the host draw the header: one title bar per panel, never two. */
+  chromeless?: boolean;
 }>();
 
 const container = ref<HTMLDivElement | null>(null);
@@ -295,8 +297,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="np-panel h-full flex flex-col">
-    <div class="flex items-center justify-between px-4 py-3" style="border-bottom: 1px solid var(--np-border-subtle);">
+  <div class="np-panel h-full flex flex-col border-0 rounded-none">
+    <div
+      v-if="!chromeless"
+      class="flex items-center justify-between px-4 py-3"
+      style="border-bottom: 1px solid var(--np-border-subtle);"
+    >
       <h3 class="text-sm font-semibold" style="color: var(--np-text);">{{ title }}</h3>
       <div class="text-[0.7rem]" style="color: var(--np-text-dim);">Live Stream</div>
     </div>

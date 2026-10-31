@@ -1239,12 +1239,29 @@ async def upsert_discovered_hosts(
             device.verified_at = None
             device.verified_source = None
 
+        # Facts derived from the answering hardware have to follow the
+        # hardware. A NIC swap keeps the address and the hostname, so this is
+        # correctly the same machine — but the vendor/type/OS were read off the
+        # card that has since been unplugged, and each line below used
+        # ``stored or observed``. That means a label taken from, say, a USB
+        # Wi-Fi adapter outlived the evidence for it and no later sweep could
+        # ever revise it: the inventory kept asserting it forever. The current
+        # sweep now has the final word, while a sweep that learned nothing new
+        # (a shallow ARP pass carries no vendor or type) still leaves what is
+        # already known intact.
         if host.mac_address and device.mac_address != host.mac_address:
+            logger.info(
+                "NIC changed on %s (%s -> %s): following the new hardware",
+                host.ip_address,
+                device.mac_address,
+                host.mac_address,
+            )
             device.mac_address = host.mac_address
+
         device.hostname = device.hostname or host.hostname
-        device.vendor = device.vendor or host.vendor
-        device.device_type = device.device_type or host.device_type
-        device.os = device.os or host.os
+        device.vendor = host.vendor or device.vendor
+        device.device_type = host.device_type or device.device_type
+        device.os = host.os or device.os
         device.last_seen = observed_at
         if host.is_gateway:
             device.is_gateway = True

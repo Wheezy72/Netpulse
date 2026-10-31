@@ -139,8 +139,8 @@
   --np-accent-muted: #475569;     /* Slate 600 */
 
   --np-text: #09090b;             /* Charcoal - high contrast text */
-  --np-text-muted: #334155;       /* Slate 700 — readable secondary text */
-  --np-text-dim: #475569;         /* Slate 600 — captions stay comfortably legible */
+  --np-text-muted: #1e293b;       /* Slate 800 — secondary text on white */
+  --np-text-dim: #334155;         /* Slate 700 — captions, still past AA at 65% */
 
   --np-border: rgba(15, 23, 42, 0.25);        /* Higher contrast border */
   --np-border-subtle: rgba(15, 23, 42, 0.15); /* More visible subtle border */
@@ -1083,12 +1083,7 @@ tbody tr:hover {
    needs real ink, so the variable is overridden here with !important. Keeping
    it in the global sheet means the fix survives the view's own theming. */
 .np-map--light {
-  --map-grid: rgba(0, 0, 0, 0.32) !important;
-}
-
-/* Keep the topology's radar grid quiet but visible on a white canvas. */
-.np-map--light {
-  --map-grid: rgba(15, 23, 42, 0.12) !important;
+  --map-grid: rgba(15, 23, 42, 0.16) !important;
 }
 
 /* ============================================

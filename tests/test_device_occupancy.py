@@ -136,3 +136,80 @@ class TestNewOccupantResetsTheRow:
         device = (await db_session.execute(select(Device))).scalars().one()
         assert device.hostname == "Immortan"
         assert device.device_type == "laptop"
+
+
+class TestDerivedFactsFollowTheHardware:
+    """The sweep decides the label; a stale one cannot outlive its evidence.
+
+    Reported symptom: a USB Wi-Fi adapter was used once and its vendor block
+    landed in the inventory. Every later sweep of the built-in NIC still
+    described the machine from that adapter, because the merge only ever
+    filled blanks — ``stored or observed`` — so nothing could revise a fact.
+    """
+
+    async def test_a_new_sweep_replaces_the_old_cards_description(self, db_session) -> None:
+        from sqlalchemy import select
+
+        from app.models.device import Device
+
+        await upsert_discovered_hosts(
+            db_session,
+            [
+                DiscoveredHost(
+                    ip_address="192.168.1.10",
+                    mac_address="50C7BF112233",  # the USB adapter answers first
+                    hostname="Immortan",
+                    vendor="TP-Link",
+                    device_type="Router",
+                    os="Linux/Embedded",
+                )
+            ],
+        )
+
+        # Adapter unplugged; the built-in NIC answers, same address and name,
+        # and the sweep derives a different description from it.
+        await upsert_discovered_hosts(
+            db_session,
+            [
+                DiscoveredHost(
+                    ip_address="192.168.1.10",
+                    mac_address="FCA47A112233",
+                    hostname="Immortan",
+                    vendor="Intel",
+                    device_type="Windows Workstation",
+                    os="Windows",
+                )
+            ],
+        )
+
+        device = (await db_session.execute(select(Device))).scalars().one()
+        assert device.mac_address == "FCA47A112233"
+        assert device.vendor == "Intel"
+        assert device.device_type == "Windows Workstation"
+        assert device.os == "Windows"
+
+    async def test_a_silent_sweep_keeps_the_known_description(self, db_session) -> None:
+        from sqlalchemy import select
+
+        from app.models.device import Device
+
+        await upsert_discovered_hosts(
+            db_session,
+            [
+                DiscoveredHost(
+                    ip_address="192.168.1.13",
+                    mac_address="FCA47A112233",
+                    hostname="Immortan",
+                    device_type="Windows Workstation",
+                    os="Windows",
+                )
+            ],
+        )
+        # A shallow ARP-only pass: same card, nothing observed but the address.
+        await upsert_discovered_hosts(
+            db_session, [DiscoveredHost(ip_address="192.168.1.13", mac_address="FCA47A112233")]
+        )
+
+        device = (await db_session.execute(select(Device))).scalars().one()
+        assert device.device_type == "Windows Workstation"
+        assert device.os == "Windows"

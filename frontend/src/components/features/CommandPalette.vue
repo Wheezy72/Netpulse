@@ -144,7 +144,7 @@ function hoverCmd(cmd: Command) {
               v-model="query"
               type="text"
               placeholder="Search commands, views, actions…"
-              class="flex-1 bg-transparent outline-none text-sm placeholder:text-[var(--np-text-dim)]/30 font-sans"
+              class="flex-1 bg-transparent outline-none text-sm placeholder:text-[var(--np-text-dim)] font-sans"
               style="color: var(--np-text);"
               @keydown.up.prevent="selectUp"
               @keydown.down.prevent="selectDown"

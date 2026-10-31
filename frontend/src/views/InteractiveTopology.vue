@@ -163,6 +163,24 @@ const { fitView, onNodesInitialized } = useVueFlow();
 onNodesInitialized(() => {
   fitView({ padding: 0.06, duration: 300 });
 });
+
+// The graph fitted itself once, on load, and never again. Any later layout
+// change — a window resize, a collapsed rail, a narrow viewport where the
+// three-column grid stacks — left every node outside the map's box, so the map
+// looked empty with the orbs parked off-canvas. Observe the map itself (not the
+// window) and refit when its box changes. A selected node means the operator is
+// inspecting something: their zoom wins, so the refit stands down.
+const mapEl = ref<HTMLElement | null>(null);
+let mapResizeObserver: ResizeObserver | null = null;
+let fitTimer: number | undefined;
+
+function scheduleRefit(): void {
+  if (fitTimer !== undefined) window.clearTimeout(fitTimer);
+  fitTimer = window.setTimeout(() => {
+    if (selectedNodeId.value != null || !flowNodes.value.length) return;
+    fitView({ padding: 0.06, duration: 200 });
+  }, 160);
+}
 function deviceOf(node: Node): TopologyNode {
   return node.data?.device as TopologyNode;
 }
@@ -630,7 +648,7 @@ async function loadTopology(background = false): Promise<void> {
       target: String(e.target),
       type: "straight",
       class: "np-flow-edge",
-      style: { stroke: "var(--map-edge, #14b8a6)", strokeWidth: 1.25 },
+      style: { stroke: "var(--map-edge, #14b8a6)", strokeWidth: 1.5 },
     }));
 
     const layout = layoutRadial(nodes);
@@ -731,6 +749,7 @@ async function loadZones(): Promise<void> {
 }
 
 function handleResize() {
+  scheduleRefit();
   if (term && fitAddon) {
     fitAddon.fit();
     ws?.send(JSON.stringify({
@@ -763,9 +782,16 @@ onMounted(() => {
     }
   }, 15_000);
   window.addEventListener("resize", handleResize);
+  if (mapEl.value) {
+    mapResizeObserver = new ResizeObserver(scheduleRefit);
+    mapResizeObserver.observe(mapEl.value);
+  }
 });
 
 onBeforeUnmount(() => {
+  if (fitTimer !== undefined) window.clearTimeout(fitTimer);
+  mapResizeObserver?.disconnect();
+  mapResizeObserver = null;
   if (topologyRefreshTimer !== undefined) window.clearInterval(topologyRefreshTimer);
   if (pingTimer !== null) window.clearInterval(pingTimer);
   window.removeEventListener("resize", handleResize);
@@ -778,7 +804,7 @@ onBeforeUnmount(() => {
     <!-- Page heading -->
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <p class="text-[0.6rem] font-mono uppercase tracking-[0.35em] text-[var(--np-text-dim)]">Network map</p>
+        <p class="text-[0.65rem] font-mono uppercase tracking-[0.28em] text-[var(--np-text-dim)]">Network map</p>
         <h1 class="mt-1 text-2xl font-bold tracking-tight text-[var(--np-text)]">Interactive topology</h1>
         <p class="mt-1 text-xs text-[var(--np-text-muted)]">
           Discovered hosts, drawn from the uplink outwards.
@@ -827,6 +853,7 @@ onBeforeUnmount(() => {
       <div
         class="np-map glass-card lg:col-span-2 flex flex-col overflow-hidden relative h-[460px] sm:h-[560px] lg:h-[calc(100vh-17rem)]"
         :class="{ 'np-map--light': !isNightshade }"
+        ref="mapEl"
       >
         <VueFlow
           :nodes="flowNodes"
@@ -899,11 +926,11 @@ onBeforeUnmount(() => {
 
         <!-- Map key -->
         <div class="absolute left-3 top-3 z-10 hidden items-center gap-3 rounded-full border border-[var(--np-border-subtle)] bg-[var(--np-glass-bg)]/85 px-3.5 py-1.5 backdrop-blur-md pointer-events-none sm:flex">
-          <span class="flex items-center gap-1.5 text-[0.6rem] font-medium text-[var(--np-text-muted)]"><span class="np-legend-dot np-legend-dot--gw" /> Gateway</span>
-          <span class="flex items-center gap-1.5 text-[0.6rem] font-medium text-[var(--np-text-muted)]"><span class="np-legend-dot np-legend-dot--infra" /> Infrastructure</span>
-          <span class="flex items-center gap-1.5 text-[0.6rem] font-medium text-[var(--np-text-muted)]"><span class="np-legend-dot" /> Endpoint</span>
-          <span class="flex items-center gap-1.5 text-[0.6rem] font-medium text-[var(--np-text-muted)]"><span class="np-legend-dot np-legend-dot--danger" /> Alert</span>
-          <span class="flex items-center gap-1.5 text-[0.6rem] font-medium text-[var(--np-text-muted)]"><span class="np-legend-dot np-legend-dot--offline" /> Not responding</span>
+          <span class="flex items-center gap-1.5 text-[0.7rem] font-semibold text-[var(--np-text-muted)]"><span class="np-legend-dot np-legend-dot--gw" /> Gateway</span>
+          <span class="flex items-center gap-1.5 text-[0.7rem] font-semibold text-[var(--np-text-muted)]"><span class="np-legend-dot np-legend-dot--infra" /> Infrastructure</span>
+          <span class="flex items-center gap-1.5 text-[0.7rem] font-semibold text-[var(--np-text-muted)]"><span class="np-legend-dot" /> Endpoint</span>
+          <span class="flex items-center gap-1.5 text-[0.7rem] font-semibold text-[var(--np-text-muted)]"><span class="np-legend-dot np-legend-dot--danger" /> Alert</span>
+          <span class="flex items-center gap-1.5 text-[0.7rem] font-semibold text-[var(--np-text-muted)]"><span class="np-legend-dot np-legend-dot--offline" /> Not responding</span>
         </div>
 
         <!-- Live counters -->
@@ -1085,7 +1112,7 @@ onBeforeUnmount(() => {
 
                 <div class="space-y-3.5">
                   <div>
-                    <label class="block text-[0.6rem] uppercase tracking-wider mb-1.5 font-mono text-[var(--np-text-dim)]">Username</label>
+                    <label class="block text-[0.68rem] uppercase tracking-wider mb-1.5 font-mono text-[var(--np-text-dim)]">Username</label>
                     <input
                       v-model="sshUsername"
                       type="text"
@@ -1095,7 +1122,7 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div>
-                    <label class="block text-[0.6rem] uppercase tracking-wider mb-1.5 font-mono text-[var(--np-text-dim)]">Password</label>
+                    <label class="block text-[0.68rem] uppercase tracking-wider mb-1.5 font-mono text-[var(--np-text-dim)]">Password</label>
                     <input
                       v-model="sshPassword"
                       type="password"
@@ -1105,7 +1132,7 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div>
-                    <label class="block text-[0.6rem] uppercase tracking-wider mb-1.5 font-mono text-[var(--np-text-dim)]">Port</label>
+                    <label class="block text-[0.68rem] uppercase tracking-wider mb-1.5 font-mono text-[var(--np-text-dim)]">Port</label>
                     <input
                       v-model="sshPort"
                       type="number"
@@ -1237,7 +1264,7 @@ onBeforeUnmount(() => {
             <span class="absolute inset-3 rounded-full border border-[var(--np-accent-border)]" />
             <span class="h-1.5 w-1.5 rounded-full bg-[var(--np-accent)] shadow-[0_0_12px_var(--np-accent-glow)]" />
           </div>
-          <span class="font-mono text-[0.65rem] uppercase tracking-[0.2em] text-[var(--np-text-dim)]">
+          <span class="font-mono text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-[var(--np-text-muted)]">
             Select a node to inspect
           </span>
           <p class="mt-2 max-w-[16rem] text-xs leading-relaxed text-[var(--np-text-muted)]">
@@ -1264,6 +1291,8 @@ onBeforeUnmount(() => {
   --map-chip-bg: rgba(9, 13, 22, 0.72);
   --map-chip-fg: #cbd5e1;
   --map-glow: rgba(20, 184, 166, 0.10);
+  /* 42% reads as a rumour of a line on a white canvas. */
+  --map-edge-opacity: 0.42;
 }
 
 .np-map--light {
@@ -1271,16 +1300,17 @@ onBeforeUnmount(() => {
      leaking" into light mode. */
   --map-edge: #4f46e5;
   --map-canvas: #ffffff;
-  --map-grid: rgba(9, 9, 11, 0.06);
-  --map-ring: rgba(9, 9, 11, 0.2);
+  --map-grid: rgba(15, 23, 42, 0.16);
+  --map-ring: rgba(15, 23, 42, 0.22);
   --map-minimap-mask: rgba(244, 244, 245, 0.72);
   --map-node-fg: #09090b;
-  --map-node-dim: #52525b;
+  --map-node-dim: #3f3f46;
   --map-control-bg: rgba(255, 255, 255, 0.95);
   --map-control-fg: #3f3f46;
   --map-chip-bg: rgba(255, 255, 255, 0.9);
   --map-chip-fg: #3f3f46;
   --map-glow: rgba(79, 70, 229, 0.06);
+  --map-edge-opacity: 0.7;
 }
 
 /* Radar-style concentric backdrop */
@@ -1466,16 +1496,16 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
   letter-spacing: 0.01em;
   color: var(--map-node-fg);
   text-align: center;
 }
 .np-label-ip {
-  margin-top: 2px;
-  font-size: 9.5px;
-  letter-spacing: 0.05em;
+  margin-top: 3px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
   color: var(--map-node-dim);
 }
 
@@ -1522,8 +1552,8 @@ onBeforeUnmount(() => {
 
 /* ---- Legend + counters ---- */
 .np-legend-dot {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 9999px;
   background: #a78bfa;
   box-shadow: 0 0 8px rgba(167, 139, 250, 0.55);
@@ -1547,7 +1577,7 @@ onBeforeUnmount(() => {
   background: var(--map-chip-bg);
   padding: 3px 9px;
   font-family: ui-monospace, monospace;
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--map-chip-fg);
@@ -1565,8 +1595,8 @@ onBeforeUnmount(() => {
 
 /* ---- Edges: animated traffic flow ---- */
 .np-topology-flow :deep(.np-flow-edge .vue-flow__edge-path) {
-  stroke-dasharray: 5 9;
-  opacity: 0.42;
+  stroke-dasharray: 6 8;
+  opacity: var(--map-edge-opacity);
   animation: np-edge-flow 1.7s linear infinite;
   filter: drop-shadow(0 0 3px color-mix(in srgb, var(--map-edge) 40%, transparent));
   transition: opacity 0.2s ease;

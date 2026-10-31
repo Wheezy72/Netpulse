@@ -326,8 +326,9 @@ component written once renders correctly in either.
   reset tokens with a one-hour expiry.
 - **Rate limiting** on authentication, backed by Redis.
 - **Security headers** on every response: a CSP without `unsafe-eval`,
-  `X-Content-Type-Options: nosniff`, `X-Frame-Options`, `Referrer-Policy` and a
-  restrictive `Permissions-Policy`.
+  `X-Content-Type-Options: nosniff`, `X-Frame-Options`, `Referrer-Policy`, a
+  restrictive `Permissions-Policy`, COOP/CORP isolation, and HSTS once the
+  request arrives over TLS.
 - **API responses are `no-store, private`** and never get the document CSP; only
   the SPA is a browsing context.
 - **Secrets stay in `.env`** — never in the bundle, never in logs. Optional AI
