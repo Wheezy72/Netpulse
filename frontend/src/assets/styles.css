@@ -195,11 +195,10 @@ html, body {
 }
 
 /* ── Left rail footprint ──
-   One variable owns how much room the rail takes. The console drawer is ported
-   to the viewport (outside the content column, whose `relative z-10` traps its
-   stacking context), so without this it slid underneath the rail and its first
-   characters were painted over. Collapsing the rail sets this to zero and the
-   drawer takes the full width. */
+   Mirrors the rail's own fixed 64px so the console drawer, which is ported to
+   the viewport outside the content column (whose `relative z-10` traps its
+   stacking context), can start where the rail ends instead of underneath it.
+   The shell itself still uses the plain `md:pl-16` padding. */
 :root {
   --np-rail-w: 0px;
 }
@@ -207,9 +206,6 @@ html, body {
   :root {
     --np-rail-w: 64px;
   }
-}
-body.np-rail-collapsed {
-  --np-rail-w: 0px !important;
 }
 
 /* ============================================

@@ -27,6 +27,42 @@ const target = ref("");
 const saveResults = ref(true);
 const isTerminalOpen = ref(false);
 
+// The console resizes from its top edge, the way a docked panel does. Height is
+// remembered and the page's bottom padding follows it, so growing the console
+// moves nothing in the shell — no nav, no rail, no icon rows.
+const CONSOLE_MIN_H = 160;
+const consoleHeight = ref(
+  Math.min(
+    Math.max(Number(localStorage.getItem("np-console-height")) || 340, CONSOLE_MIN_H),
+    900
+  )
+);
+const consoleClearance = computed(() =>
+  isTerminalOpen.value ? consoleHeight.value + 12 : 0
+);
+
+function startConsoleResize(event: PointerEvent): void {
+  if (!isTerminalOpen.value) return;
+  event.preventDefault();
+  const startY = event.clientY;
+  const startH = consoleHeight.value;
+  const ceiling = Math.round(window.innerHeight * 0.85);
+
+  const onMove = (e: PointerEvent) => {
+    consoleHeight.value = Math.min(
+      Math.max(startH + (startY - e.clientY), CONSOLE_MIN_H),
+      ceiling
+    );
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    localStorage.setItem("np-console-height", String(consoleHeight.value));
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
+
 // --- Scanning State ---
 type TargetedPresetId = "ping" | "quick" | "services" | "full" | "vuln" | "custom";
 const preset = ref<TargetedPresetId>("quick");
@@ -529,9 +565,9 @@ watch(
 </script>
 
 <template>
-  <!-- pb-* when the console is open: the drawer is an overlay, so without it
-       the last rows of the page hide behind it. -->
-  <div class="flex flex-col h-full gap-5 relative" :class="{ 'pb-[352px]': isTerminalOpen }">
+  <!-- The console is an overlay, so the page reserves whatever height it
+       currently has. Resizing the console moves this padding, not the shell. -->
+  <div class="flex flex-col h-full gap-5 relative" :style="{ paddingBottom: consoleClearance + 'px' }">
     
     <!-- Header Section -->
     <header class="flex items-end justify-between px-1 shrink-0">
@@ -945,8 +981,19 @@ watch(
     <!-- Collapsible Live Terminal Drawer at Bottom -->
     <div 
       class="fixed bottom-0 left-0 right-0 z-50 flex flex-col overflow-hidden border-t border-[var(--np-border)] bg-[var(--np-glass-bg)] shadow-2xl backdrop-blur-lg transition-transform duration-300"
-      :style="{ left: 'var(--np-rail-w)', transform: isTerminalOpen ? 'translateY(0)' : 'translateY(calc(100% - 34px))', height: '340px' }"
+      :style="{ left: 'var(--np-rail-w)', transform: isTerminalOpen ? 'translateY(0)' : 'translateY(calc(100% - 40px))', height: consoleHeight + 'px' }"
     >
+      <!-- Resize handle. The console owns its own height, so dragging it
+           never touches the nav, the rail or the header icons. -->
+      <div
+        class="np-console-grip"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize console"
+        title="Drag to resize"
+        @pointerdown="startConsoleResize"
+      ></div>
+
       <!-- One title bar for the whole panel. The toggle is a real button
            rather than the entire strip, so selecting output text no longer
            folds the console shut. -->
@@ -1009,6 +1056,29 @@ watch(
 </template>
 
 <style scoped>
+.np-console-grip {
+  position: relative;
+  flex: 0 0 6px;
+  height: 6px;
+  cursor: row-resize;
+  background: transparent;
+}
+.np-console-grip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 44px;
+  height: 2px;
+  transform: translateX(-50%);
+  border-radius: 9999px;
+  background: var(--np-border);
+  transition: background 150ms ease;
+}
+.np-console-grip:hover::after {
+  background: var(--np-accent);
+}
+
 .custom-scrollbar::-webkit-scrollbar {
   width: 5px;
   height: 5px;
