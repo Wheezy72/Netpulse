@@ -36,74 +36,92 @@ CATALOG_VERSION = "2026.10"
 VULN_SCRIPT_CATALOG: dict[str, dict[str, str | None]] = {
     "smb-vuln-ms17-010": {
         "cve": "CVE-2017-0143",
+        "severity": "critical",
         "summary": "EternalBlue SMBv1 remote code execution (MS17-010).",
     },
     "smb-vuln-ms08-067": {
         "cve": "CVE-2008-4250",
+        "severity": "critical",
         "summary": "Windows Server service SMB path handling remote code execution (MS08-067).",
     },
     "smb-vuln-cve2009-3103": {
         "cve": "CVE-2009-3103",
+        "severity": "high",
         "summary": "SMB2 malformed packet denial of service (MS09-050).",
     },
     "smb-vuln-cve-2017-7494": {
         "cve": "CVE-2017-7494",
+        "severity": "critical",
         "summary": "Samba shared-library loading remote code execution (SambaCry).",
     },
     "http-vuln-cve2017-5638": {
         "cve": "CVE-2017-5638",
+        "severity": "critical",
         "summary": "Apache Struts 2 Jakarta Multipart parser remote code execution.",
     },
     "http-vuln-cve2014-3704": {
         "cve": "CVE-2014-3704",
+        "severity": "critical",
         "summary": "Drupal SQL injection (Drupalgeddon).",
     },
     "http-vuln-cve2015-1635": {
         "cve": "CVE-2015-1635",
+        "severity": "critical",
         "summary": "Windows HTTP.sys range header remote code execution (MS15-034).",
     },
     "http-vuln-cve2012-1823": {
         "cve": "CVE-2012-1823",
+        "severity": "critical",
         "summary": "PHP-CGI query-string argument injection and remote code execution.",
     },
     "http-vuln-cve2010-0738": {
         "cve": "CVE-2010-0738",
+        "severity": "high",
         "summary": "JBoss JMX console authentication bypass.",
     },
     "ssl-heartbleed": {
         "cve": "CVE-2014-0160",
+        "severity": "high",
         "summary": "OpenSSL Heartbeat information disclosure (Heartbleed).",
     },
     "ssl-poodle": {
         "cve": "CVE-2014-3566",
+        "severity": "medium",
         "summary": "SSLv3 CBC padding oracle (POODLE).",
     },
     "ssl-ccs-injection": {
         "cve": "CVE-2014-0224",
+        "severity": "high",
         "summary": "OpenSSL ChangeCipherSpec man-in-the-middle injection.",
     },
     "ssl-dh-params": {
         "cve": None,
+        "severity": "medium",
         "summary": "Weak or common Diffie-Hellman parameters (Logjam class; no single CVE).",
     },
     "rdp-vuln-ms12-020": {
         "cve": None,
+        "severity": "high",
         "summary": "Remote Desktop denial of service (MS12-020; CVE varies by bulletin).",
     },
     "ftp-vuln-cve2010-4221": {
         "cve": "CVE-2010-4221",
+        "severity": "high",
         "summary": "ProFTPD response-pool buffer overflow.",
     },
     "mysql-vuln-cve2012-2122": {
         "cve": "CVE-2012-2122",
+        "severity": "critical",
         "summary": "MySQL authentication bypass after repeated failed logins.",
     },
     "smtp-vuln-cve2011-1764": {
         "cve": "CVE-2011-1764",
+        "severity": "high",
         "summary": "Exim DKIM format-string vulnerability.",
     },
     "http-shellshock": {
         "cve": "CVE-2014-6271",
+        "severity": "critical",
         "summary": "Bash environment-function injection reachable through CGI (Shellshock).",
     },
 }

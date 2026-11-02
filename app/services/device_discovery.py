@@ -113,7 +113,18 @@ def classify_host(
         return "Printer", "Embedded"
     if any(k in h for k in ("nas", "storage", "synology", "qnap")):
         return "NAS", "Linux/Embedded"
-    if any(k in h for k in ("tv", "roku", "chromecast", "firetv", "appletv")):
+    # Screens before phones: an "android-tv-4k" hostname matches both lists, and
+    # the screen is the more specific answer. The OS label is refined when the
+    # name itself says which platform the screen runs, so Android TV and an
+    # Apple TV are no longer reported as the same thing.
+    if any(
+        k in h
+        for k in ("tv", "roku", "chromecast", "firetv", "fire-tv", "appletv", "bravia")
+    ):
+        if "android" in h:
+            return "Smart TV", "Android TV"
+        if "appletv" in h or "apple-tv" in h:
+            return "Smart TV", "tvOS"
         return "Smart TV", "Android/tvOS"
     if any(k in h for k in ("iphone", "ipad")):
         return "Phone/Tablet (Apple)", "iOS"

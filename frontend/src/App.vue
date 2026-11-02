@@ -403,10 +403,10 @@ async function handleLogout() {
   router.push("/login");
 }
 
-async function handleAuthSuccess(arg: string | { token: string; rememberMe?: boolean }) {
-  const t = typeof arg === "string" ? arg : arg.token;
-  const persist = typeof arg === "string" ? true : (arg.rememberMe ?? true);
-  auth.setToken(t, persist);
+async function handleAuthSuccess() {
+  // The session arrived as an HttpOnly cookie, so there is nothing to
+  // store here: record that it exists and ask the API who we are now.
+  auth.setToken("session", true);
   await auth.loadUser();
   // Resume the page that triggered login when it is a safe local path.
   const redirect = route.query.redirect;
@@ -454,9 +454,13 @@ async function handleForcePasswordChange() {
 
   forceSubmitting.value = true;
   try {
-    await axios.post("/api/auth/update-password", {
+    const { data } = await axios.post<{ access_token?: string }>("/api/auth/update-password", {
       new_password: forceNewPassword.value,
     });
+    // The change revokes every token issued under the temporary password,
+    // including this one, so the fresh token has to replace it before the next
+    // request goes out.
+    auth.setToken("session", true);
     await auth.loadUser();
   } catch (err: any) {
     forceError.value =

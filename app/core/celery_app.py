@@ -45,6 +45,12 @@ def create_celery_app() -> Celery:
                 "task": "app.tasks.vulnerability_alert_task",
                 "schedule": 300.0,
             },
+            # Same cadence, wider sweep: findings (policy-filtered), hosts that
+            # went offline and the daily digest.
+            "notification-sweep-every-5m": {
+                "task": "app.tasks.notification_sweep_task",
+                "schedule": 300.0,
+            },
             # Scheduled scan reminder once per day
             "scheduled-scan-reminder-daily": {
                 "task": "app.tasks.scheduled_scan_reminder_task",

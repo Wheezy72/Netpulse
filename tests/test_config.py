@@ -12,7 +12,10 @@ import pytest
 # Placeholder fixture values. Kept in neutral constants purely so the test
 # reads clearly; none of these are real credentials.
 _TEST_DB_CREDENTIAL = "test" + "pass"
-_TEST_SIGNING = "unit-test-signing"
+# Long enough to be a usable signing key: a short value is treated as a
+# placeholder and replaced with a generated one, so the forwarding test would
+# otherwise pass a key the settings layer had already swapped out.
+_TEST_SIGNING = "unit-test-signing-key-0123456789ab"
 _TEST_SMTP = "unit-test-smtp"
 _TEST_LEGACY = "unused"
 

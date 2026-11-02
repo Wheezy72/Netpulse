@@ -3,18 +3,53 @@ import type { Pinia } from "pinia";
 import type { Router } from "vue-router";
 
 /** Endpoints that answer 401 for their own reasons (bad credentials). */
-const CREDENTIAL_ENDPOINTS = ["/api/auth/login", "/api/auth/logout"];
+const CREDENTIAL_ENDPOINTS = [
+  "/api/auth/login",
+  "/api/auth/login/totp",
+  "/api/auth/logout",
+];
+
+/** Methods the CSRF check applies to on the server. */
+const UNSAFE_METHODS = new Set(["post", "put", "patch", "delete"]);
+
+const CSRF_COOKIE = "np_csrf";
+const CSRF_HEADER = "X-CSRF-Token";
+
+function readCookie(name: string): string {
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : "";
+}
 
 /**
- * Send the operator back to the sign-in screen when the token stops being
- * valid, instead of leaving every panel showing "Failed to load …".
+ * Send the session cookie with every API call, and mirror the readable CSRF
+ * cookie into a header for writes.
  *
- * This matters most for "Remember me" left unchecked: that token lives 60
- * minutes, so a long session hits it while still working. Without a handler the
- * router guard still believes the session is valid and nothing recovers until a
- * manual reload.
+ * The session token is never touched here: it is HttpOnly, so the browser
+ * attaches it and JavaScript cannot read it. The CSRF cookie is readable by
+ * design — that is what makes the double-submit check possible — and it is
+ * useless on its own.
  */
 export function installAuthInterceptor(router: Router, pinia: Pinia): void {
+  axios.defaults.withCredentials = true;
+
+  // Tokens stored by earlier builds are still readable by any injected script,
+  // so an upgraded install clears them on load.
+  localStorage.removeItem("np-token");
+  sessionStorage.removeItem("np-token");
+  delete axios.defaults.headers.common["Authorization"];
+
+  axios.interceptors.request.use((config) => {
+    const method = (config.method || "get").toLowerCase();
+    if (UNSAFE_METHODS.has(method)) {
+      const token = readCookie(CSRF_COOKIE);
+      if (token) {
+        config.headers = config.headers ?? {};
+        (config.headers as Record<string, string>)[CSRF_HEADER] = token;
+      }
+    }
+    return config;
+  });
+
   axios.interceptors.response.use(
     (response) => response,
     async (error) => {
@@ -28,10 +63,10 @@ export function installAuthInterceptor(router: Router, pinia: Pinia): void {
       const { useAuthStore } = await import("../stores/auth");
       const auth = useAuthStore(pinia);
 
-      // No token means an unauthenticated probe (setup status, health) or a
+      // No session means an unauthenticated probe (setup status, health) or a
       // rejection the router guard already handled on boot — either way there
       // is nothing to announce from here.
-      if (!auth.token) {
+      if (!auth.isAuthenticated) {
         return Promise.reject(error);
       }
       auth.setToken(null);

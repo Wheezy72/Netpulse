@@ -9,7 +9,9 @@ services:
     environment:
       POSTGRES_DB: netpulse
       POSTGRES_USER: netpulse
-      POSTGRES_PASSWORD: netpulse
+      # Required, not defaulted: a compose file that ships a password is a
+      # compose file that runs with that password forever.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     # Bound to localhost only – app traffic stays on the host loopback.
     ports:
       - "127.0.0.1:5432:5432"
@@ -59,9 +61,11 @@ services:
       # Run as root in the container so raw sockets work (ARP sweeps, SYN scans).
     user: "0"
     environment:
-      DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@127.0.0.1:5432/netpulse
+      DATABASE_URL: postgresql+asyncpg://netpulse:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@127.0.0.1:5432/netpulse
       REDIS_URL: redis://127.0.0.1:6379/0
-      SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
+      # Left empty when .env does not set it: the app then generates a strong
+      # key at data/signing_key instead of using a published default.
+      SECRET_KEY: ${SECRET_KEY:-}
       ENVIRONMENT: ${ENVIRONMENT:-production}
       BOOTSTRAP_ADMIN_ENABLED: ${BOOTSTRAP_ADMIN_ENABLED:-true}
       BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
@@ -86,6 +90,13 @@ services:
     cap_add:
       - NET_RAW
       - NET_ADMIN
+    # Raw sockets are the only privileged thing this image needs, so everything
+    # else in the default capability set is dropped and escalation through a
+    # setuid binary inside the container is refused.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
   # Celery worker with the beat scheduler embedded (-B) so a separate
   # beat container is no longer needed.
@@ -107,9 +118,9 @@ services:
     command: ["celery", "-A", "app.core.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=4", "--max-tasks-per-child=100", "--beat"]
     user: "0"
     environment:
-      DATABASE_URL: postgresql+asyncpg://netpulse:netpulse@127.0.0.1:5432/netpulse
+      DATABASE_URL: postgresql+asyncpg://netpulse:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@127.0.0.1:5432/netpulse
       REDIS_URL: redis://127.0.0.1:6379/0
-      SECRET_KEY: ${SECRET_KEY:-super-secret-change-me-in-production}
+      SECRET_KEY: ${SECRET_KEY:-}
       ENVIRONMENT: ${ENVIRONMENT:-production}
       SCRIPTS_BASE_DIR: /app/scripts
     volumes:
@@ -117,6 +128,10 @@ services:
     cap_add:
       - NET_RAW
       - NET_ADMIN
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   db_data:

@@ -23,7 +23,14 @@ from app.models.script_job import ScriptJob
 from app.models.vulnerability import Vulnerability, VulnerabilitySeverity
 from app.services.device_discovery import run_device_discovery
 from app.services.console_host import console_macs
-from app.services.device_enrichment import scan_device_ports, upsert_device_ports
+from app.services.cve_feed import find_cve_matches
+from app.services.device_enrichment import (
+    VulnerabilityFinding,
+    scan_device,
+    upsert_device_ports,
+)
+from app.services.nmap_capabilities import VULN_SCRIPT_CATALOG, detect_capabilities
+from app.services.vulnerability_store import record_vuln_findings
 from app.services.router_source import describe_configuration, verify_devices as run_verification
 from app.services.oui import is_locally_administered, normalize_mac
 from app.services.os_fingerprint import resolve_device_os
@@ -128,6 +135,17 @@ class DiscoveryResponse(BaseModel):
     router_verification: Optional[Dict[str, Any]] = None
 
 
+class DeepScanFinding(BaseModel):
+    """One NSE vulnerability verdict from a deep scan."""
+
+    script: Optional[str] = None
+    title: str
+    severity: str
+    cve_id: Optional[str] = None
+    port: Optional[int] = None
+    protocol: Optional[str] = None
+
+
 class DeepScanResponse(BaseModel):
     device_id: int
     ip_address: str
@@ -138,6 +156,13 @@ class DeepScanResponse(BaseModel):
     warnings: List[str]
     os: Optional[str] = None
     os_confidence: Optional[str] = None
+    # Vulnerability checks are part of the answer to "test this node": the
+    # button exists to say whether anything is *wrong*, not only what is
+    # listening. Empty when this install has no NSE vulnerability scripts.
+    vuln_scripts: List[str] = Field(default_factory=list)
+    vulnerabilities: List[DeepScanFinding] = Field(default_factory=list)
+    vulns_created: int = 0
+    vulns_resolved: int = 0
 
 
 class TopologyNode(BaseModel):
@@ -547,14 +572,20 @@ def _guess_device_type(device: Device) -> tuple[Optional[str], Optional[float]]:
         return "switch", 0.9
 
     # TV / media
-    tv_keywords = ["tv", "roku", "chromecast", "firetv"]
-    if any(k in hostname for k in tv_keywords) or any(k in vendor for k in tv_keywords):
-        return "smart-tv", 0.8
+    # A vendor match alone is not enough: Samsung and LG make phones and Apple
+    # makes laptops. The hostname (or the type discovery already derived) has to
+    # point at a screen before this claims "TV".
+    tv_keywords = ["tv", "roku", "chromecast", "firetv", "appletv", "bravia", "tizen", "webos"]
+    if any(k in hostname for k in tv_keywords) or any(k in dtype for k in tv_keywords):
+        return "smart-tv", 0.85
 
     # Phone / tablet
-    phone_keywords = ["iphone", "ipad", "android", "pixel", "galaxy"]
-    if any(k in hostname for k in phone_keywords) or any(k in vendor for k in ["samsung", "apple", "xiaomi", "oneplus"]):
-        return "phone-tablet", 0.7
+    # An OUI identifies the maker, not the product line, so only phone-heavy
+    # vendors count without a hostname saying so.
+    phone_keywords = ["iphone", "ipad", "android", "pixel", "galaxy", "sm-g", "sm-a", "sm-s"]
+    phone_vendors = ["xiaomi", "oneplus", "oppo", "vivo", "realme", "huawei", "honor", "motorola"]
+    if any(k in hostname for k in phone_keywords) or any(k in vendor for k in phone_vendors):
+        return "phone-tablet", 0.75
 
     # Printer
     if "printer" in hostname or any(k in vendor for k in ["hp", "epson", "canon", "brother"]):
@@ -721,6 +752,10 @@ async def get_device_detail(
 )
 async def deep_scan_device(
     device_id: int,
+    include_vulns: bool = Query(
+        default=True,
+        description="Also run the installed NSE vulnerability scripts against this host.",
+    ),
     db: AsyncSession = Depends(db_session),
 ) -> DeepScanResponse:
     """Run a targeted service/version scan against a single device.
@@ -736,10 +771,29 @@ async def deep_scan_device(
             detail="Device not found",
         )
 
-    observations, warnings = await scan_device_ports(device.ip_address)
+    # Which vulnerability scripts this install actually has. The catalog is
+    # intersected with the files on disk, so a run never names a script nmap
+    # would reject.
+    vuln_scripts: List[str] = []
+    advisory: List[str] = []
+    if include_vulns:
+        caps = detect_capabilities()
+        vuln_scripts = sorted(set(caps.vuln_scripts) & set(VULN_SCRIPT_CATALOG))
+        if not vuln_scripts:
+            advisory.append(
+                "No nmap vulnerability scripts are installed, so only the "
+                "bundled CVE catalogue could match versions (scripts "
+                f"directory: {caps.scripts_dir or 'not found'})."
+            )
+
+    result = await scan_device(device.ip_address, vuln_scripts=vuln_scripts)
+    observations = result.observations
+    # A scan that could not run leaves the stored ports alone. Advisory notes
+    # (no scripts installed, fallback engine) do not count as a failure.
+    warnings = [*result.warnings, *advisory]
 
     created = updated = removed = 0
-    if observations or not warnings:
+    if observations or not result.warnings:
         # A clean scan that found nothing listening is a real result and should
         # clear stale rows. A scan that could not run (no nmap, restricted
         # subnet, failure) leaves the previously stored ports untouched.
@@ -786,6 +840,31 @@ async def deep_scan_device(
         device.updated_at = utcnow()
         await db.commit()
 
+    # Version-based matches from the bundled catalogue: noticing that
+    # Apache 2.4.49 is exposed needs no NSE script, and the deep scan
+    # already collected the version string.
+    cve_findings = [
+        VulnerabilityFinding(
+            script="cve-version-catalog",
+            title=match.title,
+            severity=match.severity,
+            cve_id=match.cve_id,
+            port=match.port,
+            protocol=match.protocol,
+            detail=match.detail,
+        )
+        for match in (find_cve_matches(observations) if include_vulns else [])
+    ]
+    all_findings = [*result.findings, *cve_findings]
+
+    # Findings are stored in the same table the dashboard and the alert sweep
+    # read, so a CVE found here behaves exactly like one found by a scan job.
+    vulns_created = vulns_resolved = 0
+    if include_vulns and (observations or not result.warnings):
+        vulns_created, vulns_resolved = await record_vuln_findings(
+            db, device.id, all_findings
+        )
+
     return DeepScanResponse(
         device_id=device.id,
         ip_address=device.ip_address,
@@ -799,6 +878,20 @@ async def deep_scan_device(
         warnings=warnings,
         os=os_label,
         os_confidence=os_confidence,
+        vuln_scripts=vuln_scripts,
+        vulnerabilities=[
+            DeepScanFinding(
+                script=finding.script,
+                title=finding.title,
+                severity=finding.severity,
+                cve_id=finding.cve_id,
+                port=finding.port,
+                protocol=finding.protocol,
+            )
+            for finding in all_findings
+        ],
+        vulns_created=vulns_created,
+        vulns_resolved=vulns_resolved,
     )
 
 

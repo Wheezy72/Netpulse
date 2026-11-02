@@ -3,7 +3,6 @@ import { ref, computed } from "vue";
 import axios from "axios";
 
 import { DEFAULT_AVATAR_STYLE, normalizeAvatarStyle } from "../utils/avatar";
-import { getStoredToken } from "../utils/token";
 
 /** Two roles: admin acts, viewer observes. */
 type Role = "admin" | "viewer";
@@ -19,10 +18,19 @@ interface CurrentUser {
   force_password_change: boolean;
 }
 
+/**
+ * "A session is probably open." Not a credential: the session itself is an
+ * HttpOnly cookie the page cannot read, so the worst a script can do with this
+ * flag is make the app ask /api/auth/me and be told 401.
+ *
+ * It exists because the cookie is invisible to JavaScript, so the app would
+ * otherwise have no way to decide between "try to restore the session" and
+ * "show the sign-in screen" before the first request completes.
+ */
+const SESSION_HINT = "np-session";
+
 export const useAuthStore = defineStore("auth", () => {
-  // Prefer a long-lived token from localStorage; fall back to a session-only
-  // token stored in sessionStorage (used when "Remember me" is unchecked).
-  const token = ref<string | null>(getStoredToken() || null);
+  const sessionHint = ref<boolean>(localStorage.getItem(SESSION_HINT) === "1");
   const user = ref<CurrentUser | null>(null);
 
   // The portrait skin is per account. It lives on the server (so the admin
@@ -46,27 +54,25 @@ export const useAuthStore = defineStore("auth", () => {
     void axios.put("/api/settings/avatar-style", { style: valid }).catch(() => {});
   }
 
-  const isAuthenticated = computed(() => !!token.value);
+  const isAuthenticated = computed(() => sessionHint.value);
   const isAdmin = computed(() => user.value?.role === "admin");
 
   /**
-   * Store `t` and set the Axios Authorization header.
-   * When `persist` is true (the default) the token survives browser restarts
-   * via localStorage.  When false it is kept only for the current browser
-   * session via sessionStorage — matching the "Remember me" checkbox intent.
+   * Record that a session exists (or no longer does).
+   *
+   * The token string is accepted and ignored: older builds stored it in
+   * localStorage and every call site still passes one. Nothing is written to
+   * storage except the boolean hint — a credential must never be reachable
+   * from JavaScript again.
    */
-  function setToken(t: string | null, persist = true) {
-    token.value = t;
+  function setToken(t: string | null, _persist = true) {
+    sessionHint.value = !!t;
     if (t) {
-      if (persist) {
-        localStorage.setItem("np-token", t);
-        sessionStorage.removeItem("np-token");
-      } else {
-        sessionStorage.setItem("np-token", t);
-        localStorage.removeItem("np-token");
-      }
-      axios.defaults.headers.common["Authorization"] = `Bearer ${t}`;
+      localStorage.setItem(SESSION_HINT, "1");
     } else {
+      localStorage.removeItem(SESSION_HINT);
+      // Clear tokens left behind by a previous build, which an injected script
+      // could still read on an upgraded install.
       localStorage.removeItem("np-token");
       sessionStorage.removeItem("np-token");
       delete axios.defaults.headers.common["Authorization"];
@@ -76,14 +82,14 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   /**
-   * Resolve the signed-in account from the stored token.
+   * Resolve the signed-in account from the session cookie.
    *
-   * Returns false when the token was rejected (expired or revoked) and it has
-   * been cleared — the router uses that to explain why sign-in is being asked
-   * for again instead of silently bouncing to the form.
+   * Returns false when the API rejected the session (expired or revoked) and
+   * the hint has been cleared — the router uses that to explain why sign-in is
+   * being asked for again instead of silently bouncing to the form.
    */
   async function loadUser(): Promise<boolean> {
-    if (!token.value) return false;
+    if (!sessionHint.value) return false;
     try {
       const { data } = await axios.get<CurrentUser>("/api/auth/me");
       user.value = data;
@@ -107,7 +113,7 @@ export const useAuthStore = defineStore("auth", () => {
 
   async function logout() {
     try {
-      if (token.value) {
+      if (sessionHint.value) {
         await axios.post("/api/auth/logout");
       }
     } catch (e) {
@@ -117,10 +123,14 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
-  // Restore token on app init.
-  if (token.value) {
-    axios.defaults.headers.common["Authorization"] = `Bearer ${token.value}`;
-  }
-
-  return { token, user, avatarStyle, isAuthenticated, isAdmin, setToken, setAvatarStyle, loadUser, logout };
+  return {
+    user,
+    avatarStyle,
+    isAuthenticated,
+    isAdmin,
+    setToken,
+    setAvatarStyle,
+    loadUser,
+    logout,
+  };
 });

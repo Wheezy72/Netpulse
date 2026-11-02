@@ -33,6 +33,9 @@ class NotificationSettings(BaseModel):
     alert_on_warning: bool = False
     alert_on_device_down: bool = True
     daily_digest: bool = False
+    # Written by the digest sender so an account gets one summary a day. Lives
+    # in the same blob (like the scheduler's last_run) to avoid a migration.
+    digest_last_sent: Optional[str] = None
 
 
 class AISettings(BaseModel):
@@ -157,13 +160,23 @@ async def update_notification_settings(
     db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> NotificationSettings:
-    """Update notification settings for the current user."""
+    """Update notification settings for the current user.
+
+    The digest marker lives in the same blob, so it is carried across a save:
+    opening the panel must not make the account look like it never got today's
+    summary, and saving twice must not send it twice.
+    """
+    row = await _get_user_settings(db, current_user.id)
+    existing = dict(row.notification_settings or {}) if row else {}
+    payload = settings.model_dump()
+    payload["digest_last_sent"] = existing.get("digest_last_sent")
+
     await _upsert_user_settings(
         db,
         current_user.id,
-        notification_settings=settings.model_dump(),
+        notification_settings=payload,
     )
-    return settings
+    return NotificationSettings(**payload)
 
 
 AI_PROVIDER_ENV_VARS: dict[str, str] = {

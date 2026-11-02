@@ -138,15 +138,24 @@ async function handleSubmit(): Promise<void> {
 
   isSubmitting.value = true;
   try {
-    const { data } = await axios.post<{ access_token: string; token_type: string }>(
-      "/api/auth/login",
-      {
-        username: username.value,
-        password: password.value,
-        remember_me: rememberMe.value,
-      }
-    );
-    emit("login-success", { token: data.access_token, rememberMe: rememberMe.value });
+    const { data } = await axios.post<{
+      access_token?: string | null;
+      mfa_required?: boolean;
+      mfa_token?: string;
+    }>("/api/auth/login", {
+      username: username.value,
+      password: password.value,
+      remember_me: rememberMe.value,
+    });
+    // With a second factor the password only buys a five-minute ticket;
+    // the session is issued once the code is verified.
+    if (data.mfa_required && data.mfa_token) {
+      mfaToken.value = data.mfa_token;
+      mfaCode.value = "";
+      errorMessage.value = null;
+      return;
+    }
+    emit("login-success", { token: "", rememberMe: rememberMe.value });
   } catch (error) {
     // An unreachable server is not a wrong password; say which one happened.
     errorMessage.value = describeRequestError(error, "That username and password don't match.");
@@ -154,6 +163,39 @@ async function handleSubmit(): Promise<void> {
     isSubmitting.value = false;
   }
 }
+// --- Second factor ---------------------------------------------------------
+const mfaToken = ref<string | null>(null);
+const mfaCode = ref("");
+
+async function submitMfa(): Promise<void> {
+  errorMessage.value = null;
+  if (!mfaToken.value) return;
+  const compact = mfaCode.value.replace(/[\s-]/g, "");
+  if (compact.length < 6) {
+    errorMessage.value = "Enter the six-digit code from your authenticator app, or a recovery code.";
+    return;
+  }
+
+  isSubmitting.value = true;
+  try {
+    const { data } = await axios.post<{ access_token?: string | null }>(
+      "/api/auth/login/totp",
+      { mfa_token: mfaToken.value, code: mfaCode.value }
+    );
+    emit("login-success", { token: "", rememberMe: rememberMe.value });
+  } catch (error) {
+    errorMessage.value = describeRequestError(error, "That code was not accepted.");
+  } finally {
+    isSubmitting.value = false;
+  }
+}
+
+function cancelMfa(): void {
+  mfaToken.value = null;
+  mfaCode.value = "";
+  errorMessage.value = null;
+}
+
 </script>
 
 <template>
@@ -178,8 +220,9 @@ async function handleSubmit(): Promise<void> {
           </p>
         </div>
 
-        <form class="space-y-5" @submit.prevent="handleSubmit">
+        <form class="space-y-5" @submit.prevent="mfaToken ? submitMfa() : handleSubmit()">
           <div
+            v-if="!mfaToken"
             class="np-stagger-item"
             :class="showField1 ? 'np-stagger-visible' : 'np-stagger-hidden'"
           >
@@ -196,6 +239,7 @@ async function handleSubmit(): Promise<void> {
           </div>
 
           <div
+            v-if="!mfaToken"
             class="np-stagger-item"
             :class="showField2 ? 'np-stagger-visible' : 'np-stagger-hidden'"
           >
@@ -223,8 +267,36 @@ async function handleSubmit(): Promise<void> {
             </div>
           </div>
 
+          <!-- Second step: the code, and nothing else. -->
+          <div v-if="mfaToken" class="space-y-2">
+            <label class="block text-xs font-medium text-[var(--np-text-muted)]">
+              Authentication code
+            </label>
+            <input
+              v-model="mfaCode"
+              type="text"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              autofocus
+              class="np-neon-input w-full rounded-lg px-4 py-3 text-sm tracking-[0.3em]"
+              placeholder="123 456"
+              @keyup.enter="submitMfa"
+            />
+            <p class="text-[0.7rem] text-[var(--np-text-dim)]">
+              The six-digit code from your authenticator app, or one of your recovery codes.
+            </p>
+            <button
+              type="button"
+              class="text-xs transition-colors np-dim-text hover:np-brand-text"
+              @click="cancelMfa"
+            >
+              Back to sign-in
+            </button>
+          </div>
+
           <!-- Remember me + Forgot password row -->
           <div
+            v-if="!mfaToken"
             class="np-stagger-item flex items-center justify-between"
             :class="showField2 ? 'np-stagger-visible' : 'np-stagger-hidden'"
           >
@@ -258,7 +330,7 @@ async function handleSubmit(): Promise<void> {
               :disabled="isSubmitting"
             >
               <LoaderCircle v-if="isSubmitting" class="w-4 h-4 animate-spin" :stroke-width="1.7" />
-              <span>{{ isSubmitting ? "Signing in…" : "Sign In" }}</span>
+              <span>{{ isSubmitting ? "Checking…" : mfaToken ? "Verify" : "Sign In" }}</span>
             </button>
           </div>
 

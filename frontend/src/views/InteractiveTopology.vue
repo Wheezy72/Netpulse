@@ -17,7 +17,6 @@ import { useRoute } from "vue-router";
 import { Cctv, Cpu, Laptop, LoaderCircle, Lock, Monitor, Printer, RefreshCw, Router, Server, Smartphone, Wifi, Waypoints } from "lucide-vue-next";
 
 import { resolveOui } from "../utils/oui";
-import { getStoredToken } from "../utils/token";
 
 const props = defineProps<{
   theme: "nightshade" | "sysadmin";
@@ -446,7 +445,6 @@ async function connectSsh() {
   sshConnecting.value = true;
   sshError.value = null;
 
-  const token = getStoredToken();
   const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || window.location.origin;
   const wsBase = apiBase.replace(/^http/, "ws");
   // Only the target address goes in the URL. The token, username and
@@ -487,7 +485,6 @@ async function connectSsh() {
     socket.send(
       JSON.stringify({
         type: "auth",
-        token,
         username: sshUsername.value,
         password: sshPassword.value,
         port: sshPort.value,
@@ -708,14 +705,32 @@ async function testSelectedNode(): Promise<void> {
     const { data } = await axios.post<{
       ports: { port: number }[];
       warnings?: string[];
+      vulnerabilities?: { title: string; severity: string; cve_id?: string | null }[];
+      vuln_scripts?: string[];
     }>(`/api/devices/${node.id}/deep-scan`);
 
     const portCount = data.ports?.length ?? 0;
-    testMessage.value = portCount
-      ? `Scan complete — ${portCount} open port${portCount === 1 ? "" : "s"} found.`
-      : "Scan complete — nothing listening on the probed ports.";
-    testMessageKind.value = data.warnings?.length ? "warn" : "ok";
-    if (data.warnings?.length) testMessage.value += ` ${data.warnings[0]}`;
+    const vulns = data.vulnerabilities ?? [];
+    // The button answers two questions, because "what is listening" without
+    // "is anything wrong" was why it read as a decoration.
+    const summary = [
+      portCount
+        ? `${portCount} open port${portCount === 1 ? "" : "s"}`
+        : "nothing listening on the probed ports",
+      vulns.length
+        ? `${vulns.length} vulnerabilit${vulns.length === 1 ? "y" : "ies"} found`
+        : data.vuln_scripts?.length
+          ? "no known CVE matched"
+          : "no CVE checks available",
+    ];
+    testMessage.value = `Scan complete — ${summary.join(", ")}.`;
+    testMessageKind.value = vulns.length ? "err" : data.warnings?.length ? "warn" : "ok";
+    if (vulns.length) {
+      const worst = vulns[0];
+      testMessage.value += ` ${worst.cve_id ?? worst.title} (${worst.severity}).`;
+    } else if (data.warnings?.length) {
+      testMessage.value += ` ${data.warnings[0]}`;
+    }
 
     await loadDeviceDetail(node.id);
     await loadTopology();

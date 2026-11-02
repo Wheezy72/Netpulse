@@ -3,7 +3,6 @@ import axios from "axios";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { CircleCheck, CircleX } from "lucide-vue-next";
 import LiveTerminal from "../components/features/LiveTerminal.vue";
-import { getStoredToken } from "../utils/token";
 
 type Theme = "nightshade" | "sysadmin";
 
@@ -241,9 +240,8 @@ function getWsBase(): string {
 }
 
 const terminalTitle = computed(() => (currentScanId.value ? `Scan ${currentScanId.value}` : "Toolbox Output Console"));
-const terminalToken = computed(() => getStoredToken() || null);
 const terminalStreamUrl = computed(() => {
-  if (!currentScanId.value || !terminalToken.value) return null;
+  if (!currentScanId.value) return null;
   // No token in the URL: it rides in the WebSocket subprotocol instead.
   return `${getWsBase()}/api/ws/scans/${currentScanId.value}`;
 });
@@ -1032,7 +1030,6 @@ watch(
           :title="terminalTitle"
           :stream-url="terminalStreamUrl"
           :theme="props.theme"
-          :token="terminalToken"
           chromeless
         />
       </div>

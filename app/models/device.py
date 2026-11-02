@@ -52,6 +52,15 @@ class Device(Base):
     verified_source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
 
     last_seen: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # Set once "host offline" has been emailed for the current outage, so a
+    # device that stays down is reported once rather than every sweep. Cleared
+    # the moment discovery sees it again.
+    offline_alert_sent: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        server_default="false",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utcnow,

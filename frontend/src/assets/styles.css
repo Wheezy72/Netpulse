@@ -1071,6 +1071,38 @@ tbody tr:hover {
   }
 }
 
+/* Portrait motion. DiceBear draws a static SVG, so the movement is CSS applied
+   to the inline face: the tinted circle stays put (a ring that bobs reads as an
+   error state) and only the face inside it moves. This is the portrait's
+   behaviour, not a preference — there is no switch. */
+.np-avatar-motion svg {
+  transform-origin: 50% 85%;
+  animation: np-avatar-bob 3.4s ease-in-out infinite;
+}
+
+@keyframes np-avatar-bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg) scale(1);
+  }
+  25% {
+    transform: translateY(-5%) rotate(2deg) scale(1.02);
+  }
+  50% {
+    transform: translateY(0) rotate(0deg) scale(1);
+  }
+  75% {
+    transform: translateY(-3%) rotate(-2deg) scale(1.02);
+  }
+}
+
+/* Motion is decoration; the operating-system preference always wins. */
+@media (prefers-reduced-motion: reduce) {
+  .np-avatar-motion svg {
+    animation: none !important;
+  }
+}
+
 /* Theme control gives the selected sun/moon a small, tactile turn on hover. */
 .np-theme-toggle-icon {
   transform-origin: 50% 50%;

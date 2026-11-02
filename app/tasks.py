@@ -20,7 +20,13 @@ from sqlalchemy.orm import sessionmaker
 from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.core.paths import SCANS_DIR, ensure_dir
-from app.services.alerts import process_vulnerability_alerts, send_system_alert
+from app.services.alert_policy import load_alert_policy
+from app.services.alerts import (
+    process_daily_digest,
+    process_device_down_alerts,
+    process_vulnerability_alerts,
+    send_system_alert,
+)
 from app.services.latency_monitor import monitor_latency
 from app.services.recon import passive_arp_discovery
 from app.services.script_executor import execute_script
@@ -183,6 +189,29 @@ def vulnerability_alert_task() -> None:
         try:
             async with factory() as session:
                 await process_vulnerability_alerts(session)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+@celery_app.task(name="app.tasks.notification_sweep_task")
+def notification_sweep_task() -> None:
+    """Run the whole notification sweep: findings, offline hosts, digest.
+
+    Mirrors the in-process loop so a full Docker stack and a no-worker install
+    alert the same way.
+    """
+
+    async def _run() -> None:
+        engine, factory = _create_session_factory()
+        try:
+            async with factory() as session:
+                policy = await load_alert_policy(session)
+                await process_vulnerability_alerts(session, policy=policy)
+                await process_device_down_alerts(session, policy=policy)
+                await process_daily_digest(session)
+                await session.commit()
         finally:
             await engine.dispose()
 

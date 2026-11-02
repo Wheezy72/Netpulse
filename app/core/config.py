@@ -1,13 +1,82 @@
 from functools import lru_cache
 import logging
+import secrets
 import sys
 import subprocess
+from pathlib import Path
 from typing import List, Any
 
 from pydantic import Field, model_validator, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.paths import DATA_DIR, PROJECT_ROOT
+
+
+logger = logging.getLogger("netpulse.config")
+
+# Values that look configured but are public knowledge. Every entry here has
+# appeared in a README, a compose file or a template, so none of them may sign
+# a session token or a peer message.
+_PLACEHOLDER_SECRET_KEYS = {
+    "",
+    "changeme",
+    "change_me_in_production",
+    "change-me-to-a-random-string",
+    "super-secret-change-me-in-production",
+    "secret",
+    "secret-key",
+}
+
+_MIN_SECRET_KEY_LENGTH = 32
+_SIGNING_KEY_FILENAME = "signing_key"
+
+
+def _is_usable_secret(candidate: str | None) -> bool:
+    """True when *candidate* is long enough and is not a known placeholder."""
+    value = (candidate or "").strip()
+    return len(value) >= _MIN_SECRET_KEY_LENGTH and value.lower() not in _PLACEHOLDER_SECRET_KEYS
+
+
+def _load_or_create_signing_key() -> str:
+    """Return a real signing key, generating and storing one when needed.
+
+    Replacing a placeholder with a per-install random key is what stops a
+    forgotten SECRET_KEY from meaning "every token in the world is valid". The
+    generated value lives beside the rest of the runtime data
+    (``data/signing_key``, mode 0600) so sessions survive a restart and the API
+    and the Celery worker agree on it without either being configured.
+    """
+    path = Path(DATA_DIR) / _SIGNING_KEY_FILENAME
+    try:
+        existing = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        existing = ""
+
+    if _is_usable_secret(existing):
+        return existing
+
+    generated = secrets.token_urlsafe(48)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(generated + "\n", encoding="utf-8")
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+        logger.warning(
+            "SECRET_KEY is unset or a placeholder; generated one at %s. Set "
+            "SECRET_KEY in .env to choose it yourself (peer discovery only "
+            "trusts instances that share the same key).",
+            path,
+        )
+    except OSError as exc:
+        logger.warning(
+            "SECRET_KEY is unset or a placeholder and %s is not writable (%s); "
+            "using a key that lasts for this process only.",
+            path,
+            exc,
+        )
+    return generated
 
 
 def detect_default_gateway() -> str:
@@ -164,6 +233,11 @@ class Settings(BaseSettings):
     app_name: str = "NetPulse Enterprise"
     environment: str = "development"
 
+    # Session cookies carry Secure when this is true. None (auto) follows
+    # the request scheme, which is what a LAN install on plain http needs:
+    # a Secure cookie over http is dropped and sign-in fails silently.
+    cookie_secure: bool | None = None
+
     # Database
     postgres_host: str = "db"
     postgres_port: int = 5432
@@ -188,6 +262,18 @@ class Settings(BaseSettings):
     def resolve_gateway_ip(self) -> "Settings":
         if self.pulse_gateway_ip == "auto":
             self.pulse_gateway_ip = detect_default_gateway()
+        return self
+
+    # Rogue DHCP detection allowlist (MAC addresses).
+    @model_validator(mode="after")
+    def resolve_signing_key(self) -> "Settings":
+        """Never keep a placeholder SECRET_KEY.
+
+        JWTs and peer-discovery HMACs are signed with this value, so a default
+        that appears in this file would be a published signing key.
+        """
+        if not _is_usable_secret(self.signing_key):
+            self.signing_key = _load_or_create_signing_key()
         return self
 
     # Rogue DHCP detection allowlist (MAC addresses).
@@ -217,6 +303,11 @@ class Settings(BaseSettings):
     scripts_base_dir: str = str(PROJECT_ROOT / "scripts")
     scripts_uploads_subdir: str = "uploads"
     scripts_prebuilt_subdir: str = "prebuilt"
+    # Uploaded scripts are arbitrary code. They run in a gVisor container by
+    # default; running them in the API's own interpreter is a development
+    # convenience that must be requested explicitly, so an install which simply
+    # forgot to set ENVIRONMENT can never execute uploads unsandboxed.
+    scripts_unsandboxed: bool = False
 
     # Empty means "the interface carrying the default route", resolved at run
     # time. A literal "eth0" is wrong on most laptops and on every USB Wi-Fi
@@ -244,7 +335,10 @@ class Settings(BaseSettings):
     ssh_known_hosts_file: str = str(DATA_DIR / "known_hosts.json")
 
     # Security / auth. env: SECRET_KEY
-    signing_key: str = Field(default="CHANGE_ME_IN_PRODUCTION", validation_alias="SECRET_KEY")
+    # No default on purpose: a placeholder is detected and replaced with a
+    # generated key by `resolve_signing_key` below, so the value that signs
+    # every session can never be a string that ships in the repository.
+    signing_key: str | None = Field(default=None, validation_alias="SECRET_KEY")
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
     # Only believe X-Forwarded-For / X-Real-IP when a proxy actually sets them.
@@ -268,6 +362,11 @@ class Settings(BaseSettings):
     # request to an empty instance names the administrator; with it, that
     # request must also present this token.
     setup_token: str | None = Field(default=None, validation_alias="SETUP_TOKEN")
+    # Peers used to copy the administrator's password *hash* over a UDP
+    # broadcast signed with SECRET_KEY, which made "knows the key" equal to
+    # "can take over the admin account". Credential sync is now opt-in and off
+    # by default; presence discovery still works without it.
+    peer_credential_sync: bool = False
 
     # Router-verified inventory. env: ROUTER_*
     #
@@ -327,6 +426,12 @@ class Settings(BaseSettings):
     smtp_pass: str | None = Field(default=None, validation_alias="SMTP_PASSWORD")
     alert_email_from: str | None = None
     alert_email_to: str | None = None
+    # A device counts as offline when discovery has not refreshed its
+    # last_seen for this many minutes. Discovery runs every five minutes, so
+    # three missed passes is long enough that a slow sweep is not an outage.
+    device_offline_minutes: int = 15
+    # Local hour at or after which the daily digest goes out (per account).
+    digest_hour: int = 8
 
     # Switch isolation / containment.
     # env: SWITCH_MGMT_PASSWORD / SWITCH_MGMT_ENABLE_SECRET
@@ -434,7 +539,7 @@ class Settings(BaseSettings):
 
     @property
     def secret_key(self) -> str:
-        return self.signing_key
+        return str(self.signing_key or "")
 
     @property
     def router_source_configured(self) -> bool:

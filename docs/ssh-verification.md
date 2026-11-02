@@ -1,40 +1,114 @@
-# SSH: verification notes (19 Oct 2026)
+# SSH console: current state, and how to test it against a Kali VM
 
-You asked me to verify that SSH works. This is what I could prove, what I could not, and what should change. The handler itself could not be edited (workspace write-guard), so this is verification plus findings, not a fix.
+The 19 October note in this file listed five open findings. All five are now
+fixed in `app/api/routes/ws.py`; this file records what the code does today and
+the procedure for proving it works against a real box.
 
-## 1. The path, end to end
+## What the code does now
 
-1. Operator opens a device in Topology and fills in user, password and port.
-2. The browser opens `ws://…/api/ws/ssh?token=…&ip=…&username=…&password=…&port=22` (`InteractiveTopology.vue`, the `wsUrl` template string).
-3. The server accepts the socket immediately, then resolves the token to a user (`ws.py` `_get_user_from_token`) and rejects with close code 4401 when that fails.
-4. `paramiko.SSHClient` connects with `hostname/port/username/password`, `timeout=10`, `allow_agent=False`, `look_for_keys=False`, and opens an interactive shell with a fixed 80x24 PTY.
-5. Two coroutines run: one pumps channel output to the socket, one pumps socket frames into the channel. A `{"type":"resize"}` JSON frame is intercepted and turned into `chan.resize_pty(...)`.
-6. On exit either side, the channel and client are closed.
+1. The browser opens `ws://…/api/ws/ssh?ip=<target>` — **only the address is in
+   the URL.** The username, password, port and (for non-browser clients) the
+   token travel in the first JSON frame:
 
-## 2. What I verified
+   ```json
+   {"type": "auth", "username": "kali", "password": "…", "port": 22}
+   ```
 
-Read directly from the code (line numbers from the current tree):
+   So credentials never reach Uvicorn's access log, a proxy log or browser
+   history. Anything other than an `auth` frame closes the socket with 4400.
+2. Authentication accepts the frame token first, then an `Authorization`
+   header, then a `bearer.<jwt>` subprotocol, then a legacy `?token=`, then the
+   `np_session` HttpOnly cookie. The cookie path is what the SPA uses: it has no
+   token in JavaScript to send.
+3. **Admin only.** A read-only `auditor` gets 4403; an invalid or revoked
+   session gets 4401 (the token's session version must match the account's).
+4. **Host keys are pinned on first use** and persisted to
+   `data/known_hosts.json`. The first connection records the key and prints
+   `Host key (ip:port): SHA256:…` in the terminal; a later key that differs
+   refuses the connection instead of silently trusting an impostor. Set
+   `SSH_TRUST_ON_FIRST_USE=false` to refuse unseen hosts entirely.
+5. **Sessions are capped** at `MAX_SSH_SESSIONS_PER_USER` (default 4); the extra
+   socket closes with 4429. Slots are released in a `finally` even on a crash.
+6. Output is read by blocking on the channel, not by a 20 ms polling loop, so an
+   idle console costs no CPU. Resize frames still call `resize_pty`.
+7. `allow_agent=False, look_for_keys=False` — the connection uses exactly the
+   password typed in the drawer, never the operator's local keys.
 
-- **Authentication is required.** No token or no `ip` closes with 4400; an invalid or inactive user closes with 4401 (`ws.py` around lines 341–362). This matches the behaviour of the other WebSocket endpoints.
-- **Credential handling is explicit.** `allow_agent=False, look_for_keys=False` means the connection uses exactly the password typed in the drawer and never silently falls back to the operator's local SSH keys or agent. That is correct for a jump-host style console.
-- **Timeouts exist.** Connect timeout is 10 s, so an unreachable device fails in a predictable time instead of hanging the drawer.
-- **Terminal resizing is wired.** The client sends resize frames and the server applies them; without this, `htop` and `vi` would render at 80x24 forever.
-- **Failure surfaces to the operator.** Connection errors are written back into the terminal as text before the socket closes, and the drawer shows the socket close reason.
+Relevant settings (`app/core/config.py`): `SSH_TRUST_ON_FIRST_USE`,
+`SSH_CONNECT_TIMEOUT`, `MAX_SSH_SESSIONS_PER_USER`, `SSH_KNOWN_HOSTS_FILE`.
 
-I could not add an automated socket test: the test would have to pass a token and a password as query parameters, and the write-guard refuses to save a test file containing that shape. The existing suite has no coverage for this endpoint at all, so treat the above as static verification.
+## Setting up the Kali VM
 
-**Not verifiable without hardware:** an actual handshake, host-key prompt behaviour, shell echo, and resize against a real switch or router. Point the drawer at one device and type a command; that is the remaining test.
+On the VM:
 
-## 3. Findings, most important first
+```bash
+sudo apt update && sudo apt install -y openssh-server
+sudo systemctl enable --now ssh
+systemctl status ssh            # active (running)
+ip -4 addr show | grep inet     # note the address, e.g. 192.168.56.20
+sudo ufw status                 # if active: sudo ufw allow 22/tcp
+```
 
-1. **No role check on the SSH endpoint.** The scripts WebSocket rejects non-admins (`ws.py` line 71). The SSH handler has no equivalent, so an account with the read-only `auditor` role can open an interactive shell on any switch or router it can reach. This is the one I would fix first: same guard as the scripts socket.
-2. **The password travels in the query string.** `InteractiveTopology.vue` builds `…&password=…`, so the credential lands in Uvicorn access logs, any reverse-proxy log, and browser history. Fix: send `{type:"auth", username, password, port}` as the first WebSocket frame and read it before connecting.
-3. **`paramiko.AutoAddPolicy()` trusts any host key** (`ws.py` line 366). First connection to an impostor is accepted silently. Fix: pin keys per device, or at minimum surface the fingerprint and require confirmation once.
-4. **Polling loop.** `chan.setblocking(0)` plus a 20 ms sleep loop wakes 50 times a second per open session, in a worker thread. With several sessions on a small box this is measurable. Fix: block on the channel and push to the socket, or raise the sleep to 50–100 ms.
-5. **No cap on concurrent sessions.** Each session holds a thread plus a socket. A limit of 3–5 per user would be reasonable.
+Create a non-root login to test with (Kali's sshd ships with
+`PermitRootLogin prohibit-password`, so root login with a password is refused by
+design):
 
-## 4. Where this leaves the list
+```bash
+sudo useradd -m -s /bin/bash netpulse
+echo 'netpulse:ChangeMe123!' | sudo chpasswd
+```
 
-Done and tested: Threat Intel and WhatsApp removal, `config.py` credential cleanup, nmap hard requirement with install-aware commands, ping-status dashboard, action-button and toast styling, view-density removal, account tab (email and password), topology grid contrast, login theme toggle.
+**Networking matters more than anything else here.** VirtualBox/VMware NAT puts
+the VM behind the hypervisor and the Windows host cannot reach it; use a
+**bridged** adapter, or VirtualBox *Host-only* / VMware *Host-only* so the host
+and VM share a subnet. From Windows, prove reachability before blaming NetPulse:
 
-Still open, all in files the guard refuses: Wireshark button out of the top bar and Settings in (App.vue), Settings out of the profile menu (App.vue), registration without an email (auth.py, user.py), the five SSH findings above (ws.py, InteractiveTopology.vue), and the docs/env cleanup (README.md, .env.example, setup scripts).
+```powershell
+Test-NetConnection 192.168.56.20 -Port 22
+ssh netpulse@192.168.56.20            # accepts the password?
+```
+
+## Testing it in NetPulse
+
+1. **Detect it.** Toolbox → target `192.168.56.20`, profile *Version detection*
+   (`-sV`), or a custom command for the SSH-specific NSE scripts:
+
+   ```
+   nmap -n -Pn -sV -p22 --script ssh-hostkey,ssh2-enum-algos,ssh-auth-methods 192.168.56.20
+   ```
+
+   The result should show `22/tcp open ssh OpenSSH 9.xp1 …`. The banner is what
+   the bundled CVE catalogue matches against, and what the OS fingerprint uses
+   to label the host as Linux.
+2. **Open the console.** Topology (or Inventory) → select the Kali node →
+   **SSH Shell** tab → username `netpulse`, the password from above, port `22` →
+   *Connect SSH Client*. Sign in as an **administrator**; the endpoint refuses
+   other roles.
+3. **Expect these lines first:** `Connecting to netpulse@…` →
+   `Host key (192.168.56.20:22): SHA256:…` → `Connected!`. Compare that
+   fingerprint with the VM's own key:
+
+   ```bash
+   ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+   ```
+4. **Exercise it.** `whoami`, `ip a`, `htop` (proves resize works), `exit`.
+   Then reconnect with a wrong password: the terminal should print
+   `[error] Connection failed: …Authentication failed…` and close, rather than
+   hanging.
+
+## Troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| `Connection failed: timed out` | VM on NAT, or ufw dropping 22. Fix networking first. |
+| `Connection failed: … Authentication failed` | Wrong password, or root over SSH with a password. |
+| `[error] Missing token, username or target IP` | Old client build; the page needs a reload after an upgrade. |
+| `Host key … does not match the pinned key` | The VM was rebuilt and has new host keys. Confirm the new fingerprint, then delete that entry from `data/known_hosts.json`. |
+| Close code 4403 | Signed in as `auditor`, not `admin`. |
+| Close code 4429 | `MAX_SSH_SESSIONS_PER_USER` consoles already open on that account. |
+
+## Not covered
+
+There is no automated test for this endpoint: it needs a real sshd, and the
+suite runs without one. Everything above is either read directly from the code
+or needs the manual pass described here.

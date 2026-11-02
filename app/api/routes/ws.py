@@ -97,7 +97,13 @@ async def _get_user_from_token(token: str, db: AsyncSession) -> User | None:
 
     # Same resolution as the REST dependency: id-based subjects first, with
     # the legacy email form as a fallback.
-    return await resolve_user_from_subject(db, subject)
+    user = await resolve_user_from_subject(db, subject)
+    if user is None or not user.is_active:
+        return None
+    # A revoked session must not keep a console or metrics socket open.
+    if int(getattr(user, "token_version", 0) or 0) != int(payload.get("ver") or 0):
+        return None
+    return user
 
 
 async def _accept_with_protocol(websocket: WebSocket) -> None:
@@ -128,14 +134,23 @@ def _bearer_from_handshake(websocket: WebSocket) -> str:
     """
     for protocol in websocket.scope.get("subprotocols") or []:
         if protocol.startswith("bearer."):
-            return protocol[len("bearer.") :]
+            value = protocol[len("bearer.") :].strip()
+            if value:
+                return value
 
     header = websocket.headers.get("authorization") or ""
     scheme, _, value = header.partition(" ")
     if scheme.lower() == "bearer" and value.strip():
         return value.strip()
 
-    return websocket.query_params.get("token") or ""
+    from app.core.session_cookie import SESSION_COOKIE
+
+    token = websocket.query_params.get("token") or ""
+    if token:
+        return token
+    # A browser cannot set headers on a WebSocket handshake, so with cookie
+    # sessions the HttpOnly cookie is what authenticates the socket.
+    return websocket.cookies.get(SESSION_COOKIE) or ""
 
 
 @router.websocket("/scripts/{job_id}")
@@ -460,7 +475,10 @@ async def websocket_ssh(websocket: WebSocket) -> None:
         await websocket.close(code=4400)
         return
 
-    token = handshake.get("token") or ""
+    # A browser with a cookie session has no token to put in the frame, so the
+    # HttpOnly cookie (or a subprotocol / header / legacy query token) stands in
+    # for it. An explicit frame token still wins, for scripts and the CLI.
+    token = str(handshake.get("token") or "") or _bearer_from_handshake(websocket)
     username = str(handshake.get("username") or "")
     password = str(handshake.get("password") or "")
 

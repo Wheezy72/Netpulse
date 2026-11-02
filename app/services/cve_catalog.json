@@ -1,0 +1,148 @@
+{
+  "updated": "2026-11-02",
+  "source": "Curated seed ranges. Run `python -m app.services.cve_feed` helpers / see README to extend from NVD.",
+  "notes": "Ranges are upstream versions. A vendor backport can be patched while still inside a range; findings say so.",
+  "advisories": [
+    {
+      "cve_id": "CVE-2021-41773",
+      "summary": "Apache httpd path traversal / RCE (mod_proxy)",
+      "severity": "critical",
+      "products": ["apache httpd", "httpd"],
+      "ranges": [{ "introduced": "2.4.49", "fixed": "2.4.50" }],
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-41773"
+    },
+    {
+      "cve_id": "CVE-2021-42013",
+      "summary": "Apache httpd path traversal bypass of the 2.4.50 fix",
+      "severity": "critical",
+      "products": ["apache httpd", "httpd"],
+      "ranges": [{ "introduced": "2.4.50", "fixed": "2.4.51" }],
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-42013"
+    },
+    {
+      "cve_id": "CVE-2019-0211",
+      "summary": "Apache httpd local privilege escalation via scoreboard",
+      "severity": "high",
+      "products": ["apache httpd", "httpd"],
+      "ranges": [{ "introduced": "2.4.17", "fixed": "2.4.39" }],
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2019-0211"
+    },
+    {
+      "cve_id": "CVE-2021-44790",
+      "summary": "Apache httpd mod_lua buffer overflow",
+      "severity": "critical",
+      "products": ["apache httpd", "httpd"],
+      "ranges": [{ "introduced": "2.4.0", "fixed": "2.4.52" }],
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-44790"
+    },
+    {
+      "cve_id": "CVE-2021-23017",
+      "summary": "nginx resolver off-by-one (DNS response heap write)",
+      "severity": "high",
+      "products": ["nginx"],
+      "ranges": [{ "introduced": "0.6.18", "fixed": "1.20.1" }],
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-23017"
+    },
+    {
+      "cve_id": "CVE-2019-20372",
+      "summary": "nginx error_page request smuggling",
+      "severity": "medium",
+      "products": ["nginx"],
+      "ranges": [{ "introduced": "0.0.0", "fixed": "1.17.7" }],
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2019-20372"
+    },
+    {
+      "cve_id": "CVE-2018-15473",
+      "summary": "OpenSSH username enumeration via malformed auth request",
+      "severity": "medium",
+      "products": ["openssh", "ssh"],
+      "ranges": [{ "introduced": "0.0.0", "fixed": "7.7" }],
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2018-15473"
+    },
+    {
+      "cve_id": "CVE-2016-0777",
+      "summary": "OpenSSH roaming client information leak",
+      "severity": "high",
+      "products": ["openssh", "ssh"],
+      "ranges": [{ "introduced": "5.4", "fixed": "7.2" }],
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2016-0777"
+    },
+    {
+      "cve_id": "CVE-2014-0160",
+      "summary": "OpenSSL Heartbleed heartbeat information leak",
+      "severity": "critical",
+      "products": ["openssl"],
+      "ranges": [{ "introduced": "1.0.1", "fixed": "1.0.1g" }],
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2014-0160"
+    },
+    {
+      "cve_id": "CVE-2022-0778",
+      "summary": "OpenSSL infinite loop parsing a crafted certificate (BN_mod_sqrt)",
+      "severity": "high",
+      "products": ["openssl"],
+      "ranges": [
+        { "introduced": "1.1.1", "fixed": "1.1.1n" },
+        { "introduced": "3.0.0", "fixed": "3.0.2" }
+      ],
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-0778"
+    },
+    {
+      "cve_id": "CVE-2020-1938",
+      "summary": "Apache Tomcat AJP Ghostcat file read / RCE",
+      "severity": "critical",
+      "products": ["apache tomcat", "tomcat", "coyote"],
+      "ranges": [
+        { "introduced": "7.0.0", "fixed": "7.0.100" },
+        { "introduced": "8.5.0", "fixed": "8.5.51" },
+        { "introduced": "9.0.0", "fixed": "9.0.31" }
+      ],
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-1938"
+    },
+    {
+      "cve_id": "CVE-2017-5638",
+      "summary": "Apache Struts Jakarta multipart parser RCE",
+      "severity": "critical",
+      "products": ["apache struts", "struts"],
+      "ranges": [
+        { "introduced": "2.3.0", "fixed": "2.3.32" },
+        { "introduced": "2.5.0", "fixed": "2.5.10.1" }
+      ],
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2017-5638"
+    },
+    {
+      "cve_id": "CVE-2018-7600",
+      "summary": "Drupal Drupalgeddon2 remote code execution",
+      "severity": "critical",
+      "products": ["drupal"],
+      "ranges": [
+        { "introduced": "7.0", "fixed": "7.58" },
+        { "introduced": "8.0.0", "fixed": "8.5.1" }
+      ],
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2018-7600"
+    },
+    {
+      "cve_id": "CVE-2011-2523",
+      "summary": "vsftpd 2.3.4 backdoor (smiley face trigger)",
+      "severity": "critical",
+      "products": ["vsftpd"],
+      "ranges": [{ "introduced": "2.3.4", "fixed": "2.3.5" }],
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2011-2523"
+    },
+    {
+      "cve_id": "CVE-2015-3306",
+      "summary": "ProFTPD mod_copy unauthenticated file copy",
+      "severity": "critical",
+      "products": ["proftpd"],
+      "ranges": [{ "introduced": "1.3.5", "fixed": "1.3.6" }],
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2015-3306"
+    },
+    {
+      "cve_id": "CVE-2017-7494",
+      "summary": "Samba SambaCry remote code execution via writable share",
+      "severity": "high",
+      "products": ["samba", "smbd"],
+      "ranges": [{ "introduced": "3.5.0", "fixed": "4.6.4" }],
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2017-7494"
+    }
+  ]
+}

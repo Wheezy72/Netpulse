@@ -7,9 +7,9 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from email_validator import EmailNotValidError, validate_email
-from jose import jwt
+from jose import JWTError, jwt
 from pydantic import BaseModel, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,12 +21,20 @@ from app.api.deps import (
     get_password_hash,
     optional_current_user,
     require_admin,
+    resolve_user_from_subject,
+    revoke_sessions,
     subject_for_user,
     verify_password,
     security_scheme,
 )
 from app.core.config import settings
 from app.core.redis import get_redis
+from app.core.session_cookie import (
+    clear_session_cookies,
+    session_token_from_request,
+    set_session_cookies,
+)
+from app.core.totp import match_recovery_code, verify_totp
 from app.models.user import User, UserRole
 from app.models.user_settings import UserSettings
 from app.core.clock import utcnow
@@ -168,8 +176,59 @@ def token_subject_for(user: User) -> str:
 
 
 class TokenResponse(BaseModel):
-    access_token: str
+    """Login outcome.
+
+    ``access_token`` is still returned so scripts and the CLI keep working,
+    but the browser no longer stores it: the same session arrives as an
+    HttpOnly cookie, which page scripts cannot read. When a second factor
+    is enabled the first response carries no session at all — only
+    ``mfa_token``, which is useless without the code.
+    """
+
+    access_token: str | None = None
     token_type: str = "bearer"
+    mfa_required: bool = False
+    mfa_token: str | None = None
+
+
+class MfaLoginRequest(BaseModel):
+    mfa_token: str
+    code: str
+
+
+MFA_SCOPE = "mfa"
+_MFA_TOKEN_TTL = timedelta(minutes=5)
+
+
+def _mfa_token_for(user: User, remember: bool) -> str:
+    """A five-minute ticket proving only that the password was accepted."""
+    return jwt.encode(
+        {
+            "sub": token_subject_for(user),
+            "scope": MFA_SCOPE,
+            "rmb": bool(remember),
+            "ver": int(getattr(user, "token_version", 0) or 0),
+            "exp": utcnow() + _MFA_TOKEN_TTL,
+        },
+        settings.secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+
+def _decode_mfa_token(token: str) -> dict[str, Any]:
+    expired = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="That sign-in step expired. Start again.",
+    )
+    try:
+        payload = jwt.decode(
+            token, settings.secret_key, algorithms=[settings.jwt_algorithm]
+        )
+    except JWTError:
+        raise expired from None
+    if payload.get("scope") != MFA_SCOPE or not payload.get("sub"):
+        raise expired
+    return payload
 
 
 def _normalize_email(value: str) -> str:
@@ -271,6 +330,10 @@ class UserMeResponse(BaseModel):
 async def login(
     payload: LoginRequest,
     db: AsyncSession = Depends(db_session),
+    # Annotated so FastAPI injects them; the None default keeps direct calls
+    # (tests, scripts) working outside a request context.
+    request: Request = None,  # type: ignore[assignment]
+    response: Response = None,  # type: ignore[assignment]
 ) -> TokenResponse:
     """Authenticate a user and return a JWT access token."""
     result = await db.execute(select(User).where(User.username == payload.username))
@@ -314,6 +377,14 @@ async def login(
                     detail="This temporary password has expired. Request a fresh one via 'Forgot password' — it only lasts 15 minutes.",
                 )
 
+    # Second factor. Nothing is issued here except a five-minute,
+    # single-purpose ticket: a password alone must never produce a session.
+    if user.totp_enabled and user.totp_secret:
+        return TokenResponse(
+            mfa_required=True,
+            mfa_token=_mfa_token_for(user, payload.remember_me),
+        )
+
     access_token_expires = (
         timedelta(days=30)
         if payload.remember_me
@@ -323,7 +394,89 @@ async def login(
         subject=token_subject_for(user),
         role=user.role.value,
         expires_delta=access_token_expires,
+        token_version=user.token_version,
     )
+    if response is not None:
+        set_session_cookies(
+            response,
+            token,
+            max_age=int(access_token_expires.total_seconds()),
+            request=request,
+        )
+    return TokenResponse(access_token=token)
+
+
+@router.post(
+    "/login/totp",
+    response_model=TokenResponse,
+    summary="Complete a sign-in that requires a second factor",
+    dependencies=[Depends(_enforce_login_rate_limit)],
+)
+async def login_totp(
+    payload: MfaLoginRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(db_session),
+) -> TokenResponse:
+    """Exchange a password-verified ticket plus a code for a session.
+
+    The ticket proves the password was accepted and nothing more. The code is
+    the current authenticator code, or one of the recovery codes — which is
+    consumed on use, because a recovery code that keeps working is a second
+    password.
+    """
+    data = _decode_mfa_token(payload.mfa_token)
+    user = await resolve_user_from_subject(db, str(data.get("sub") or ""))
+    if (
+        user is None
+        or not user.is_active
+        or not user.totp_enabled
+        or not user.totp_secret
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Two-factor authentication is not available for this account.",
+        )
+
+    # A password change between the two steps revokes the ticket.
+    if int(getattr(user, "token_version", 0) or 0) != int(data.get("ver") or 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has been revoked",
+        )
+
+    if not verify_totp(user.totp_secret, payload.code):
+        hashes = user.recovery_hashes()
+        index = match_recovery_code(hashes, payload.code)
+        if index is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="That code is not valid.",
+            )
+        hashes.pop(index)
+        user.set_recovery_hashes(hashes)
+        await db.commit()
+        logger.warning(
+            "Recovery code used to sign in as %s (%d left).",
+            user.username,
+            len(hashes),
+        )
+
+    expires = (
+        timedelta(days=30)
+        if bool(data.get("rmb"))
+        else timedelta(minutes=settings.access_token_expire_minutes)
+    )
+    token = create_access_token(
+        subject=token_subject_for(user),
+        role=user.role.value,
+        expires_delta=expires,
+        token_version=user.token_version,
+    )
+    if response is not None:
+        set_session_cookies(
+            response, token, max_age=int(expires.total_seconds()), request=request
+        )
     return TokenResponse(access_token=token)
 
 
@@ -334,11 +487,19 @@ async def login(
 async def logout(
     request: Request,
     db: AsyncSession = Depends(db_session),
+    response: Response = None,  # type: ignore[assignment]
 ) -> Dict[str, str]:
-    # Extract token
+    # Bearer when a client sent one, else the session cookie the browser
+    # carries (it cannot be read by page scripts, only presented).
     auth_header = request.headers.get("Authorization")
+    token = ""
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header.split(" ")[1]
+    else:
+        token = session_token_from_request(request)
+    if response is not None:
+        clear_session_cookies(response)
+    if token:
         try:
             # Decode token (ignore expiration verification to find remaining TTL)
             payload = jwt.decode(
@@ -363,6 +524,35 @@ async def logout(
             logger.exception("Error blacklisting token on logout: %s", e)
 
     return {"message": "Logged out successfully"}
+
+
+@router.post(
+    "/logout-all",
+    summary="Invalidate every session for the current account",
+)
+async def logout_all(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(db_session),
+    response: Response = None,  # type: ignore[assignment]
+) -> Dict[str, object]:
+    """Revoke every token issued for this account, including this one.
+
+    A bearer token cannot be recalled, so the account's version moves and every
+    token carrying the old version stops validating on the next request. No
+    replacement token is returned on purpose: whoever asked for all sessions to
+    die should not be handed the one that asked.
+    """
+    db_user = await db.get(User, user.id)
+    if db_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    if response is not None:
+        clear_session_cookies(response)
+    version = await revoke_sessions(db, db_user)
+    return {"message": "All sessions revoked", "token_version": version}
 
 
 @router.get(
@@ -756,6 +946,7 @@ async def update_password(
     request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(db_session),
+    response: Response = None,  # type: ignore[assignment]
 ) -> Dict[str, str]:
     # Retrieve the user directly from the database to ensure it's attached and has all fields loaded
     result = await db.execute(select(User).where(User.id == user.id))
@@ -780,6 +971,17 @@ async def update_password(
     db_user.reset_token_expires = None
     await db.commit()
 
+    # The temporary password was a credential an admin (or the server console)
+    # knew. Once a real password replaces it, every token issued under the
+    # temporary one has to stop working.
+    await revoke_sessions(db, db_user)
+
+    new_token = create_access_token(
+        subject=token_subject_for(db_user),
+        role=db_user.role.value,
+        token_version=db_user.token_version,
+    )
+
     # Invalidate Redis session cache so it updates with the new user profile state on next request
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
@@ -793,7 +995,14 @@ async def update_password(
         except Exception:
             pass
 
-    return {"message": "Password updated successfully."}
+    if response is not None:
+        set_session_cookies(
+            response,
+            new_token,
+            max_age=settings.access_token_expire_minutes * 60,
+            request=request,
+        )
+    return {"message": "Password updated successfully.", "access_token": new_token}
 
 
 @router.post(
@@ -853,6 +1062,10 @@ async def forgot_password(
 
     # Sessions minted under the old password must not survive the replacement.
     revoked = await _revoke_user_sessions(user.id)
+    # Clearing the cache is not enough on its own: a token minted on another
+    # host (or re-cached after a restart) still carries the old version, so the
+    # bump is what actually invalidates it.
+    await revoke_sessions(db, user)
 
     # Log the plaintext to the console so the operator can copy-paste it.
     logger.warning(

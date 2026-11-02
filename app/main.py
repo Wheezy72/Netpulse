@@ -25,7 +25,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
@@ -37,6 +37,7 @@ from starlette.responses import Response
 from sqlalchemy import select
 
 from app.core.clock import utcnow
+from app.core.session_cookie import require_csrf
 
 # scapy narrates its own environment at *import* time, long before
 # setup_logging() runs, so its loggers have to be quieted ahead of the first app
@@ -104,6 +105,21 @@ _VERIFICATION_SCHEMA_STATEMENTS = (
 # Per-user portrait skins arrived after user_settings; same deal.
 _SETTINGS_SCHEMA_STATEMENTS = (
     "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS avatar_style VARCHAR(32)",
+)
+
+# "Host offline" alerting needs one bit of state on the device row; create_all
+# cannot add it to an existing table.
+_ALERT_STATE_SCHEMA_STATEMENTS = (
+    "ALTER TABLE devices ADD COLUMN IF NOT EXISTS offline_alert_sent "
+    "BOOLEAN NOT NULL DEFAULT FALSE",
+)
+
+# Session revocation arrived after the users table; create_all cannot add it.
+_SESSION_SCHEMA_STATEMENTS = (
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_recovery_codes TEXT",
 )
 
 
@@ -286,6 +302,36 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                         exc,
                     )
 
+            if engine.dialect.name == "postgresql":
+                try:
+                    from sqlalchemy import text
+
+                    async with engine.begin() as conn:
+                        for statement in _SESSION_SCHEMA_STATEMENTS:
+                            await conn.execute(text(statement))
+                except Exception as exc:
+                    logger.warning(
+                        "Could not add the session-version column (%s); "
+                        "sign-out-everywhere will not work. Apply "
+                        "migrations/20261102_add_user_token_version.sql by hand.",
+                        exc,
+                    )
+
+            # 2. TimescaleDB is opt-in. Ordinary PostgreSQL tables hold every
+            if engine.dialect.name == "postgresql":
+                try:
+                    from sqlalchemy import text
+
+                    async with engine.begin() as conn:
+                        for statement in _ALERT_STATE_SCHEMA_STATEMENTS:
+                            await conn.execute(text(statement))
+                except Exception as exc:
+                    logger.warning(
+                        "Could not add the offline-alert column (%s); apply "
+                        "migrations/20261102_add_offline_alert_state.sql by hand.",
+                        exc,
+                    )
+
             # 2. TimescaleDB is opt-in. Ordinary PostgreSQL tables hold every
             #    metric; the extension only changes how they are stored. So it
             #    is not probed on a normal boot at all — an install without it
@@ -443,7 +489,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         evaluated the vulnerability feed or nudged anyone about scheduled
         scans, so a no-Docker install behaved differently from the full stack.
         """
-        from app.services.alerts import process_vulnerability_alerts, send_system_alert
+        from app.services.alert_policy import load_alert_policy
+        from app.services.alerts import (
+            process_daily_digest,
+            process_device_down_alerts,
+            process_vulnerability_alerts,
+            send_system_alert,
+        )
         from app.services.device_discovery import run_device_discovery
         from app.services.scan_scheduler import run_due_scheduled_scans
 
@@ -462,9 +514,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         while True:
             try:
                 async with async_session_factory() as session:  # type: ignore[union-attr]
-                    await process_vulnerability_alerts(session)
+                    # One policy read per sweep: the four switches in Settings →
+                    # Notifications decide which severities and events fire,
+                    # and who receives them.
+                    policy = await load_alert_policy(session)
+                    await process_vulnerability_alerts(session, policy=policy)
+                    await process_device_down_alerts(session, policy=policy)
+                    await process_daily_digest(session)
                     await session.commit()
-                log.debug("Vulnerability alert sweep complete.")
+                log.debug("Notification sweep complete.")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # keep the loop alive
@@ -617,7 +675,10 @@ app.add_middleware(
     max_age=600,
 )
 
-app.include_router(api_router, prefix="/api")
+# Every HTTP route sits behind the CSRF guard. It only acts on requests
+# authenticated by the session cookie: bearer clients cannot be driven
+# cross-site, and unauthenticated calls carry no cookie to abuse.
+app.include_router(api_router, prefix="/api", dependencies=[Depends(require_csrf)])
 
 
 @app.get("/api/security/status", include_in_schema=False)

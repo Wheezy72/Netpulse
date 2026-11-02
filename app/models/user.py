@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, Integer, String
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -54,6 +55,29 @@ class User(Base):
         index=True,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Bumped when sessions must be invalidated ("sign out everywhere", password
+    # change, admin reset). Tokens carry the version they were issued under, so
+    # a stolen token stops working the moment this moves — the only way to kill
+    # a bearer token before it expires.
+    token_version: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+        server_default="0",
+    )
+    # Second factor (RFC 6238). The secret exists as soon as enrolment
+    # starts so a half-finished setup verifies against the same secret; it
+    # only becomes a requirement for sign-in once totp_enabled is true.
+    totp_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        server_default="false",
+    )
+    # Recovery codes as a JSON list of sha256 digests, consumed one at a
+    # time: a lost phone must not mean a lost account.
+    totp_recovery_codes: Mapped[str | None] = mapped_column(Text, nullable=True)
     reset_token: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     reset_token_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -61,3 +85,15 @@ class User(Base):
         DateTime(timezone=True),
         default=utcnow,
     )
+
+
+    def recovery_hashes(self) -> list[str]:
+        """Hashes of the unused recovery codes (never the codes themselves)."""
+        try:
+            data = json.loads(self.totp_recovery_codes or "[]")
+        except (TypeError, ValueError):
+            return []
+        return [str(item) for item in data] if isinstance(data, list) else []
+
+    def set_recovery_hashes(self, hashes: list[str]) -> None:
+        self.totp_recovery_codes = json.dumps(list(hashes))

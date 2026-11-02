@@ -46,6 +46,11 @@ data/scans/*.txt
 data/scans/*.xml
 !data/scans/.gitkeep
 
+# Generated at first start when SECRET_KEY is a placeholder, plus the pinned
+# SSH host keys. Both are local state, not source.
+data/signing_key
+data/known_hosts.json
+
 # Runtime state: the launcher writes its PID here on every start.
 data/run/
 

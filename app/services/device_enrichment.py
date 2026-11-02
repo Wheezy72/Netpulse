@@ -17,10 +17,11 @@ parsing logic stays testable in the minimal CI environment.
 from __future__ import annotations
 
 import asyncio
+import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from app.services.scan_policy import is_restricted_target, validate_target
 
@@ -43,6 +44,105 @@ class PortObservation:
     version: Optional[str] = None
     extra_info: Optional[str] = None
     banner: Optional[str] = None
+
+
+# nmap's vuln NSE library prints a state line per host. "NOT VULNERABLE" also
+# contains the word, so the positive pattern is anchored to the state form and
+# the negative one is checked first.
+_POSITIVE_STATE = re.compile(r"(?im)^\s*(?:state:\s*)?(?:likely\s+)?vulnerable\b")
+_NEGATIVE_STATE = re.compile(r"(?im)^\s*state:\s*not vulnerable\b")
+_CVE_IN_TEXT = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
+
+# Only the stems in our own catalog ever reach argv, but guard anyway: a script
+# name is interpolated into a command line.
+_SCRIPT_NAME_SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+
+
+@dataclass(slots=True)
+class VulnerabilityFinding:
+    """One NSE script that reported a host (or port) as vulnerable."""
+
+    script: str
+    title: str
+    severity: str = "medium"
+    cve_id: Optional[str] = None
+    port: Optional[int] = None
+    protocol: Optional[str] = None
+    detail: Optional[str] = None
+
+
+def script_reports_vulnerable(output: str) -> bool:
+    """Whether an NSE script's output is a positive verdict.
+
+    Kept separate and pure because attribution matters: mailing "vulnerable"
+    for every script that merely ran would be worse than not scanning at all.
+    """
+    text = output or ""
+    if _NEGATIVE_STATE.search(text):
+        return False
+    return bool(_POSITIVE_STATE.search(text))
+
+
+def vuln_findings_from_scan_data(scan_data: Dict[str, Any]) -> List[VulnerabilityFinding]:
+    """Read NSE verdicts out of python-nmap's per-port script mapping.
+
+    Pure, like :func:`ports_from_scan_data`: it takes the plain dict so the
+    attribution rules are testable without scanning anything.
+    """
+    from app.services.nmap_capabilities import VULN_SCRIPT_CATALOG
+
+    findings: List[VulnerabilityFinding] = []
+    seen: set[tuple[str, Optional[int], Optional[str]]] = set()
+
+    for _host, host_entry in (scan_data or {}).items():
+        if not isinstance(host_entry, dict):
+            continue
+        for protocol in STATE_PORT_PROTOCOLS:
+            ports = host_entry.get(protocol)
+            if not isinstance(ports, dict):
+                continue
+            for port_key, info in ports.items():
+                if not isinstance(info, dict):
+                    continue
+                scripts = info.get("script")
+                if not isinstance(scripts, dict):
+                    continue
+                try:
+                    port: Optional[int] = int(port_key)
+                except (TypeError, ValueError):
+                    port = None
+
+                for script_name, output in scripts.items():
+                    text = str(output or "")
+                    if not script_reports_vulnerable(text):
+                        continue
+
+                    key = (str(script_name), port, protocol)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+
+                    catalog = VULN_SCRIPT_CATALOG.get(str(script_name)) or {}
+                    summary = str(catalog.get("summary") or "").strip()
+                    cve = catalog.get("cve")
+                    if not cve:
+                        match = _CVE_IN_TEXT.search(text)
+                        cve = match.group(0).upper() if match else None
+
+                    findings.append(
+                        VulnerabilityFinding(
+                            script=str(script_name),
+                            title=summary or f"{script_name} reported a vulnerability",
+                            severity=str(catalog.get("severity") or "medium"),
+                            cve_id=str(cve) if cve else None,
+                            port=port,
+                            protocol=protocol,
+                            detail=text.strip()[:4000] or None,
+                        )
+                    )
+
+    findings.sort(key=lambda item: (item.port or 0, item.script))
+    return findings
 
 
 def _format_script_output(entry: Dict[str, Any]) -> Optional[str]:
@@ -108,13 +208,24 @@ def nmap_available() -> bool:
     return shutil.which("nmap") is not None
 
 
-def _deep_scan_sync(ip_address: str, host_timeout: int, port_spec: str) -> Dict[str, Any]:
+def _deep_scan_sync(
+    ip_address: str,
+    host_timeout: int,
+    port_spec: str,
+    vuln_scripts: Sequence[str] = (),
+) -> Dict[str, Any]:
     """Blocking targeted nmap scan, returned in python-nmap's scan shape."""
     import nmap  # python-nmap
 
     arguments = f"-sV -T4 -Pn --host-timeout {int(host_timeout)}s"
     if port_spec:
         arguments = f"{arguments} -p {port_spec}"
+    scripts = [name for name in vuln_scripts if _SCRIPT_NAME_SAFE.match(name)]
+    if scripts:
+        # One targeted run instead of a second sweep: the service scan already
+        # opened the connections, and the script list is the catalog
+        # intersected with what this install actually has on disk.
+        arguments = f"{arguments} --script {','.join(scripts)}"
 
     scanner = nmap.PortScanner()
     scanner.scan(hosts=ip_address, arguments=arguments)
@@ -126,36 +237,45 @@ def _deep_scan_sync(ip_address: str, host_timeout: int, port_spec: str) -> Dict[
     return scan_data
 
 
-async def scan_device_ports(
+@dataclass(slots=True)
+class DeviceScanResult:
+    """Everything one deep scan of a known host produced."""
+
+    observations: List[PortObservation] = field(default_factory=list)
+    findings: List[VulnerabilityFinding] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+
+async def scan_device(
     ip_address: str,
     *,
     host_timeout: int = 180,
     port_spec: str = "",
-) -> Tuple[List[PortObservation], List[str]]:
-    """Scan one device for listening ports.
+    vuln_scripts: Sequence[str] = (),
+) -> DeviceScanResult:
+    """Scan one device for listening ports and, optionally, known CVEs.
 
-    Returns ``(observations, warnings)``. Missing nmap, a restricted target, or
-    a failed scan are all reported as warnings with an empty result rather than
-    raised, because a detail lookup should degrade visibly instead of erroring.
+    Missing nmap, a restricted target, or a failed scan are all reported as
+    warnings with an empty result rather than raised, because a detail lookup
+    should degrade visibly instead of erroring.
     """
-    warnings: List[str] = []
-
     if not validate_target(ip_address):
-        return [], [f"Refusing to scan invalid target: {ip_address!r}"]
+        return DeviceScanResult(warnings=[f"Refusing to scan invalid target: {ip_address!r}"])
     if is_restricted_target(ip_address):
-        return [], [
-            "Active scanning is prohibited on designated fragile or restricted subnets."
-        ]
+        return DeviceScanResult(
+            warnings=["Active scanning is prohibited on designated fragile or restricted subnets."]
+        )
     if not nmap_available():
         # Built-in engine: a TCP connect sweep still answers "what is
-        # listening" without nmap. Service/version detection needs nmap, so
-        # the caller is told the result is port-level only.
+        # listening" without nmap. Service/version detection and the NSE
+        # vulnerability scripts both need nmap, so the caller is told the
+        # result is port-level only.
         from app.services.builtin_scan import builtin_scan
 
         try:
             _output, summary = await builtin_scan(ip_address, "-sV -F")
         except Exception as exc:  # noqa: BLE001 - surfaced as a warning
-            return [], [f"Deep scan failed: {exc}"]
+            return DeviceScanResult(warnings=[f"Deep scan failed: {exc}"])
 
         observations: List[PortObservation] = []
         for host in summary.get("hosts", []):
@@ -169,17 +289,36 @@ async def scan_device_ports(
                     )
                 )
         observations.sort(key=lambda obs: obs.port)
-        return observations, [
-            "Scanned with the built-in TCP engine (nmap not installed); "
-            "port-level results only, no service versions."
-        ]
+        return DeviceScanResult(
+            observations=observations,
+            warnings=[
+                "Scanned with the built-in TCP engine (nmap not installed); "
+                "port-level results only, no service versions or vulnerability checks."
+            ],
+        )
 
     try:
-        scan_data = await asyncio.to_thread(_deep_scan_sync, ip_address, host_timeout, port_spec)
+        scan_data = await asyncio.to_thread(
+            _deep_scan_sync, ip_address, host_timeout, port_spec, list(vuln_scripts)
+        )
     except Exception as exc:  # noqa: BLE001 - surfaced to the caller as a warning
-        return [], [f"Deep scan failed: {exc}"]
+        return DeviceScanResult(warnings=[f"Deep scan failed: {exc}"])
 
-    return ports_from_scan_data(scan_data), warnings
+    return DeviceScanResult(
+        observations=ports_from_scan_data(scan_data),
+        findings=vuln_findings_from_scan_data(scan_data),
+    )
+
+
+async def scan_device_ports(
+    ip_address: str,
+    *,
+    host_timeout: int = 180,
+    port_spec: str = "",
+) -> Tuple[List[PortObservation], List[str]]:
+    """Port-only view of :func:`scan_device`, kept for existing callers."""
+    result = await scan_device(ip_address, host_timeout=host_timeout, port_spec=port_spec)
+    return result.observations, result.warnings
 
 
 async def upsert_device_ports(

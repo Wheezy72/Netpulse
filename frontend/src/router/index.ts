@@ -103,7 +103,7 @@ router.beforeEach(async (to, from, next) => {
   // A stored token that the API no longer accepts (unchecked "Remember me"
   // expires after an hour) is the boot-time case; say so on the login screen.
   let sessionExpired = false;
-  if (auth.token && !auth.user) {
+  if (auth.isAuthenticated && !auth.user) {
     sessionExpired = !(await auth.loadUser());
   }
 

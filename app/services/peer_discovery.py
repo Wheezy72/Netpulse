@@ -118,6 +118,11 @@ class PeerDiscoveryProtocol(asyncio.DatagramProtocol):
             logger.debug(f"Error parsing incoming peer message: {e}")
 
     async def handle_ping(self, payload: Dict[str, Any], addr: tuple[str, int]):
+        # Presence-only discovery unless credential sync was explicitly turned
+        # on. Nothing below may move a password hash around by default.
+        if not settings.peer_credential_sync:
+            return
+
         peer_has_changed = payload.get("admin_password_changed", False)
         our_has_changed = await check_is_admin_password_changed()
 
@@ -127,6 +132,13 @@ class PeerDiscoveryProtocol(asyncio.DatagramProtocol):
             await self.send_sync_req(addr)
 
     async def handle_sync_req(self, payload: Dict[str, Any], addr: tuple[str, int]):
+        if not settings.peer_credential_sync:
+            logger.warning(
+                "Ignoring credential sync request from %s: PEER_CREDENTIAL_SYNC is off.",
+                addr[0],
+            )
+            return
+
         # Peer is requesting admin credentials. Only send if we have a changed password
         our_has_changed = await check_is_admin_password_changed()
         if our_has_changed:
@@ -135,6 +147,9 @@ class PeerDiscoveryProtocol(asyncio.DatagramProtocol):
                 await self.send_sync_resp(hashed_pw, addr)
 
     async def handle_sync_resp(self, payload: Dict[str, Any], addr: tuple[str, int]):
+        if not settings.peer_credential_sync:
+            return
+
         # Received credentials response. Only update if we still need a password change
         our_has_changed = await check_is_admin_password_changed()
         if not our_has_changed:
@@ -156,7 +171,13 @@ class PeerDiscoveryProtocol(asyncio.DatagramProtocol):
             self.transport.sendto(data, addr)
 
     async def send_ping(self):
-        password_changed = await check_is_admin_password_changed()
+        # Only advertise the flag when sync is enabled; otherwise a peer would
+        # ask us for a hash we are never going to send.
+        password_changed = (
+            await check_is_admin_password_changed()
+            if settings.peer_credential_sync
+            else False
+        )
         payload = {
             "type": "PING",
             "sender_id": INSTANCE_ID,

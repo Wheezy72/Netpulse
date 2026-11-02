@@ -7,6 +7,11 @@
  * utils/avatar.ts), so it rides the theme like every AppGlyph does. The circle
  * behind it uses the brand tint ring the old letter-initial chips had, keeping
  * the silhouette seated on the same surface other identity marks live on.
+ *
+ * The face moves on its own (see `.np-avatar-motion` in assets/styles.css).
+ * There is no setting for that: a portrait that is alive is the app's default
+ * look, not a preference, and `prefers-reduced-motion` still switches the
+ * animation off for anyone who asks their operating system for that.
  */
 import { computed } from "vue";
 
@@ -40,7 +45,7 @@ const svg = computed(() =>
     :title="label || undefined"
   >
     <span
-      class="flex h-full w-full items-center justify-center text-[var(--np-accent)]"
+      class="np-avatar-motion flex h-full w-full items-center justify-center text-[var(--np-accent)]"
       v-html="svg"
     />
   </span>

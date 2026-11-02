@@ -328,8 +328,12 @@ if __name__ == "__main__":
         temp_file_path = temp_dir / f"temp_job_{job.id}.py"
         temp_file_path.write_text(wrapper_code, encoding="utf-8")
 
-        if settings.environment.lower() == "development":
-            # Bypass sandbox: execute the generated wrapper with this interpreter.
+        if settings.environment.lower() == "development" and settings.scripts_unsandboxed:
+            # Explicitly requested development shortcut: the generated wrapper
+            # runs with this interpreter and no containment at all. Gated on a
+            # separate opt-in so a deployment that forgot ENVIRONMENT does not
+            # silently execute uploaded code inside the API process.
+            log("Running with the API interpreter (SCRIPTS_UNSANDBOXED): no sandbox containment.")
             argv: list[str] = [sys.executable, str(temp_file_path.resolve())]
         else:
             # Production: execute using secure gVisor sandbox containment scripts
@@ -359,6 +363,15 @@ if __name__ == "__main__":
             returncode, stdout_str, stderr_str = await run_captured(
                 argv, timeout=SCRIPT_JOB_TIMEOUT_SECONDS
             )
+        except FileNotFoundError:
+            log(
+                "Script sandbox unavailable: the 'docker' command was not found, "
+                "so the gVisor container could not be started. Install Docker, "
+                "or set SCRIPTS_UNSANDBOXED=true on a trusted development "
+                "machine to run scripts with the API interpreter instead."
+            )
+            job.status = ScriptJobStatus.FAILED
+            return
         except TimeoutError:
             log(
                 f"Script stopped after {SCRIPT_JOB_TIMEOUT_SECONDS}s "

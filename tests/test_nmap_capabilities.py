@@ -191,7 +191,10 @@ def test_catalog_is_versioned_and_well_formed() -> None:
     assert len(VULN_SCRIPT_CATALOG) >= 18
     for name, entry in VULN_SCRIPT_CATALOG.items():
         assert name
-        assert set(entry) == {"cve", "summary"}
+        # Severity joined the catalog when deep scans started writing findings
+        # into the vulnerability table; it is what the alert policy filters on.
+        assert set(entry) == {"cve", "severity", "summary"}
+        assert entry["severity"] in {"critical", "high", "medium", "low", "info"}
         assert entry["cve"] is None or entry["cve"].startswith("CVE-")
 
 

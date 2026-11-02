@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.redis import get_redis
+from app.core.session_cookie import session_token_from_request
 from app.db.session import async_session_factory
 from app.models.user import User, UserRole
 from app.core.clock import utcnow
@@ -23,7 +24,7 @@ from app.core.clock import utcnow
 logger = logging.getLogger("netpulse.audit")
 
 ph = PasswordHasher()
-security_scheme = HTTPBearer(auto_error=True)
+security_scheme = HTTPBearer(auto_error=False)
 
 # Tokens issued before 2026-10 carry the email address as their subject. New
 # tokens carry "id:<user id>", which survives an email change and works for
@@ -34,6 +35,21 @@ SUBJECT_ID_PREFIX = "id:"
 def _token_cache_key(token: str) -> str:
     digest = hashlib.sha256(token.encode()).hexdigest()[:32]
     return f"np:session:{digest}"
+
+
+def _extract_token(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None,
+) -> str:
+    """The caller's token: an explicit bearer header first, else the cookie.
+
+    Bearer wins when both are present so a script can act as a user without
+    touching the browser session. The cookie is what the SPA uses; it is
+    HttpOnly, so page scripts cannot read it.
+    """
+    if credentials is not None and credentials.credentials:
+        return credentials.credentials.strip()
+    return session_token_from_request(request)
 
 
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
@@ -59,8 +75,13 @@ def create_access_token(
     subject: str,
     role: str,
     expires_delta: Optional[timedelta] = None,
+    token_version: int | None = None,
 ) -> str:
-    to_encode = {"sub": subject, "role": role}
+    to_encode: dict[str, object] = {"sub": subject, "role": role}
+    if token_version is not None:
+        # The version this token is only valid under. Tokens minted before this
+        # existed carry no claim and are treated as version 0.
+        to_encode["ver"] = int(token_version)
     expire = utcnow() + (
         expires_delta
         if expires_delta is not None
@@ -68,6 +89,39 @@ def create_access_token(
     )
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, settings.secret_key, algorithm=settings.jwt_algorithm)
+
+
+async def revoke_sessions(db: AsyncSession, user: User) -> int:
+    """Invalidate every token issued for *user* so far.
+
+    Bearer tokens cannot be un-issued, so the account carries a version and a
+    token is only accepted when it matches. The new version is also written to
+    Redis, because the session cache would otherwise keep serving a stale copy
+    of the user (and a still-valid token) until its TTL expired.
+    """
+    user.token_version = int(getattr(user, "token_version", 0) or 0) + 1
+    await db.commit()
+    try:
+        await get_redis().set(f"np:tokenver:{user.id}", str(user.token_version))
+    except Exception:  # noqa: BLE001 - Redis is a cache, the DB is the truth
+        logger.warning("Could not mark session revocation in Redis for user %s", user.id)
+    return int(user.token_version)
+
+
+async def _token_version_revoked(user_id: int, token_version: int) -> bool:
+    """True when a bumped version has already invalidated this token."""
+    if user_id <= 0:
+        return False
+    try:
+        stored = await get_redis().get(f"np:tokenver:{user_id}")
+    except Exception:  # noqa: BLE001 - fall back to the database check
+        return False
+    if stored is None:
+        return False
+    try:
+        return int(stored) != int(token_version)
+    except (TypeError, ValueError):
+        return False
 
 
 def subject_for_user(user: User) -> str:
@@ -105,14 +159,23 @@ async def resolve_user_from_subject(db: AsyncSession, subject: str) -> User | No
 
 
 async def get_current_user(
-    credentials: Annotated[HTTPAuthorizationCredentials, Security(security_scheme)],
+    request: Request,
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Security(security_scheme)
+    ] = None,
     db: AsyncSession = Depends(db_session),
 ) -> User:
     """Validate the bearer token and return the active User.
 
     Checks the Redis session cache first; falls back to the database on a miss.
     """
-    token = credentials.credentials
+    token = _extract_token(request, credentials)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     redis = get_redis()
     digest = hashlib.sha256(token.encode()).hexdigest()[:32]
 
@@ -146,6 +209,17 @@ async def get_current_user(
             detail="Could not validate credentials",
         ) from None
 
+    # A bumped session version invalidates every token issued before it. This is
+    # what "sign out everywhere" and a password change rely on.
+    token_version = int(payload.get("ver") or 0)
+    parsed_subject = parse_subject(subject)
+    if parsed_subject is not None and parsed_subject[0] == "id":
+        if await _token_version_revoked(int(parsed_subject[1]), token_version):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session has been revoked",
+            )
+
     cache_key = _token_cache_key(token)
     try:
         cached = await redis.get(cache_key)
@@ -159,11 +233,17 @@ async def get_current_user(
                 role=UserRole(data["role"]),
                 is_active=data["is_active"],
                 force_password_change=data.get("force_password_change", False),
+                token_version=data.get("token_version", 0),
             )
             if not user.is_active:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Inactive or missing user",
+                )
+            if int(getattr(user, "token_version", 0) or 0) != token_version:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Session has been revoked",
                 )
             return user
     except HTTPException:
@@ -177,6 +257,12 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Inactive or missing user",
+        )
+
+    if int(getattr(user, "token_version", 0) or 0) != token_version:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has been revoked",
         )
 
     exp: int = payload.get("exp", 0)
@@ -193,6 +279,7 @@ async def get_current_user(
                 "role": user.role.value,
                 "is_active": user.is_active,
                 "force_password_change": user.force_password_change,
+                "token_version": int(getattr(user, "token_version", 0) or 0),
             }),
         )
     except Exception:
@@ -275,6 +362,7 @@ _optional_security_scheme = HTTPBearer(auto_error=False)
 
 
 async def optional_current_user(
+    request: Request,
     credentials: Annotated[
         HTTPAuthorizationCredentials | None, Security(_optional_security_scheme)
     ] = None,
@@ -287,10 +375,9 @@ async def optional_current_user(
     anonymous request resolves to ``None`` so the closed-signup gate can
     refuse it.
     """
-    if credentials is None:
+    token = _extract_token(request, credentials)
+    if not token:
         return None
-
-    token = credentials.credentials
     try:
         payload = jwt.decode(
             token,
@@ -305,7 +392,11 @@ async def optional_current_user(
         return None
 
     user = await resolve_user_from_subject(db, subject)
-    return user if user is not None and user.is_active else None
+    if user is None or not user.is_active:
+        return None
+    if int(getattr(user, "token_version", 0) or 0) != int(payload.get("ver") or 0):
+        return None
+    return user
 
 
 async def require_admin(

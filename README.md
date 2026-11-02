@@ -144,8 +144,10 @@ vulnerabilities, device-health drops and scan completions.
   or a blocked port 25 says so instead of failing silently.
 - A failed send never breaks the request or the alert loop, and the
   vulnerability stays unmarked so the next tick retries it.
-- The switches in **Settings → Notifications** are stored per user; the sender
-  reads only `.env`.
+- The switches in **Settings → Notifications** are read per account: enabling
+  email (with an address, or `ALERT_EMAIL_TO` as the fallback recipient) makes
+  the matching alerts fire, and the four toggles decide which severities and
+  events actually do.
 
 ## Networks
 
@@ -402,6 +404,37 @@ discards before removing the tables.
 
 ## What changed recently
 
+- Sign-in can require a second factor. Settings → Account → Two-factor
+  authentication enrols a TOTP app (any RFC 6238 client) and issues eight
+  single-use recovery codes. With it on, `/api/auth/login` returns no session
+  at all — only a five-minute ticket that `/api/auth/login/totp` exchanges for
+  one — so a leaked password alone cannot open the console.
+- The browser no longer stores its token anywhere JavaScript can read it. The
+  session arrives as an `HttpOnly`, `SameSite=Lax` cookie and every
+  cookie-authenticated write carries a double-submit CSRF header; bearer tokens
+  still work for scripts and the CLI. Upgraded installs have the old
+  localStorage token cleared on first load.
+- Version-based CVE matching: the deep scan compares the service versions nmap
+  reports against a bundled catalogue of affected ranges (`app/services/
+  cve_catalog.json`), so Apache 2.4.49 is flagged even on an install with no
+  NSE scripts at all. Findings land in the same vulnerability table and say
+  plainly that a vendor backport may already be patched.
+- Portraits always animate; the Still/Calm/Lively switch and its column are
+  gone (`migrations/20261102_drop_avatar_motion.sql`), and
+  `prefers-reduced-motion` still turns the motion off.
+- A placeholder `SECRET_KEY` no longer signs anything: it is detected and
+  replaced with a generated key stored at `data/signing_key`, so a forgotten
+  value cannot make every session token forgeable. Peer instances only trust
+  each other's broadcasts when they share that key.
+- Peer-to-peer credential sync (copying the administrator password hash between
+  instances) is now opt-in via `PEER_CREDENTIAL_SYNC=true`; presence discovery
+  still works without it.
+- “Test this node” now answers more than “what is listening”: the deep scan runs
+  the installed NSE vulnerability scripts, stores what they report in the
+  vulnerability table with its CVE, and the alert policy can mail it.
+- The Settings → Notifications toggles are honoured: critical findings, warning
+  findings, hosts going offline and the daily digest each follow their own
+  switch, and the recipient is the account's own address.
 - A discovery sweep is now authoritative for the identity it can derive. Vendor,
   device type and OS from the network card answering now win over what is already
   stored, so a description taken from a NIC that has since been unplugged can no
@@ -461,6 +494,11 @@ Deploy       → Docker Compose (recommended)
 
 **[docs/dev_guide.md](docs/dev_guide.md)** covers the API reference,
 architecture and advanced configuration.
+
+**[docs/ssh-verification.md](docs/ssh-verification.md)** covers the SSH
+console: how credentials and host keys are handled, the settings that
+govern it, and a step-by-step check against a real host (a Kali VM works
+fine), including the networking traps that look like NetPulse bugs.
 
 ---
 
