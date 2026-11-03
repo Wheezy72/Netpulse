@@ -339,6 +339,52 @@ report generation and script execution, and `run_stack.sh` starts one for you.
 
 Report a vulnerability privately; see [SECURITY.md](SECURITY.md).
 
+<details>
+<summary><b>Uninstalling</b></summary>
+
+<br />
+
+Removing NetPulse is explicit, because the inventory is the part you would miss.
+
+```bash
+./scripts/uninstall.sh --dry-run     # show exactly what would go
+./scripts/uninstall.sh               # artefacts only, database kept
+./scripts/uninstall.sh --yes --purge # also .env and the database
+```
+
+```cmd
+scripts\windows_uninstall.bat --dry-run
+scripts\windows_uninstall.bat --yes
+```
+
+Artefacts are the virtualenv, `frontend/node_modules` and `dist`, caches, logs,
+runtime data and the Compose stack. `--purge` also removes `.env` and destroys the
+Docker volumes; on a bare-metal PostgreSQL it prints the one `DROP DATABASE`
+statement it will not run for you. Nothing outside the checkout is touched, and the
+script refuses to run anywhere that is not a NetPulse checkout.
+
+</details>
+
+<details>
+<summary><b>Working on NetPulse</b></summary>
+
+<br />
+
+```bash
+pip install -e ".[dev]"
+
+ruff check app/
+vulture app/ vulture_whitelist.py --min-confidence 80
+pytest tests/ -v
+```
+
+The test suite needs no external services. CI runs ruff and vulture, the unit suite
+and a full image build. The entrypoint is `app/main.py`, routes live in
+`app/api/routes/`, and schema changes are plain SQL in `migrations/` — see
+[docs/dev_guide.md](docs/dev_guide.md) for the loop and the migration list.
+
+</details>
+
 ## Need more?
 
 **[docs/dev_guide.md](docs/dev_guide.md)** covers the API reference, the
