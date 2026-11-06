@@ -637,18 +637,222 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await close_pool()
 
 
-# The interactive docs are a development convenience. In production they
-# advertise every route and schema, so they follow ENVIRONMENT rather than a
-# `debug` setting that never existed (which used to leave them always on).
-_docs_enabled = settings.environment == "development"
+# Swagger groups the reference by tag, so the tags themselves carry the
+# explanation of what each part of the API is for. Order here is the order
+# the groups appear in.
+_API_TAGS = [
+    {
+        "name": "health",
+        "description": "Liveness and capability checks. No authentication, safe to poll.",
+    },
+    {
+        "name": "auth",
+        "description": "Sign-in, the TOTP second step, sign-out and password changes.",
+    },
+    {
+        "name": "account",
+        "description": "The signed-in account: profile, second factor, recovery codes.",
+    },
+    {
+        "name": "devices",
+        "description": "The host inventory: listing, detail, edits and discovery.",
+    },
+    {
+        "name": "device-actions",
+        "description": "Actions against one host, such as a deep service scan.",
+    },
+    {
+        "name": "networks",
+        "description": "Remembered networks, so one install can move between sites.",
+    },
+    {
+        "name": "network-segments",
+        "description": "CIDR segments and which of them may be scanned.",
+    },
+    {
+        "name": "recon",
+        "description": "Scan jobs: run, follow, cancel and read results.",
+    },
+    {
+        "name": "nmap",
+        "description": "Profiles built from the capabilities of the installed nmap.",
+    },
+    {
+        "name": "insights",
+        "description": "Fleet health, reachability probes and recommendations.",
+    },
+    {
+        "name": "metrics",
+        "description": "Latency and throughput samples behind the dashboard charts.",
+    },
+    {
+        "name": "tools",
+        "description": "One-off diagnostics: ping, traceroute, DNS and TCP probes.",
+    },
+    {
+        "name": "reports",
+        "description": "PDF and CSV exports of inventory, scans and findings.",
+    },
+    {
+        "name": "logs",
+        "description": "Application log stream and the syslog view.",
+    },
+    {
+        "name": "syslog",
+        "description": "Ingest endpoint for syslog traffic sent to this host.",
+    },
+    {
+        "name": "playbooks",
+        "description": "Saved, repeatable scan and response sequences.",
+    },
+    {
+        "name": "scripts",
+        "description": "Uploaded scripts and the jobs that run them.",
+    },
+    {
+        "name": "uptime",
+        "description": "Uptime monitors for hosts and ports.",
+    },
+    {
+        "name": "backup",
+        "description": "Export and restore of the instance's own data.",
+    },
+    {
+        "name": "settings",
+        "description": "Instance-wide settings the admin controls.",
+    },
+    {
+        "name": "plugins",
+        "description": "Installed extensions and what they expose.",
+    },
+    {
+        "name": "ws",
+        "description": "WebSocket endpoints. Documented for reference; these upgrade, not JSON.",
+    },
+]
+
+_API_DESCRIPTION = """
+NetPulse is a self-hosted network console: it discovers the hosts on your
+network, keeps an inventory of them, draws the topology and alerts you when
+something changes.
+
+Every route lives under `/api` and speaks JSON. Sign in with
+`POST /api/auth/login`; the browser receives an `HttpOnly` session cookie and
+scripts receive a bearer token, and both work here. Cookie-authenticated
+writes need the double-submit CSRF header (`X-CSRF-Token`, value from the
+`np_csrf` cookie) — the app's own client does that for you, so it mostly
+matters when you call the API from a script that shares the cookie jar.
+
+Durations are milliseconds unless a field says otherwise, timestamps are
+ISO 8601 in UTC, and every list endpoint is scoped to one network at a time.
+"""
+
+
+def _api_version() -> str:
+    """Version of the OpenAPI document."""
+    try:
+        from importlib.metadata import version as distribution_version
+
+        return distribution_version("netpulse")
+    except Exception:  # noqa: BLE001 - a source checkout has no installed metadata
+        pass
+
+    # A checkout that was never pip-installed still knows its version.
+    try:
+        import tomllib
+        from pathlib import Path as _Path
+
+        pyproject = _Path(__file__).resolve().parent.parent / "pyproject.toml"
+        return str(tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"])
+    except Exception:  # noqa: BLE001 - no pyproject beside the app (an image)
+        return "dev"
+
+_DOCS_CSS = """
+:root {
+  --np-bg: #09090b;
+  --np-surface: #111114;
+  --np-line: #1f2227;
+  --np-accent: #10b981;
+  --np-text: #e5e7eb;
+  --np-dim: #8b949e;
+}
+body { background: var(--np-bg); }
+.swagger-ui { color: var(--np-text); font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif; }
+.swagger-ui .topbar { background: var(--np-bg); border-bottom: 1px solid var(--np-line); padding: 10px 0; }
+.swagger-ui .topbar-wrapper img { display: none; }
+.swagger-ui .topbar-wrapper::after {
+  content: "NetPulse API";
+  color: var(--np-text);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+}
+.swagger-ui .info .title, .swagger-ui .info p, .swagger-ui .info li,
+.swagger-ui .opblock-tag, .swagger-ui table thead tr th,
+.swagger-ui .model-title, .swagger-ui .tab li { color: var(--np-text); }
+.swagger-ui .info .title small { background: rgba(16, 185, 129, 0.14); color: var(--np-accent); }
+.swagger-ui .info a, .swagger-ui .opblock-tag small { color: var(--np-dim); }
+.swagger-ui .scheme-container, .swagger-ui .opblock-tag-section { background: transparent; box-shadow: none; }
+.swagger-ui .opblock { border-radius: 10px; margin: 0 0 12px; }
+.swagger-ui .opblock.opblock-get { background: rgba(16, 185, 129, 0.06); border-color: rgba(16, 185, 129, 0.35); }
+.swagger-ui .opblock.opblock-post { background: rgba(56, 189, 248, 0.06); border-color: rgba(56, 189, 248, 0.35); }
+.swagger-ui .opblock.opblock-put, .swagger-ui .opblock.opblock-patch { background: rgba(245, 158, 11, 0.06); border-color: rgba(245, 158, 11, 0.35); }
+.swagger-ui .opblock.opblock-delete { background: rgba(239, 68, 68, 0.06); border-color: rgba(239, 68, 68, 0.35); }
+.swagger-ui .btn { border-radius: 8px; }
+.swagger-ui .btn.execute { background: var(--np-accent); border-color: var(--np-accent); color: #04120c; font-weight: 700; }
+.swagger-ui select, .swagger-ui input[type=text], .swagger-ui textarea {
+  background: var(--np-surface); color: var(--np-text); border-color: var(--np-line);
+}
+.swagger-ui .highlight-code, .swagger-ui .microlight { background: #0d1117 !important; border-radius: 8px; }
+.swagger-ui section.models { border-color: var(--np-line); }
+.swagger-ui .model-box { background: rgba(255, 255, 255, 0.03); }
+"""
+
+# The interactive docs advertise every route and schema, so they follow
+# ENVIRONMENT unless ENABLE_API_DOCS says otherwise.
+_docs_enabled = (
+    settings.enable_api_docs
+    if settings.enable_api_docs is not None
+    else settings.environment == "development"
+)
+
+_SWAGGER_SETTINGS = {
+    "persistAuthorization": True,
+    "docExpansion": "none",
+    "filter": True,
+    "displayRequestDuration": True,
+    "tryItOutEnabled": True,
+}
 
 app = FastAPI(
     title=settings.app_name,
+    version=_api_version(),
+    description=_API_DESCRIPTION,
+    openapi_tags=_API_TAGS,
     lifespan=lifespan,
-    docs_url="/api/docs" if _docs_enabled else None,
+    docs_url=None,  # replaced by the branded page below
     redoc_url="/api/redoc" if _docs_enabled else None,
     openapi_url="/api/openapi.json" if _docs_enabled else None,
+    swagger_ui_parameters=_SWAGGER_SETTINGS,
 )
+
+if _docs_enabled:
+
+    @app.get("/api/docs", include_in_schema=False)
+    async def api_docs():
+        """The API reference, in the console's own palette."""
+        from fastapi.openapi.docs import get_swagger_ui_html
+        from fastapi.responses import HTMLResponse
+
+        page = get_swagger_ui_html(
+            openapi_url="/api/openapi.json",
+            title=f"{settings.app_name} · API",
+            swagger_favicon_url="/branding/logo.svg",
+            swagger_ui_parameters=_SWAGGER_SETTINGS,
+        )
+        html = page.body.decode("utf-8").replace("</head>", f"<style>{_DOCS_CSS}</style></head>")
+        return HTMLResponse(html)
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore

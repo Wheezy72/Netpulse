@@ -28,7 +28,7 @@ from app.api.deps import (
     security_scheme,
 )
 from app.core.config import settings
-from app.core.redis import get_redis
+from app.core.redis import get_redis, note_redis_failure, note_redis_success, redis_reachable
 from app.core.session_cookie import (
     clear_session_cookies,
     session_token_from_request,
@@ -113,25 +113,30 @@ async def _enforce_rate_limit(
         elif x_real_ip := request.headers.get("X-Real-IP"):
             client_ip = x_real_ip.strip() or client_ip
 
-    redis_client = get_redis()
     rate_limit_key = f"{key_prefix}{client_ip}"
     current_unix_time = utcnow().timestamp()
     window_start_time = current_unix_time - window_seconds
 
-    try:
-        async with redis_client.pipeline(transaction=True) as pipeline:
-            pipeline.zremrangebyscore(rate_limit_key, "-inf", window_start_time)
-            pipeline.zcard(rate_limit_key)
-            pipeline.zadd(rate_limit_key, {str(current_unix_time): current_unix_time})
-            pipeline.expire(rate_limit_key, window_seconds)
-            results = await pipeline.execute()
-        attempt_count_before_this_request = results[1]
-    except Exception as exc:
-        # Redis is a cache, not the source of truth: a hiccup must not turn a
-        # sign-in into a 500. Falling back to an in-process window keeps the
-        # brute-force ceiling in place while Redis is unavailable, instead of
-        # silently disabling it.
-        logger.warning("Login throttle unavailable, using local window: %s", exc)
+    attempt_count_before_this_request: int | None = None
+    if redis_reachable():
+        try:
+            redis_client = get_redis()
+            async with redis_client.pipeline(transaction=True) as pipeline:
+                pipeline.zremrangebyscore(rate_limit_key, "-inf", window_start_time)
+                pipeline.zcard(rate_limit_key)
+                pipeline.zadd(rate_limit_key, {str(current_unix_time): current_unix_time})
+                pipeline.expire(rate_limit_key, window_seconds)
+                results = await pipeline.execute()
+            attempt_count_before_this_request = results[1]
+            note_redis_success()
+        except Exception as exc:
+            # Redis is a cache, not the source of truth: a hiccup must not
+            # turn a sign-in into a 500. Falling back to an in-process window
+            # keeps the brute-force ceiling while Redis is unavailable, and
+            # the breaker stops later requests paying the timeout again.
+            note_redis_failure(exc)
+            logger.warning("Login throttle unavailable, using local window: %s", exc)
+    if attempt_count_before_this_request is None:
         attempt_count_before_this_request = _local_attempt_count(
             rate_limit_key, current_unix_time, window_seconds
         )

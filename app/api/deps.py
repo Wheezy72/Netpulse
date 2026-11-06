@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.redis import get_redis
+from app.core.redis import get_redis, note_redis_failure, note_redis_success, redis_reachable
 from app.core.session_cookie import session_token_from_request
 from app.db.session import async_session_factory
 from app.models.user import User, UserRole
@@ -101,10 +101,13 @@ async def revoke_sessions(db: AsyncSession, user: User) -> int:
     """
     user.token_version = int(getattr(user, "token_version", 0) or 0) + 1
     await db.commit()
-    try:
-        await get_redis().set(f"np:tokenver:{user.id}", str(user.token_version))
-    except Exception:  # noqa: BLE001 - Redis is a cache, the DB is the truth
-        logger.warning("Could not mark session revocation in Redis for user %s", user.id)
+    if redis_reachable():
+        try:
+            await get_redis().set(f"np:tokenver:{user.id}", str(user.token_version))
+            note_redis_success()
+        except Exception as exc:  # noqa: BLE001 - the database is the truth
+            note_redis_failure(exc)
+            logger.warning("Could not mark session revocation in Redis for user %s", user.id)
     return int(user.token_version)
 
 
@@ -112,9 +115,13 @@ async def _token_version_revoked(user_id: int, token_version: int) -> bool:
     """True when a bumped version has already invalidated this token."""
     if user_id <= 0:
         return False
+    if not redis_reachable():
+        return False
     try:
         stored = await get_redis().get(f"np:tokenver:{user_id}")
-    except Exception:  # noqa: BLE001 - fall back to the database check
+        note_redis_success()
+    except Exception as exc:  # noqa: BLE001 - fall back to the database check
+        note_redis_failure(exc)
         return False
     if stored is None:
         return False
@@ -176,12 +183,15 @@ async def get_current_user(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    redis = get_redis()
+    try:
+        redis = get_redis() if redis_reachable() else None
+    except RuntimeError:  # pool not initialised (tests, bare scripts)
+        redis = None
     digest = hashlib.sha256(token.encode()).hexdigest()[:32]
 
     # Check if token is blacklisted
     try:
-        if await redis.get(f"np:blacklist:{digest}"):
+        if redis is not None and await redis.get(f"np:blacklist:{digest}"):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token has been blacklisted (logged out)",

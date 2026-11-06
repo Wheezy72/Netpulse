@@ -233,6 +233,11 @@ class Settings(BaseSettings):
     app_name: str = "NetPulse Enterprise"
     environment: str = "development"
 
+    # Interactive API docs. None follows ENVIRONMENT, i.e. on in development
+    # and off in production, because the document advertises every route and
+    # schema. True publishes them from a production install on purpose.
+    enable_api_docs: bool | None = None
+
     # Session cookies carry Secure when this is true. None (auto) follows
     # the request scheme, which is what a LAN install on plain http needs:
     # a Secure cookie over http is dropped and sign-in fails silently.
@@ -252,6 +257,11 @@ class Settings(BaseSettings):
 
     # Redis / Celery
     redis_url: str = "redis://redis:6379/0"
+    # Redis is a cache, never the source of truth. A wrong host or a stopped
+    # server must cost a fraction of a second, not the operating system's TCP
+    # timeout, or the first thing a user sees is a sign-in that hangs.
+    redis_connect_timeout: float = 1.5
+    redis_socket_timeout: float = 1.5
 
     # Network monitoring targets (Pulse)
     pulse_gateway_ip: str = "auto"

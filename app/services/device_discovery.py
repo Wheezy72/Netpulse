@@ -27,8 +27,10 @@ neither scapy, nmap, nor SQLAlchemy.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import socket
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -246,6 +248,74 @@ def hosts_from_arp_pairs(
             )
         )
     return hosts
+
+
+# Proxy ARP, and captive portals that answer for everything, both make one
+# NIC reply for addresses it does not own: a /24 sweep then reports 254
+# "hosts" sharing a single MAC and fills the inventory with copies of the
+# router. Above this many addresses, one MAC is treated as answering for
+# others; a NAT host with a few extra addresses stays well under it.
+PROXY_ARP_ADDRESS_LIMIT = 8
+
+
+def _address_sort_key(address: str) -> tuple:
+    """Order addresses numerically, falling back to text for odd input."""
+    try:
+        return (0, int(ipaddress.ip_address(address)))
+    except ValueError:
+        return (1, address)
+
+
+def collapse_proxy_arp(
+    pairs: Sequence[Tuple[str, str]],
+    *,
+    limit: int = PROXY_ARP_ADDRESS_LIMIT,
+) -> List[Tuple[str, str]]:
+    """Keep one entry per MAC when a single NIC answers for many addresses.
+
+    A MAC replying for more than *limit* distinct addresses is a router
+    doing proxy ARP, or a portal intercepting traffic, not a machine with
+    that many addresses. Only its lowest address survives, which is the
+    router's own address in the layout that produces this.
+
+    Genuine networks lose nothing: a NAT host with a handful of addresses
+    stays under the limit, and a machine with several NICs has a different
+    MAC per address. Order is preserved for everything that is kept.
+    """
+    normalised = [(ip, normalize_mac(mac) or mac) for ip, mac in pairs]
+    counts = Counter(mac for _ip, mac in normalised)
+    shared = {mac for mac, count in counts.items() if count > limit}
+    if not shared:
+        return list(pairs)
+
+    lowest: Dict[str, str] = {}
+    for (address, _mac), (_same, mac) in zip(pairs, normalised):
+        if mac not in shared:
+            continue
+        current = lowest.get(mac)
+        if current is None or _address_sort_key(address) < _address_sort_key(current):
+            lowest[mac] = address
+
+    kept: List[Tuple[str, str]] = []
+    seen: set[str] = set()
+    for (address, mac), (_same, normalised_mac) in zip(pairs, normalised):
+        if normalised_mac not in shared:
+            kept.append((address, mac))
+            continue
+        if lowest[normalised_mac] == address and normalised_mac not in seen:
+            kept.append((address, mac))
+            seen.add(normalised_mac)
+
+    dropped = len(pairs) - len(kept)
+    if dropped:
+        logger.warning(
+            "Sweep ignored %d address(es) answered by %d MAC(s) holding more "
+            "than %d each: proxy ARP or a captive portal, not that many hosts.",
+            dropped,
+            len(shared),
+            limit,
+        )
+    return kept
 
 
 def os_from_ttl(
@@ -942,6 +1012,7 @@ async def sweep_target(
     try:
         pairs = await asyncio.to_thread(arp_sweep, target, iface, arp_timeout)
         if pairs:
+            pairs = collapse_proxy_arp(pairs)
             discovered.extend(hosts_from_arp_pairs(pairs))
             outcome.methods.append("arp")
     except Exception as exc:
