@@ -9,6 +9,7 @@ from app.api.routes import (
     health,
     insights,
     logs,
+    maintenance,
     metrics,
     network_segments,
     networks,
@@ -47,6 +48,7 @@ api_router.include_router(syslog_receiver.router, prefix="/syslog", tags=["syslo
 api_router.include_router(device_actions.router, prefix="/device-actions", tags=["device-actions"])
 api_router.include_router(backup.router, prefix="/backup", tags=["backup"])
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
+api_router.include_router(maintenance.router, prefix="/maintenance", tags=["maintenance"])
 api_router.include_router(plugins.router, prefix="/plugins", tags=["plugins"])
 api_router.include_router(tools.router, prefix="/tools", tags=["tools"])
 

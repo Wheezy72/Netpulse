@@ -189,7 +189,7 @@ file keeps working after an upgrade.
 | `POSTGRES_DB` | `netpulse` | |
 | `POSTGRES_USER` | `netpulse` | |
 | `POSTGRES_PASSWORD` | — | Required in practice. |
-| `REDIS_URL` | `redis://redis:6379/0` | Use `redis://localhost:6379/0` outside Docker. |
+| `REDIS_URL` | `redis://redis:6379/0` | Use `redis://127.0.0.1:6379/0` outside Docker. A `localhost` URL resolves to `::1` first on dual-stack hosts, and that attempt can spend the whole 1.5s connect timeout before IPv4 is tried. |
 
 ### Monitoring and scanning
 

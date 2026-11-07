@@ -30,6 +30,15 @@ const isNightshade = computed(() => props.theme === "nightshade");
 const NODE_W = 132;
 const NODE_H = 112;
 
+// A ring grows its radius with the number of hosts it holds, so 250 endpoints
+// is a layer some 13,000px across — and Chromium re-rasterizes that whole layer
+// on every pan, which is where the map froze. Past this many hosts the graph is
+// no longer readable either, so draw a bounded slice (gateway, alerts,
+// infrastructure, then the newest) and say how many are left out.
+const DRAWN_HOST_LIMIT = 120;
+const drawnAllHosts = ref(false);
+const hiddenHostCount = ref(0);
+
 type TopologyNode = {
   id: number;
   label: string;
@@ -283,6 +292,59 @@ function nodeTier(device: TopologyNode): number {
   if (type.includes("switch") || type.includes("access point") || type === "ap") return 1;
   if (type.includes("server") || type.includes("nas")) return 2;
   return 3;
+}
+
+/** Score a host for the draw budget: the map keeps what an operator looks at. */
+function hostPriority(device: TopologyNode): number {
+  if (device.is_gateway) return 0;
+  if (nodeDangerLevel(device)) return 1;
+  if (nodeTier(device) <= 2) return 2;
+  return 3;
+}
+
+function hostRecency(device: TopologyNode): number {
+  const seen = device.last_seen ? Date.parse(device.last_seen) : NaN;
+  return Number.isFinite(seen) ? seen : 0;
+}
+
+/**
+ * Keep the map inside the draw budget.
+ *
+ * Edges are filtered with their endpoints, otherwise Vue Flow keeps asking for
+ * nodes it was never given and drops the connection. The count is reported back
+ * so the map can say what it left out rather than quietly lying about the network.
+ */
+function budgetHosts(
+  nodes: Node<DeviceNodeData>[],
+  edges: Edge[],
+): { nodes: Node<DeviceNodeData>[]; edges: Edge[]; hidden: number } {
+  if (drawnAllHosts.value || nodes.length <= DRAWN_HOST_LIMIT) {
+    return { nodes, edges, hidden: 0 };
+  }
+
+  const ranked = [...nodes].sort(
+    (a, b) =>
+      hostPriority(deviceOf(a)) - hostPriority(deviceOf(b)) ||
+      hostRecency(deviceOf(b)) - hostRecency(deviceOf(a)),
+  );
+  const kept = ranked.slice(0, DRAWN_HOST_LIMIT);
+  const keptIds = new Set(kept.map((node) => node.id));
+
+  return {
+    nodes: kept,
+    edges: edges.filter((edge) => keptIds.has(edge.source) && keptIds.has(edge.target)),
+    hidden: nodes.length - kept.length,
+  };
+}
+
+function drawAllHosts(): void {
+  drawnAllHosts.value = true;
+  void loadTopology();
+}
+
+function drawFewerHosts(): void {
+  drawnAllHosts.value = false;
+  void loadTopology();
 }
 
 /**
@@ -648,10 +710,12 @@ async function loadTopology(background = false): Promise<void> {
       style: { stroke: "var(--map-edge, #14b8a6)", strokeWidth: 1.5 },
     }));
 
-    const layout = layoutRadial(nodes);
+    const budget = budgetHosts(nodes, edges);
+    hiddenHostCount.value = budget.hidden;
+    const layout = layoutRadial(budget.nodes);
     // Orbit guides go first so they paint behind the device orbs.
     flowNodes.value = [...layout.orbits, ...layout.nodes];
-    flowEdges.value = edges;
+    flowEdges.value = budget.edges;
 
     if (background) {
       // Keep the operator's selection across refreshes; only drop it when the
@@ -878,6 +942,7 @@ onBeforeUnmount(() => {
           :nodes-connectable="false"
           :elements-selectable="true"
           :nodes-draggable="true"
+          :only-render-visible-elements="flowNodes.length > 60"
           class="np-topology-flow w-full h-full"
           @init="onFlowInit"
           @node-click="onNodeClick"
@@ -929,6 +994,7 @@ onBeforeUnmount(() => {
           <Background :gap="20" :size="1.2" pattern-color="transparent" />
           <Controls />
           <MiniMap
+            v-if="flowNodes.length <= 150"
             pannable
             zoomable
             :node-color="minimapNodeColor"
@@ -938,6 +1004,36 @@ onBeforeUnmount(() => {
             class="hidden sm:block"
           />
         </VueFlow>
+
+        <!-- Draw budget: the map is bounded, so it says what it left out. -->
+        <div
+          v-if="hiddenHostCount > 0 || (drawnAllHosts && deviceCount > DRAWN_HOST_LIMIT)"
+          class="absolute bottom-3 left-3 z-10 max-w-[min(22rem,calc(100%-1.5rem))] rounded-lg border border-[var(--np-border-subtle)] bg-[var(--np-glass-bg)]/90 px-3 py-2 backdrop-blur-md"
+        >
+          <p v-if="hiddenHostCount > 0" class="text-[0.7rem] leading-relaxed text-[var(--np-text-muted)]">
+            Drawing {{ deviceCount }} of {{ deviceCount + hiddenHostCount }} hosts — gateway, alerts,
+            infrastructure and the newest first. Every host is listed on the Devices page.
+          </p>
+          <p v-else class="text-[0.7rem] leading-relaxed text-[var(--np-text-muted)]">
+            Drawing all {{ deviceCount }} hosts, which is slower to pan.
+          </p>
+          <button
+            v-if="hiddenHostCount > 0"
+            type="button"
+            class="np-cyber-btn mt-2 rounded px-2.5 py-1 text-[0.7rem]"
+            @click="drawAllHosts"
+          >
+            Draw all {{ deviceCount + hiddenHostCount }} (slower)
+          </button>
+          <button
+            v-else
+            type="button"
+            class="np-cyber-btn mt-2 rounded px-2.5 py-1 text-[0.7rem]"
+            @click="drawFewerHosts"
+          >
+            Back to {{ DRAWN_HOST_LIMIT }}
+          </button>
+        </div>
 
         <!-- Map key -->
         <div class="absolute left-3 top-3 z-10 hidden items-center gap-3 rounded-full border border-[var(--np-border-subtle)] bg-[var(--np-glass-bg)]/85 px-3.5 py-1.5 backdrop-blur-md pointer-events-none sm:flex">

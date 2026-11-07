@@ -726,6 +726,10 @@ _API_TAGS = [
         "description": "Installed extensions and what they expose.",
     },
     {
+        "name": "maintenance",
+        "description": "Inventory repairs: rows discovery invented, found and removed.",
+    },
+    {
         "name": "ws",
         "description": "WebSocket endpoints. Documented for reference; these upgrade, not JSON.",
     },

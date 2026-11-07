@@ -11,6 +11,9 @@
 import axios from "axios";
 import { computed, onMounted, ref } from "vue";
 
+import PhantomDevicesCard from "./PhantomDevicesCard.vue";
+import { useAuthStore } from "../../stores/auth";
+
 interface RedisReport {
   reachable: boolean;
   error: string | null;
@@ -32,6 +35,10 @@ interface Row {
   value: string;
   detail: string;
 }
+
+// Pruning rows is a write, so the repair card is only offered to admins. The
+// API enforces this too; hiding it just avoids a guaranteed 403.
+const auth = useAuthStore();
 
 const report = ref<ReadyReport | null>(null);
 const unreachable = ref(false);
@@ -149,11 +156,11 @@ onMounted(check);
 
 <template>
   <div class="space-y-4">
-    <div class="flex items-center justify-between gap-3">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <p class="text-[0.7rem] font-semibold text-[var(--np-text-dim)]">{{ summary }}</p>
       <button
         type="button"
-        class="np-cyber-btn shrink-0 rounded px-4 py-2 text-[0.75rem]"
+        class="np-cyber-btn w-full shrink-0 rounded px-4 py-2 text-[0.75rem] sm:w-auto"
         :disabled="checking"
         @click="check"
       >
@@ -165,7 +172,7 @@ onMounted(check);
       <div
         v-for="row in rows"
         :key="row.key"
-        class="flex items-start justify-between gap-4 py-3 border-b border-[var(--np-border-subtle)] last:border-b-0"
+        class="flex items-start justify-between gap-3 py-3 border-b border-[var(--np-border-subtle)] last:border-b-0 sm:gap-4"
       >
         <div class="flex min-w-0 items-start gap-2.5">
           <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full" :class="TONE_DOT[row.tone]" />
@@ -186,5 +193,9 @@ onMounted(check);
       Checked at {{ checkedAt.toLocaleTimeString() }}. After a failed check the cache is left alone for
       twenty seconds, so this page stays fast while Redis is down.
     </p>
+
+    <div v-if="auth.isAdmin" class="np-settings-section !mb-0">
+      <PhantomDevicesCard />
+    </div>
   </div>
 </template>

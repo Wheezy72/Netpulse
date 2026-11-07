@@ -5,7 +5,7 @@ function, so that is what these cover.
 """
 from __future__ import annotations
 
-from scripts.prune_phantom_devices import DEFAULT_LIMIT, plan_purge
+from app.services.phantom_devices import DEFAULT_LIMIT, plan_purge
 
 ROUTER_MAC = "8C:44:BB:07:6C:10"
 

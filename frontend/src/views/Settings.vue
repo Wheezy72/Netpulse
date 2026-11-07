@@ -913,7 +913,7 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">System</span>
-          <span class="text-[0.7rem] text-[var(--np-text-dim)] font-semibold">The services this install needs, and whether they are running.</span>
+          <span class="text-[0.7rem] text-[var(--np-text-dim)] font-semibold">The services this install needs, whether they are running, and the inventory repairs available.</span>
         </div>
       </header>
 

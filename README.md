@@ -199,8 +199,9 @@ POSTGRES_USER=netpulse
 POSTGRES_PASSWORD=change-me
 POSTGRES_DB=netpulse
 
-# Redis, or Memurai on Windows
-REDIS_URL=redis://localhost:6379/0
+# Redis, or Memurai on Windows. Use 127.0.0.1, not localhost: on a
+# dual-stack host the ::1 attempt spends the whole connect timeout first.
+REDIS_URL=redis://127.0.0.1:6379/0
 
 # Email alerts: host, from and to are all required
 ENABLE_EMAIL_ALERTS=true
