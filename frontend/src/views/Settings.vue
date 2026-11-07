@@ -5,6 +5,7 @@ import { Lock, TriangleAlert } from "lucide-vue-next";
 
 import ToggleSwitch from "../components/ui/ToggleSwitch.vue";
 import AccountPanel from "../components/settings/AccountPanel.vue";
+import SystemPanel from "../components/settings/SystemPanel.vue";
 import UsersPanel from "../components/settings/UsersPanel.vue";
 
 type Theme = "nightshade" | "sysadmin";
@@ -15,7 +16,8 @@ type SettingsTab =
   | "notifications"
   | "network"
   | "schedule"
-  | "backup";
+  | "backup"
+  | "system";
 
 interface Props {
   theme: Theme;
@@ -469,6 +471,7 @@ onMounted(async () => {
           { key: 'network', label: 'Network' },
           { key: 'schedule', label: 'Scheduler' },
           { key: 'backup', label: 'Backup' },
+          { key: 'system', label: 'System' },
         ]"
         :key="tab.key"
         type="button"
@@ -903,6 +906,18 @@ onMounted(async () => {
           {{ backupMessage }}
         </p>
       </div>
+    </section>
+
+    <!-- System -->
+    <section v-else-if="activeSettingsTab === 'system'" class="np-panel p-4 space-y-4">
+      <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
+        <div class="flex flex-col">
+          <span class="np-panel-title">System</span>
+          <span class="text-[0.7rem] text-[var(--np-text-dim)] font-semibold">The services this install needs, and whether they are running.</span>
+        </div>
+      </header>
+
+      <SystemPanel />
     </section>
   </div>
 </template>

@@ -19,6 +19,7 @@ paying the timeout again.
 
 import logging
 import time
+from typing import Any
 
 import redis.asyncio as aioredis
 
@@ -72,6 +73,43 @@ def note_redis_success() -> None:
 def last_redis_error() -> str | None:
     """The last failure, for health reporting."""
     return _last_error
+
+
+def _error_type(message: str | None) -> str | None:
+    """The exception class from a recorded error, without its host."""
+    if not message:
+        return None
+    return message.split(":", 1)[0].strip() or None
+
+
+async def ping_redis() -> bool:
+    """One PING, honouring the breaker.
+
+    A health check has to actually ask: the breaker starts closed even
+    when Redis was never reachable, so reporting its state alone would
+    claim a dead cache is fine. While the breaker is open this answers
+    instantly instead of waiting out a connect timeout.
+    """
+    if not redis_reachable():
+        return False
+    try:
+        await get_redis().ping()
+    except Exception as exc:  # noqa: BLE001 - a cache that is down is not fatal
+        note_redis_failure(exc)
+        return False
+    note_redis_success()
+    return True
+
+
+async def redis_status() -> dict[str, Any]:
+    """Reachability for the readiness probe and the System tab."""
+    if await ping_redis():
+        return {"reachable": True, "error": None, "retry_in_seconds": 0.0}
+    return {
+        "reachable": False,
+        "error": _error_type(_last_error),
+        "retry_in_seconds": round(max(0.0, _down_until - time.monotonic()), 1),
+    }
 
 
 def get_redis() -> aioredis.Redis:

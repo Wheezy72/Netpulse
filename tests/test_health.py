@@ -56,6 +56,16 @@ def nmap_available(monkeypatch):
     )
 
 
+@pytest.fixture
+def redis_up(monkeypatch):
+    """A reachable cache, so the probe never opens a socket in tests."""
+
+    async def _status():
+        return {"reachable": True, "error": None, "retry_in_seconds": 0.0}
+
+    monkeypatch.setattr(health, "redis_status", _status)
+
+
 class TestLiveness:
     def test_returns_200(self):
         response = client.get("/health/live")
@@ -71,26 +81,51 @@ class TestLiveness:
 
 
 class TestReadiness:
-    def test_returns_200(self, nmap_available):
+    def test_returns_200(self, nmap_available, redis_up):
         response = client.get("/health/ready")
         assert response.status_code == 200
 
-    def test_body_contains_status_ok_and_nmap(self, nmap_available):
+    def test_body_contains_status_ok_and_nmap(self, nmap_available, redis_up):
         response = client.get("/health/ready")
         body = response.json()
         assert body["status"] == "ok"
         assert body["nmap"]["available"] is True
         assert body["nmap"]["version"] == "7.95"
 
-    def test_content_type_is_json(self, nmap_available):
+    def test_content_type_is_json(self, nmap_available, redis_up):
         response = client.get("/health/ready")
         assert "application/json" in response.headers["content-type"]
 
-    def test_returns_503_when_nmap_missing(self, monkeypatch):
+    def test_reports_redis_reachable(self, nmap_available, redis_up):
+        body = client.get("/health/ready").json()
+        assert body["redis"] == {"reachable": True, "error": None, "retry_in_seconds": 0.0}
+
+    def test_a_stopped_cache_is_reported_but_not_a_failure(self, nmap_available, monkeypatch):
+        """Redis down costs speed, not correctness: 200, with the reason visible."""
+
+        async def _status():
+            return {"reachable": False, "error": "ConnectionError", "retry_in_seconds": 12.5}
+
+        monkeypatch.setattr(health, "redis_status", _status)
+
+        response = client.get("/health/ready")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "ok"
+        assert body["redis"]["reachable"] is False
+        assert body["redis"]["error"] == "ConnectionError"
+        assert body["redis"]["retry_in_seconds"] == 12.5
+
+    def test_returns_503_when_nmap_missing(self, nmap_available, monkeypatch):
         monkeypatch.setattr(
             health,
             "detect_capabilities",
             lambda *args, **kwargs: _StubCapabilities(available=False),
+        )
+        monkeypatch.setattr(
+            health,
+            "redis_status",
+            _redis_unreachable,
         )
 
         response = client.get("/health/ready")
@@ -98,4 +133,9 @@ class TestReadiness:
         assert response.json() == {
             "status": "degraded",
             "nmap": {"available": False, "version": None},
+            "redis": {"reachable": False, "error": None, "retry_in_seconds": 0.0},
         }
+
+
+async def _redis_unreachable():
+    return {"reachable": False, "error": None, "retry_in_seconds": 0.0}
