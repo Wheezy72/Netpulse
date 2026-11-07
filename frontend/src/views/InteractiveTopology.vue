@@ -39,6 +39,12 @@ const DRAWN_HOST_LIMIT = 120;
 const drawnAllHosts = ref(false);
 const hiddenHostCount = ref(0);
 
+// Fitting the whole graph is only useful while the graph is small. A ring of
+// 120 hosts is some 6,000px across, so "fit" lands near 0.1 — orbs a dozen
+// pixels wide, unreadable and unclickable. Past that point the map opens at a
+// zoom where the centre reads, and the operator pans out to the rest.
+const FIT_MIN_ZOOM = 0.5;
+
 type TopologyNode = {
   id: number;
   label: string;
@@ -169,7 +175,7 @@ const { fitView, onNodesInitialized } = useVueFlow();
 // Fit once real node dimensions are known – otherwise the viewport can be
 // computed against zero-sized nodes and clip the outer ring.
 onNodesInitialized(() => {
-  fitView({ padding: 0.06, duration: 300 });
+  fitView({ padding: 0.06, minZoom: FIT_MIN_ZOOM, duration: 300 });
 });
 
 // The graph fitted itself once, on load, and never again. Any later layout
@@ -186,7 +192,7 @@ function scheduleRefit(): void {
   if (fitTimer !== undefined) window.clearTimeout(fitTimer);
   fitTimer = window.setTimeout(() => {
     if (selectedNodeId.value != null || !flowNodes.value.length) return;
-    fitView({ padding: 0.06, duration: 200 });
+    fitView({ padding: 0.06, minZoom: FIT_MIN_ZOOM, duration: 200 });
   }, 160);
 }
 function deviceOf(node: Node): TopologyNode {
@@ -438,7 +444,7 @@ function clearSelection(): void {
 }
 
 function onFlowInit(): void {
-  fitView({ padding: 0.06, duration: 400 });
+  fitView({ padding: 0.06, minZoom: FIT_MIN_ZOOM, duration: 400 });
 }
 
 /** Mini-map swatches: orbit guides stay invisible, devices use category accents. */
@@ -733,7 +739,7 @@ async function loadTopology(background = false): Promise<void> {
     deviceDetail.value = null;
 
     await nextTick();
-    setTimeout(() => fitView({ padding: 0.06, duration: 450 }), 260);
+    setTimeout(() => fitView({ padding: 0.06, minZoom: FIT_MIN_ZOOM, duration: 450 }), 260);
 
     // Handle deep-link selection from query params
     const selectNodeId = route.query.select ? Number(route.query.select) : null;
