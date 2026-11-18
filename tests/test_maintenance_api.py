@@ -69,7 +69,13 @@ def session():
 
 
 @pytest.fixture
-def admin_client(app, session):
+def admin_client(app, session, monkeypatch):
+    # The stub session cannot answer the network resolver's queries, and these
+    # tests are about what a prune touches. Scoping has its own test below.
+    async def _unscoped(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(maintenance, "scoped_network_id", _unscoped)
     app.dependency_overrides[db_session] = lambda: session
     app.dependency_overrides[require_admin] = lambda: object()
     with TestClient(app) as client:
@@ -134,7 +140,11 @@ class TestPrune:
         assert getattr(session.executed[-1], "is_delete", False) is True
         assert any(getattr(statement, "is_update", False) for statement in session.executed)
 
-    def test_a_clean_inventory_deletes_nothing(self, app, session):
+    def test_a_clean_inventory_deletes_nothing(self, app, session, monkeypatch):
+        async def _unscoped(*args, **kwargs):
+            return None
+
+        monkeypatch.setattr(maintenance, "scoped_network_id", _unscoped)
         session.rows = [(1, None, "AA:BB:CC:DD:EE:01", "192.168.1.1", None, True)]
         app.dependency_overrides[db_session] = lambda: session
         app.dependency_overrides[require_admin] = lambda: object()
@@ -144,3 +154,26 @@ class TestPrune:
         assert response.status_code == 200
         assert response.json() == {"deleted": 0, "clumps": []}
         assert session.committed is False
+
+
+class TestScope:
+    def test_preview_repairs_only_this_network(self, admin_client, monkeypatch) -> None:
+        """A clump on a network this host left is trip cleanup, not a repair."""
+        seen = {}
+
+        async def _scoped(db, *, network_id=None, scope="current"):
+            return 7
+
+        real_scan = maintenance.scan
+
+        async def _spy(db, *, limit, network_id=None):
+            seen["network_id"] = network_id
+            return await real_scan(db, limit=limit, network_id=network_id)
+
+        monkeypatch.setattr(maintenance, "scoped_network_id", _scoped)
+        monkeypatch.setattr(maintenance, "scan", _spy)
+
+        response = admin_client.get("/maintenance/phantom-devices")
+
+        assert response.status_code == 200
+        assert seen["network_id"] == 7

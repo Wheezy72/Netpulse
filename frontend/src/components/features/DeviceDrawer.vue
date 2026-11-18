@@ -79,6 +79,15 @@ interface MetricSummary {
   value: number;
 }
 
+interface DeviceLocation {
+  device_id: number;
+  ip_address: string;
+  network_id: number | null;
+  network_name: string | null;
+  cidr: string | null;
+  last_seen: string | null;
+}
+
 interface DeviceDetail {
   device: DeviceIdentity;
   type_guess?: string | null;
@@ -89,6 +98,7 @@ interface DeviceDetail {
   scripts: ScriptSummary[];
   scans: ScanSummary[];
   metrics: MetricSummary[];
+  locations: DeviceLocation[];
 }
 
 const props = defineProps<{
@@ -158,6 +168,36 @@ function formatMac(value?: string | null): string {
   const pairs = clean.match(/.{2}/g);
   return pairs ? pairs.join(":") : value;
 }
+
+/**
+ * The same hardware, summarised per network.
+ *
+ * Listing every address is noise: a proxy-ARP router answers for a whole subnet
+ * with one MAC, so "seen 246 times" says nothing. One line per network does
+ * answer the question this section exists for: where has this device been?
+ */
+const locationGroups = computed(() => {
+  // Keyed by network id, not name: two remembered networks can share a CIDR.
+  const groups = new Map<string, { key: string; label: string; addresses: number; lastSeen: string | null }>();
+  for (const loc of detail.value?.locations ?? []) {
+    const key = String(loc.network_id ?? "none");
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, {
+        key,
+        label: loc.network_name || loc.cidr || "not assigned to a network",
+        addresses: 1,
+        lastSeen: loc.last_seen,
+      });
+      continue;
+    }
+    existing.addresses += 1;
+    if (loc.last_seen && (!existing.lastSeen || loc.last_seen > existing.lastSeen)) {
+      existing.lastSeen = loc.last_seen;
+    }
+  }
+  return [...groups.values()];
+});
 
 /** Coarse freshness of the last sighting, for the status dot. */
 const freshness = computed<{ label: string; color: string }>(() => {
@@ -686,6 +726,35 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
             >
               Nothing has been run against this device yet.
             </p>
+          </section>
+
+          <!-- Where this hardware has been seen -->
+          <section v-if="locationGroups.length > 1">
+            <h3 class="mb-3 text-[0.7rem] uppercase tracking-widest" :style="{ color: 'var(--np-text-dim)' }">
+              Seen on
+            </h3>
+            <p class="mb-2 text-[0.7rem]" :style="{ color: 'var(--np-text-dim)' }">
+              Same MAC address on {{ locationGroups.length }} networks.
+            </p>
+            <div
+              v-for="group in locationGroups"
+              :key="group.key"
+              class="flex items-center justify-between gap-3 text-xs"
+            >
+              <span class="truncate" :style="{ color: 'var(--np-text)' }">
+                {{ group.label }}
+              </span>
+              <span class="shrink-0 font-mono" :style="{ color: 'var(--np-text-muted)' }">
+                {{ group.addresses }} address{{ group.addresses === 1 ? '' : 'es' }}
+              </span>
+              <span
+                class="shrink-0"
+                :title="group.lastSeen ? absoluteTime(group.lastSeen) : 'never seen'"
+                :style="{ color: 'var(--np-text-dim)' }"
+              >
+                {{ group.lastSeen ? relativeTime(group.lastSeen) : 'never' }}
+              </span>
+            </div>
           </section>
 
           <!-- Metrics -->

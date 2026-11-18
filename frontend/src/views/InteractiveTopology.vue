@@ -677,6 +677,9 @@ async function loadTopology(background = false): Promise<void> {
     }
     if (selectedNetwork.value !== "all") {
       params.network_id = selectedNetwork.value;
+    } else {
+      // The endpoints default to this host's network, so "all" has to say so.
+      params.scope = "all";
     }
 
     const [topologyResponse, inventoryResponse] = await Promise.all([

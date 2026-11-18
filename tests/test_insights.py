@@ -230,7 +230,7 @@ class TestNetworkHealth:
     async def test_empty_inventory_is_healthy(self, db_session) -> None:
         pytest.importorskip("fastapi")
 
-        health = await network_health(db_session)
+        health = await network_health(db_session, scope="all")
 
         assert health.total_devices == 0
         assert health.online_devices == 0
@@ -283,7 +283,7 @@ class TestNetworkHealth:
         )
         await db_session.commit()
 
-        health = await network_health(db_session)
+        health = await network_health(db_session, scope="all")
 
         assert health.total_devices == 2
         assert health.online_devices + health.offline_devices == 2
@@ -318,7 +318,38 @@ class TestNetworkHealth:
         )
         await db_session.commit()
 
-        health = await network_health(db_session)
+        health = await network_health(db_session, scope="all")
 
         assert health.critical_issues == 0
         assert health.bottlenecks == []
+
+
+class TestNetworkScoping:
+    """The health score describes one network, not everywhere this host has been."""
+
+    async def test_devices_from_another_network_are_excluded(self, db_session) -> None:
+        pytest.importorskip("fastapi")
+        from datetime import datetime, timezone
+
+        from app.models.device import Device
+        from app.models.network import Network
+
+        home = Network(key="mac:HOME", name="home", cidr="192.168.1.0/24")
+        away = Network(key="mac:AWAY", name="away", cidr="192.168.56.0/24")
+        db_session.add_all([home, away])
+        await db_session.commit()
+
+        db_session.add_all(
+            [
+                Device(ip_address="192.168.1.5", network_id=home.id, last_seen=datetime.now(timezone.utc)),
+                Device(ip_address="192.168.56.5", network_id=away.id),
+                Device(ip_address="192.168.56.6", network_id=away.id),
+            ]
+        )
+        await db_session.commit()
+
+        health = await network_health(db_session, network_id=home.id)
+
+        assert health.total_devices == 1
+        assert health.online_devices == 1
+        assert health.offline_devices == 0

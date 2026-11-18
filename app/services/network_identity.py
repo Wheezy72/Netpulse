@@ -588,6 +588,78 @@ async def resolve_current_network(db: Any, *, refresh: bool = False) -> Optional
     return network
 
 
+async def scoped_network_id(
+    db: Any, *, network_id: Optional[int] = None, scope: str = "current"
+) -> Optional[int]:
+    """Which network a listing should be limited to (``None`` means no limit).
+
+    The inventory accumulates every network this host has been carried onto: a
+    sweep on a café or a friend's Wi-Fi leaves hundreds of rows behind that have
+    nothing to do with the network the console is on now. They are real
+    observations, so they are kept — but a listing has to default to *this*
+    network, or the operator opens a page at home to a wall of strangers'
+    devices marked offline.
+
+    An explicit ``network_id`` is honoured as given; ``scope=all`` opts out.
+    When the host cannot fingerprint its network at all, the most recently used
+    one answers instead — never the union of every network ever seen.
+    """
+    if network_id is not None:
+        return network_id
+    if scope == "all":
+        return None
+
+    try:
+        current = await resolve_current_network(db)
+    except Exception:  # pragma: no cover - detection is best-effort
+        current = None
+    if current is not None:
+        return current.id
+
+    latest = await db.execute(
+        select(Network.id).order_by(Network.last_seen.desc()).limit(1)
+    )
+    return latest.scalar_one_or_none()
+
+
+def subnet_owning(ip_address: str, subnets: list[str]) -> Optional[str]:
+    """The most specific swept subnet containing *ip_address*, else ``None``."""
+    try:
+        address = ipaddress.ip_address(ip_address)
+    except ValueError:
+        return None
+
+    best: Any = None
+    for subnet in subnets:
+        try:
+            network = ipaddress.ip_network(subnet, strict=False)
+        except ValueError:
+            continue
+        if address in network and (best is None or network.prefixlen > best.prefixlen):
+            best = network
+    return str(best) if best is not None else None
+
+
+async def sweep_network_assignments(db: Any, subnets: list[str]) -> dict[str, int]:
+    """Map each swept CIDR to the remembered network row that owns it.
+
+    Detection describes the *host*, the sweep describes an address space, and
+    with a virtual adapter present the two can disagree — which is how a set of
+    devices ends up filed under a network the machine was not really on. A
+    subnet that already has a row wins for the hosts found in it.
+
+    Only existing rows are matched: an unknown address space does not invent a
+    network, so a deliberate sweep of somewhere else leaves nothing behind.
+    """
+    wanted = [subnet for subnet in subnets if subnet]
+    if not wanted:
+        return {}
+    rows = (
+        await db.execute(select(Network.id, Network.cidr).where(Network.cidr.in_(wanted)))
+    ).all()
+    return {str(row.cidr): int(row.id) for row in rows}
+
+
 async def current_network_id(db: Any) -> Optional[int]:
     """The id of the current network, tagged onto devices as they are recorded.
 

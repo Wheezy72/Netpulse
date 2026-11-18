@@ -28,8 +28,15 @@ from app.models.user import User
 from app.models.user_settings import UserSettings
 from app.models.vulnerability import Vulnerability, VulnerabilitySeverity
 from app.services.alert_policy import AlertPolicy, load_alert_policy
+from app.services.network_identity import scoped_network_id
 
 logger = logging.getLogger("netpulse.alerts")
+
+# First sweep after start: rows that were already stale are marked as reported
+# instead of mailed. The function below assigns this through ``global``, so it
+# has to exist before the first call — without it every run raised NameError as
+# soon as it met a stale host, and offline alerting silently never worked.
+_offline_baseline_done: bool = False
 
 
 def _build_vulnerability_subject(device: Device, vuln: Vulnerability) -> str:
@@ -319,15 +326,24 @@ async def process_device_down_alerts(
         logger.debug("Offline detection skipped: the in-process scheduler is off")
         return 0
 
-    cutoff = utcnow() - timedelta(minutes=max(1, settings.device_offline_minutes))
+    # ``_as_aware`` because SQLite hands back naive timestamps and Postgres aware
+    # ones; comparing either against a naive ``utcnow()`` raised TypeError, which
+    # the scheduler logged as a failed tick and offline alerts never fired.
+    now = _as_aware(utcnow()) or datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=max(1, settings.device_offline_minutes))
     # Inventory that has been stale for hours predates this process: it is not
     # an outage that just happened, so it is not worth a mail.
     stale_floor = cutoff - timedelta(minutes=max(1, settings.device_offline_minutes) * 19)
-    devices = (
-        await db.execute(select(Device).where(Device.last_seen.is_not(None)))
-    ).scalars().all()
+    # Only this host's network: rows left behind on a network the machine has
+    # since left are stale by definition, and mailing one alert per stranger
+    # after a trip teaches the operator to ignore these mails.
+    scoped_to = await scoped_network_id(db)
+    offline_query = select(Device).where(Device.last_seen.is_not(None))
+    if scoped_to is not None:
+        offline_query = offline_query.where(Device.network_id == scoped_to)
+    devices = (await db.execute(offline_query)).scalars().all()
 
-    global _offline_baseline_done
+    global _offline_baseline_done  # noqa: PLW0603 - one process-wide baseline
 
     newly_down: List[Device] = []
     for device in devices:
@@ -380,28 +396,38 @@ async def _digest_message(db: AsyncSession) -> tuple[str, str]:
     seen_cutoff = now - timedelta(minutes=max(1, settings.device_offline_minutes))
     day_ago = now - timedelta(hours=24)
 
-    total = (await db.execute(select(func.count(Device.id)))).scalar_one()
+    # Same scope as the alert itself: a digest about networks this host is not
+    # on reports outages nobody can act on.
+    scoped_to = await scoped_network_id(db)
+    network_filter = (Device.network_id == scoped_to,) if scoped_to is not None else ()
+
+    total = (
+        await db.execute(select(func.count(Device.id)).where(*network_filter))
+    ).scalar_one()
     online = (
         await db.execute(
             select(func.count(Device.id)).where(
                 Device.last_seen.is_not(None),
                 Device.last_seen >= seen_cutoff,
+                *network_filter,
             )
         )
     ).scalar_one()
     new_devices = (
         await db.execute(
-            select(func.count(Device.id)).where(Device.created_at >= day_ago)
+            select(func.count(Device.id)).where(Device.created_at >= day_ago, *network_filter)
         )
     ).scalar_one()
 
-    severity_rows = (
-        await db.execute(
-            select(Vulnerability.severity, func.count(Vulnerability.id))
-            .where(Vulnerability.is_resolved.is_(False))
-            .group_by(Vulnerability.severity)
-        )
-    ).all()
+    severity_query = (
+        select(Vulnerability.severity, func.count(Vulnerability.id))
+        .join(Device, Vulnerability.device_id == Device.id)
+        .where(Vulnerability.is_resolved.is_(False))
+        .group_by(Vulnerability.severity)
+    )
+    if scoped_to is not None:
+        severity_query = severity_query.where(Device.network_id == scoped_to)
+    severity_rows = (await db.execute(severity_query)).all()
     counts = {
         (severity.value if hasattr(severity, "value") else str(severity)): int(count)
         for severity, count in severity_rows

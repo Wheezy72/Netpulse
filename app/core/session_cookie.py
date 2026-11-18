@@ -123,8 +123,23 @@ def csrf_problem(request: Request) -> str | None:
     return "CSRF token missing or invalid"
 
 
-def require_csrf(request: Request) -> None:
-    """Router-level dependency: refuse cookie-authenticated writes without a token."""
+def require_csrf(request: Request = None) -> None:  # type: ignore[assignment]
+    """Router-level dependency: refuse cookie-authenticated writes without a token.
+
+    The guard rides on the whole API router, WebSocket routes included, and
+    FastAPI injects a ``Request`` only on HTTP scopes. Socket scopes therefore
+    call this with no argument at all: the default is what lets a handshake
+    through instead of raising ``TypeError`` and answering HTTP 500 before the
+    endpoint is reached (which is what killed the SSH console). CSRF is a
+    double-submit header check for HTTP writes; a socket has no form body to
+    forge.
+
+    Keep the annotation as plain ``Request``. Written as ``Request | None``
+    FastAPI no longer recognises the parameter, treats ``request`` as an
+    ordinary query argument, and every cookie write would skip the check.
+    """
+    if request is None:
+        return
     problem = csrf_problem(request)
     if problem:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=problem)

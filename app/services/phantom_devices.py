@@ -22,14 +22,11 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.device import Device
-from app.models.device_port import DevicePort
-from app.models.metric import Metric
-from app.models.script_job import ScriptJob
-from app.models.vulnerability import Vulnerability
+from app.services.device_purge import delete_devices
 
 # Same threshold as PROXY_ARP_ADDRESS_LIMIT in app/services/device_discovery.py.
 DEFAULT_LIMIT = 8
@@ -145,28 +142,6 @@ async def scan(
 
 
 async def apply(session: AsyncSession, clumps: Sequence[Clump]) -> int:
-    """Delete every row in *clumps* except the one each clump keeps.
-
-    Children go first. Metrics and vulnerabilities point at the device with no
-    ``ON DELETE`` action, so the database would refuse the parent delete until
-    they are gone; ports cascade but are removed explicitly for the same
-    reason, and script jobs are kept while losing their device link, because a
-    run that happened is history and an address that never existed is not worth
-    keeping a pointer to.
-    """
+    """Delete every row in *clumps* except the one each clump keeps."""
     doomed = [device_id for clump in clumps for device_id in clump.delete_ids]
-    if not doomed:
-        return 0
-
-    await session.execute(delete(Metric).where(Metric.device_id.in_(doomed)))
-    await session.execute(delete(Vulnerability).where(Vulnerability.device_id.in_(doomed)))
-    await session.execute(delete(DevicePort).where(DevicePort.device_id.in_(doomed)))
-    await session.execute(
-        update(ScriptJob).where(ScriptJob.device_id.in_(doomed)).values(device_id=None)
-    )
-    result = await session.execute(delete(Device).where(Device.id.in_(doomed)))
-    await session.commit()
-
-    if result.rowcount is not None and result.rowcount >= 0:
-        return int(result.rowcount)
-    return len(doomed)
+    return await delete_devices(session, doomed)

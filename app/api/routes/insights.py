@@ -24,9 +24,9 @@ import asyncio
 import time
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import db_session, require_compliance_role, require_scan_role
 from app.models.device import Device
 from app.models.vulnerability import Vulnerability, VulnerabilitySeverity
+from app.services.network_identity import scoped_network_id
 from app.services.scan_policy import validate_target
 
 router = APIRouter()
@@ -275,36 +276,59 @@ async def tcp_probe(payload: TcpProbeRequest) -> TcpProbeResponse:
     summary="Summarise fleet health from inventory and findings",
     dependencies=[Depends(require_compliance_role())],
 )
-async def network_health(db: AsyncSession = Depends(db_session)) -> NetworkHealth:
-    """Fleet-level health summary.
+async def network_health(
+    db: AsyncSession = Depends(db_session),
+    network_id: Annotated[Optional[int], Query(description="Only this network's devices")] = None,
+    scope: Annotated[
+        Literal["current", "all"],
+        Query(description="`current` (default) scores this host's network; `all` scores every network"),
+    ] = "current",
+) -> NetworkHealth:
+    """Fleet-level health summary for one network.
 
     Read-only: it aggregates what discovery and scanning already recorded and
     probes nothing, so it is safe to poll.
+
+    Scoped like every other listing. Counting devices from a network this host
+    left turns their silence into an offline ratio, which drags the score down
+    for a network the operator cannot even reach.
     """
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(minutes=ONLINE_WINDOW_MINUTES)
 
-    total_devices = int(
-        (await db.execute(select(func.count()).select_from(Device))).scalar_one()
+    scoped_to = await scoped_network_id(db, network_id=network_id, scope=scope)
+
+    total_query = select(func.count()).select_from(Device)
+    online_query = (
+        select(func.count())
+        .select_from(Device)
+        .where(Device.last_seen.is_not(None), Device.last_seen >= cutoff)
     )
-    online_devices = int(
-        (
-            await db.execute(
-                select(func.count())
-                .select_from(Device)
-                .where(Device.last_seen.is_not(None), Device.last_seen >= cutoff)
-            )
-        ).scalar_one()
+    # Findings and bottlenecks are reached through the device, so the same
+    # network filter applies to both.
+    severity_query = (
+        select(Vulnerability.severity, func.count(Vulnerability.id))
+        .join(Device, Vulnerability.device_id == Device.id)
+        .where(Vulnerability.is_resolved.is_(False))
+        .group_by(Vulnerability.severity)
     )
+    finding_query = (
+        select(Vulnerability, Device)
+        .join(Device, Vulnerability.device_id == Device.id)
+        .where(Vulnerability.is_resolved.is_(False))
+        .limit(300)
+    )
+    if scoped_to is not None:
+        total_query = total_query.where(Device.network_id == scoped_to)
+        online_query = online_query.where(Device.network_id == scoped_to)
+        severity_query = severity_query.where(Device.network_id == scoped_to)
+        finding_query = finding_query.where(Device.network_id == scoped_to)
+
+    total_devices = int((await db.execute(total_query)).scalar_one())
+    online_devices = int((await db.execute(online_query)).scalar_one())
     offline_devices = max(total_devices - online_devices, 0)
 
-    severity_rows = (
-        await db.execute(
-            select(Vulnerability.severity, func.count(Vulnerability.id))
-            .where(Vulnerability.is_resolved.is_(False))
-            .group_by(Vulnerability.severity)
-        )
-    ).all()
+    severity_rows = (await db.execute(severity_query)).all()
 
     critical_issues = 0
     warning_issues = 0
@@ -317,14 +341,7 @@ async def network_health(db: AsyncSession = Depends(db_session)) -> NetworkHealt
 
     # Explicit join rather than a relationship walk: async SQLAlchemy cannot
     # lazy-load, and this keeps it to one query.
-    finding_rows = (
-        await db.execute(
-            select(Vulnerability, Device)
-            .join(Device, Vulnerability.device_id == Device.id)
-            .where(Vulnerability.is_resolved.is_(False))
-            .limit(300)
-        )
-    ).all()
+    finding_rows = (await db.execute(finding_query)).all()
 
     grouped: Dict[int, Dict[str, Any]] = {}
     for vuln, device in finding_rows:

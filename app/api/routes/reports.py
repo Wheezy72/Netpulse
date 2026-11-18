@@ -14,6 +14,7 @@ from app.api.deps import db_session, get_current_user
 from app.models.device import Device
 from app.models.scan_job import ScanJob
 from app.models.user import User
+from app.services.network_identity import scoped_network_id
 from app.services.pdf_report import (
     build_inventory_pdf,
     build_logs_pdf,
@@ -103,7 +104,13 @@ async def generate_report(
 
     devices: List[Any] = []
     if request.include_devices:
-        result = await db.execute(select(Device).limit(500))
+        # The report describes the network this host is on: a trip's leftovers
+        # are not part of today's inventory.
+        stmt = select(Device).limit(500)
+        scoped_to = await scoped_network_id(db)
+        if scoped_to is not None:
+            stmt = stmt.where(Device.network_id == scoped_to)
+        result = await db.execute(stmt)
         devices = list(result.scalars().all())
 
     try:
@@ -149,9 +156,13 @@ async def generate_devices_pdf(
     db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ) -> StreamingResponse:
-    """Generate a PDF report of all discovered devices."""
+    """Generate a PDF report of the devices discovered on this network."""
     _ = current_user
-    result = await db.execute(select(Device).order_by(Device.ip_address).limit(500))
+    stmt = select(Device).order_by(Device.ip_address).limit(500)
+    scoped_to = await scoped_network_id(db)
+    if scoped_to is not None:
+        stmt = stmt.where(Device.network_id == scoped_to)
+    result = await db.execute(stmt)
     devices = list(result.scalars().all())
 
     try:

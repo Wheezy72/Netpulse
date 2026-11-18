@@ -133,6 +133,122 @@ async function forgetNetwork(network: RememberedNetwork): Promise<void> {
   }
 }
 
+// SSH host keys pinned by the console. A rebuilt device presents a new key and
+// is refused on purpose; without a way to see and drop the old pin that refusal
+// is indistinguishable from "SSH is broken".
+interface SshHostKey {
+  host: string;
+  fingerprint: string;
+}
+const sshHostKeys = ref<SshHostKey[]>([]);
+const sshKeysError = ref<string | null>(null);
+
+async function loadSshHostKeys(): Promise<void> {
+  if (!isAdmin.value) return;
+  sshKeysError.value = null;
+  try {
+    const { data } = await axios.get<SshHostKey[]>("/api/maintenance/ssh-host-keys");
+    sshHostKeys.value = data;
+  } catch {
+    sshKeysError.value = "Failed to load pinned host keys.";
+    sshHostKeys.value = [];
+  }
+}
+
+async function forgetSshHostKey(key: SshHostKey): Promise<void> {
+  if (!isAdmin.value) return;
+  try {
+    await axios.delete(`/api/maintenance/ssh-host-keys/${encodeURIComponent(key.host)}`);
+    await loadSshHostKeys();
+  } catch (e: any) {
+    sshKeysError.value = e.response?.data?.detail || "Failed to remove that key.";
+  }
+}
+
+// Purging a network: the rows a trip left behind are real observations, so they
+// are reviewed before they are deleted rather than pruned automatically.
+interface PurgePreviewDevice {
+  ip_address: string;
+  hostname: string | null;
+  mac_address: string | null;
+  last_seen: string | null;
+}
+const purgeTarget = ref<RememberedNetwork | null>(null);
+const purgePreview = ref<PurgePreviewDevice[]>([]);
+const purgeLoading = ref(false);
+const purgeError = ref<string | null>(null);
+const purgeNotice = ref<string | null>(null);
+
+/** Canonical 12-hex MAC in the conventional colon form, for display only. */
+function formatMac(mac: string | null): string {
+  if (!mac) return "—";
+  const compact = mac.replace(/[^0-9A-F]/gi, "").toUpperCase();
+  if (compact.length !== 12) return mac;
+  return compact.toLowerCase().match(/.{2}/g)?.join(":") ?? mac;
+}
+
+async function reviewNetworkDevices(network: RememberedNetwork): Promise<void> {
+  if (!isAdmin.value || network.is_current) return;
+  purgeTarget.value = network;
+  purgePreview.value = [];
+  purgeError.value = null;
+  purgeNotice.value = null;
+  purgeLoading.value = true;
+  try {
+    const { data } = await axios.get<PurgePreviewDevice[]>("/api/devices", {
+      params: { network_id: network.id },
+    });
+    purgePreview.value = data;
+  } catch {
+    purgeError.value = "Failed to load the devices recorded on that network.";
+  } finally {
+    purgeLoading.value = false;
+  }
+}
+
+async function downloadNetworkCsv(network: RememberedNetwork): Promise<void> {
+  try {
+    const { data } = await axios.get(`/api/networks/${network.id}/devices/export`, {
+      responseType: "blob",
+    });
+    const url = URL.createObjectURL(data as Blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `network-${network.id}-devices.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch {
+    purgeError.value = "Failed to download the inventory.";
+  }
+}
+
+async function confirmPurgeNetwork(): Promise<void> {
+  const network = purgeTarget.value;
+  if (!isAdmin.value || !network || network.is_current) return;
+  purgeLoading.value = true;
+  purgeError.value = null;
+  try {
+    const { data } = await axios.delete<{ deleted_devices: number }>(
+      `/api/networks/${network.id}/devices`,
+      // The server refuses if the inventory moved since this list was fetched.
+      { params: { expected_devices: purgePreview.value.length } },
+    );
+    purgeTarget.value = null;
+    purgePreview.value = [];
+    purgeNotice.value =
+      data.deleted_devices === 1
+        ? `Deleted 1 device recorded on ${network.name}.`
+        : `Deleted ${data.deleted_devices} devices recorded on ${network.name}.`;
+    await loadRememberedNetworks();
+  } catch (e: any) {
+    purgeError.value = e.response?.data?.detail || "Failed to delete those devices.";
+  } finally {
+    purgeLoading.value = false;
+  }
+}
+
 // Network
 const segments = ref<NetworkSegment[]>([]);
 const segmentsLoading = ref(false);
@@ -455,6 +571,7 @@ onMounted(async () => {
     loadNetworkSegments(),
     loadNotificationSettings(),
     loadScanSchedule(),
+    loadSshHostKeys(),
   ]);
   if (isAdmin.value) await loadBackups();
 });
@@ -603,6 +720,7 @@ onMounted(async () => {
 
         <p v-if="networksLoading" class="text-[0.75rem] text-[var(--np-text-dim)] font-semibold">Loading...</p>
         <p v-else-if="networksError" class="text-[0.75rem] text-rose-400">{{ networksError }}</p>
+        <p v-else-if="purgeNotice" class="text-[0.75rem] text-emerald-400 font-semibold">{{ purgeNotice }}</p>
         <p v-else-if="rememberedNetworks.length === 0" class="text-[0.75rem] text-[var(--np-text-dim)] font-semibold">
           No network recorded yet. Run a discovery sweep.
         </p>
@@ -651,6 +769,16 @@ onMounted(async () => {
               </button>
               <!-- The network this host sits on cannot be forgotten: the next
                    detection would recreate it and orphan its devices. -->
+              <!-- Devices stay when a network is forgotten, so the rows a trip
+                   left behind need their own, reviewable action. -->
+              <button
+                v-if="!net.is_current && net.device_count > 0"
+                type="button"
+                class="rounded px-2 py-1 text-[0.7rem] border border-[var(--np-border-subtle)] text-[var(--np-text-dim)] hover:text-[var(--np-text)] transition-colors"
+                @click="reviewNetworkDevices(net)"
+              >
+                Purge devices
+              </button>
               <button
                 v-if="!net.is_current"
                 type="button"
@@ -660,6 +788,116 @@ onMounted(async () => {
                 Forget
               </button>
               <span v-else class="text-[0.68rem] text-[var(--np-text-dim)]">attached now</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="np-settings-section space-y-3">
+        <p class="np-settings-section-title">SSH host keys</p>
+        <p class="text-[0.7rem] text-[var(--np-text-dim)] font-semibold">
+          Pinned on the first console connection to an address. A rebuilt device presents a new
+          key and is refused on purpose — remove its pin here to trust the new one.
+        </p>
+        <p v-if="sshKeysError" class="text-[0.75rem] text-rose-400">{{ sshKeysError }}</p>
+        <p
+          v-else-if="sshHostKeys.length === 0"
+          class="text-[0.75rem] text-[var(--np-text-dim)] font-semibold"
+        >
+          No keys pinned yet.
+        </p>
+        <div v-else class="grid gap-2 md:grid-cols-2">
+          <div
+            v-for="key in sshHostKeys"
+            :key="key.host"
+            class="flex items-center justify-between gap-3 border-l-2 border-[var(--np-border-subtle)] pl-3"
+          >
+            <div class="min-w-0">
+              <p class="np-info-card-value font-mono truncate">{{ key.host }}</p>
+              <p class="np-info-card-text font-mono truncate">{{ key.fingerprint || 'no fingerprint recorded' }}</p>
+            </div>
+            <button
+              v-if="isAdmin"
+              type="button"
+              class="rounded px-2 py-1 text-[0.7rem] border border-red-500/40 text-red-500 hover:bg-red-600/20 transition-colors"
+              @click="forgetSshHostKey(key)"
+            >
+              Forget
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Review before deleting: these are real observations from a network
+           this host has left, not duplicates to fold away. -->
+      <div
+        v-if="purgeTarget"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+        @click.self="purgeTarget = null"
+      >
+        <div class="np-settings-section w-full max-w-2xl max-h-[85vh] flex flex-col gap-3">
+          <div>
+            <p class="np-settings-section-title">Devices recorded on {{ purgeTarget.name }}</p>
+            <p class="text-[0.7rem] text-[var(--np-text-dim)] font-semibold mt-1">
+              This host is not attached to {{ purgeTarget.cidr || 'that network' }} now. Deleting
+              removes these {{ purgeTarget.device_count }} device rows along with their metrics,
+              findings and ports. It cannot be undone.
+            </p>
+          </div>
+
+          <p v-if="purgeError" class="text-[0.75rem] text-rose-400">{{ purgeError }}</p>
+          <p v-else-if="purgeLoading" class="text-[0.75rem] text-[var(--np-text-dim)] font-semibold">Loading...</p>
+
+          <div v-else class="overflow-auto border border-[var(--np-border-subtle)] rounded">
+            <table class="w-full text-[0.72rem]">
+              <thead class="text-[var(--np-text-dim)]">
+                <tr class="text-left">
+                  <th class="px-2 py-1 font-semibold">Address</th>
+                  <th class="px-2 py-1 font-semibold">Hostname</th>
+                  <th class="px-2 py-1 font-semibold">MAC</th>
+                  <th class="px-2 py-1 font-semibold">Last seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="device in purgePreview.slice(0, 100)" :key="device.ip_address">
+                  <td class="px-2 py-1 font-mono">{{ device.ip_address }}</td>
+                  <td class="px-2 py-1 truncate">{{ device.hostname || '—' }}</td>
+                  <td class="px-2 py-1 font-mono">{{ formatMac(device.mac_address) }}</td>
+                  <td class="px-2 py-1">
+                    {{ device.last_seen ? new Date(device.last_seen).toLocaleString() : 'never' }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p v-if="purgePreview.length > 100" class="px-2 py-1 text-[0.7rem] text-[var(--np-text-dim)]">
+              Showing the first 100 of {{ purgePreview.length }}.
+            </p>
+          </div>
+
+          <div class="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              class="rounded px-3 py-1.5 text-[0.75rem] border border-[var(--np-border-subtle)] text-[var(--np-text-dim)] hover:text-[var(--np-text)] transition-colors"
+              @click="downloadNetworkCsv(purgeTarget)"
+            >
+              Download CSV
+            </button>
+            <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="rounded px-3 py-1.5 text-[0.75rem] border border-[var(--np-border-subtle)] text-[var(--np-text-dim)]"
+              @click="purgeTarget = null"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="rounded px-3 py-1.5 text-[0.75rem] border border-red-500/40 text-red-500 hover:bg-red-600/20 transition-colors disabled:opacity-40"
+              :disabled="purgeLoading || purgePreview.length === 0"
+              @click="confirmPurgeNetwork"
+            >
+              Delete {{ purgeTarget.device_count }} device{{ purgeTarget.device_count === 1 ? '' : 's' }}
+            </button>
             </div>
           </div>
         </div>

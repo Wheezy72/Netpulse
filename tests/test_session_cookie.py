@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from fastapi import Response
+from fastapi import Depends, FastAPI, Response, WebSocket
+from fastapi.testclient import TestClient
 
 from app.core.session_cookie import (
     CSRF_COOKIE,
@@ -10,6 +11,7 @@ from app.core.session_cookie import (
     SESSION_COOKIE,
     clear_session_cookies,
     csrf_problem,
+    require_csrf,
     set_session_cookies,
 )
 
@@ -108,3 +110,59 @@ def test_anonymous_write_is_not_blocked_here():
     # Login and first-run setup arrive before any cookie exists; refusing them
     # here would make the console impossible to sign into.
     assert csrf_problem(_request("POST")) is None
+
+
+def test_websocket_route_is_not_killed_by_the_csrf_guard():
+    """The guard rides on the whole API router, WebSocket routes included.
+
+    FastAPI injects no ``Request`` on a socket scope, so a guard that demanded
+    one raised ``TypeError`` before the endpoint ran and every handshake — the
+    SSH console included — answered HTTP 500. A socket must reach its handler.
+    """
+    socket_routes = FastAPI()
+
+    @socket_routes.websocket("/socket")
+    async def socket(websocket: WebSocket) -> None:  # noqa: ANN001
+        await websocket.accept()
+        await websocket.send_text("reached")
+        await websocket.close()
+
+    guarded = FastAPI()
+    guarded.include_router(socket_routes.router, dependencies=[Depends(require_csrf)])
+
+    with TestClient(guarded) as client:
+        with client.websocket_connect("/socket") as websocket:
+            assert websocket.receive_text() == "reached"
+
+
+def _guarded_app() -> FastAPI:
+    """A router carrying the guard the way ``app/main.py`` attaches it."""
+    routes = FastAPI()
+
+    @routes.post("/write")
+    async def write() -> dict:
+        return {"ok": True}
+
+    guarded = FastAPI()
+    guarded.include_router(routes.router, dependencies=[Depends(require_csrf)])
+    return guarded
+
+
+def test_cookie_write_through_the_router_still_needs_the_header():
+    """The socket fix must not have made the guard miss HTTP requests.
+
+    Annotating ``request`` as ``Request | None`` would make FastAPI treat it as
+    a query parameter, leaving it ``None`` on every write and skipping the
+    check — so the guard is exercised through a router, not called directly.
+    """
+    with TestClient(_guarded_app()) as client:
+        client.cookies.set(SESSION_COOKIE, "t")
+        client.cookies.set(CSRF_COOKIE, "abc123")
+        assert client.post("/write").status_code == 403
+        assert client.post("/write", headers={CSRF_HEADER: "abc123"}).status_code == 200
+
+
+def test_writes_without_a_session_cookie_are_not_refused():
+    # Bearer clients and sign-in arrive with no cookie to abuse.
+    with TestClient(_guarded_app()) as client:
+        assert client.post("/write").status_code == 200

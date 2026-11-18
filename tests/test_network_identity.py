@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,6 +21,53 @@ os.environ.setdefault("ENVIRONMENT", "development")
 
 import app.services.device_discovery as _discovery  # noqa: E402
 import app.services.network_identity as identity  # noqa: E402
+
+
+class TestSweepAttribution:
+    """A sweep is filed under the subnet the hosts were found in.
+
+    Detection describes the host; with a virtual adapter attached the two can
+    disagree, and a cafe's devices then land in a network the machine was not
+    really on.
+    """
+
+    def test_the_most_specific_subnet_wins(self) -> None:
+        assert (
+            identity.subnet_owning("192.168.1.50", ["192.168.0.0/16", "192.168.1.0/24"])
+            == "192.168.1.0/24"
+        )
+
+    def test_an_address_outside_every_subnet_has_no_home(self) -> None:
+        assert identity.subnet_owning("10.0.0.5", ["192.168.1.0/24"]) is None
+
+    def test_garbage_is_not_an_address(self) -> None:
+        assert identity.subnet_owning("not-an-ip", ["192.168.1.0/24"]) is None
+
+    def test_unparseable_subnets_are_skipped(self) -> None:
+        assert (
+            identity.subnet_owning("192.168.1.5", ["nonsense", "192.168.1.0/24"])
+            == "192.168.1.0/24"
+        )
+
+    async def test_assignments_map_a_cidr_to_its_remembered_row(self) -> None:
+        class _Result:
+            def all(self):
+                return [SimpleNamespace(id=5, cidr="192.168.1.0/24")]
+
+        class _Session:
+            async def execute(self, statement):
+                return _Result()
+
+        assignments = await identity.sweep_network_assignments(_Session(), ["192.168.1.0/24"])
+
+        assert assignments == {"192.168.1.0/24": 5}
+
+    async def test_an_unknown_address_space_invents_nothing(self) -> None:
+        class _Session:
+            async def execute(self, statement):
+                raise AssertionError("no subnets means no query")
+
+        assert await identity.sweep_network_assignments(_Session(), [""]) == {}
 
 
 def profile(**overrides) -> identity.NetworkProfile:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
@@ -18,6 +18,7 @@ from app.models.user import User
 from app.services.icmp import ping as icmp_ping
 from app.models.device_port import DevicePort
 from app.models.metric import Metric
+from app.models.network import Network
 from app.models.scan_job import ScanJob
 from app.models.script_job import ScriptJob
 from app.models.vulnerability import Vulnerability, VulnerabilitySeverity
@@ -30,6 +31,7 @@ from app.services.device_enrichment import (
     upsert_device_ports,
 )
 from app.services.nmap_capabilities import VULN_SCRIPT_CATALOG, detect_capabilities
+from app.services.network_identity import scoped_network_id
 from app.services.vulnerability_store import record_vuln_findings
 from app.services.router_source import describe_configuration, verify_devices as run_verification
 from app.services.oui import is_locally_administered, normalize_mac
@@ -220,6 +222,17 @@ class MetricSummary(BaseModel):
     tags: Optional[Dict[str, Any]] = None
 
 
+class DeviceLocation(BaseModel):
+    """One address at which this hardware answered."""
+
+    device_id: int
+    ip_address: str
+    network_id: Optional[int] = None
+    network_name: Optional[str] = None
+    cidr: Optional[str] = None
+    last_seen: Optional[datetime] = None
+
+
 class DeviceDetail(BaseModel):
     device: DeviceOut
     type_guess: Optional[str]
@@ -230,6 +243,7 @@ class DeviceDetail(BaseModel):
     scripts: List[ScriptJobSummary]
     scans: List[ScanSummary]
     metrics: List[MetricSummary]
+    locations: List[DeviceLocation] = []
 
 
 @router.get(
@@ -240,17 +254,22 @@ class DeviceDetail(BaseModel):
 )
 async def list_devices(
     db: AsyncSession = Depends(db_session),
-    zone: Optional[str] = Query(None, description="Filter devices by zone label"),
-    network_id: Optional[int] = Query(
-        None, description="Only devices seen on this network (see /api/networks)"
-    ),
+    zone: Annotated[Optional[str], Query(description="Filter devices by zone label")] = None,
+    network_id: Annotated[
+        Optional[int], Query(description="Only devices seen on this network (see /api/networks)")
+    ] = None,
+    scope: Annotated[
+        Literal["current", "all"],
+        Query(description="`current` (default) lists this host's network only; `all` lists every network"),
+    ] = "current",
 ) -> List[DeviceOut]:
     """Return discovered devices, optionally filtered by network and zone."""
     stmt = select(Device)
     if zone:
         stmt = stmt.where(Device.zone == zone)
-    if network_id is not None:
-        stmt = stmt.where(Device.network_id == network_id)
+    scoped_to = await scoped_network_id(db, network_id=network_id, scope=scope)
+    if scoped_to is not None:
+        stmt = stmt.where(Device.network_id == scoped_to)
     result = await db.execute(stmt)
     devices = list(result.scalars().all())
 
@@ -428,15 +447,20 @@ def _topology_device_groups(
 )
 async def get_topology(
     db: AsyncSession = Depends(db_session),
-    zone: Optional[str] = Query(None, description="Filter topology by zone label"),
-    network_id: Optional[int] = Query(None, description="Only this network's devices"),
+    zone: Annotated[Optional[str], Query(description="Filter topology by zone label")] = None,
+    network_id: Annotated[Optional[int], Query(description="Only this network's devices")] = None,
+    scope: Annotated[
+        Literal["current", "all"],
+        Query(description="`current` (default) draws this host's network only; `all` draws every network"),
+    ] = "current",
 ) -> TopologyResponse:
     """Return a minimal topology view for the Eye panel's graph."""
     stmt = select(Device)
     if zone:
         stmt = stmt.where(Device.zone == zone)
-    if network_id is not None:
-        stmt = stmt.where(Device.network_id == network_id)
+    scoped_to = await scoped_network_id(db, network_id=network_id, scope=scope)
+    if scoped_to is not None:
+        stmt = stmt.where(Device.network_id == scoped_to)
     result = await db.execute(stmt)
     devices = result.scalars().all()
 
@@ -731,6 +755,41 @@ async def get_device_detail(
 
     type_guess, type_confidence = _guess_device_type(device)
 
+    # The same hardware seen on several networks is the useful other half of a
+    # per-network inventory: it turns "this laptop" into "this laptop, at home
+    # and at the café". Rows without a MAC cannot be linked, so they are absent.
+    locations: List[DeviceLocation] = []
+    if device.mac_address:
+        # Compare normalised MACs. The inventory can hold the same hardware as
+        # "F41E5796FBC7" on one row and "f4:1e:57:96:fb:c7" on another (legacy
+        # rows, different sources), and a string comparison then reports the
+        # device as never having left the network it was found on.
+        stored_mac = (
+            func.upper(func.replace(func.replace(func.replace(Device.mac_address, ":", ""), "-", ""), ".", ""))
+        )
+        wanted_mac = (
+            device.mac_address.upper().replace(":", "").replace("-", "").replace(".", "")
+        )
+        location_rows = (
+            await db.execute(
+                select(Device, Network.name, Network.cidr)
+                .outerjoin(Network, Device.network_id == Network.id)
+                .where(stored_mac == wanted_mac)
+                .order_by(Device.last_seen.desc())
+            )
+        ).all()
+        locations = [
+            DeviceLocation(
+                device_id=row[0].id,
+                ip_address=row[0].ip_address,
+                network_id=row[0].network_id,
+                network_name=row[1],
+                cidr=row[2],
+                last_seen=row[0].last_seen,
+            )
+            for row in location_rows
+        ]
+
     return DeviceDetail(
         device=DeviceOut.from_orm(device),
         type_guess=type_guess,
@@ -741,6 +800,7 @@ async def get_device_detail(
         scripts=script_summaries,
         scans=scans,
         metrics=metrics,
+        locations=locations,
     )
 
 
@@ -1009,12 +1069,20 @@ async def get_ping_status(
     Results are ordered by last_seen (most recent first) so the dashboard shows
     the devices the operator most plausibly cares about. One packet per host:
     this is a health probe, not a scan.
+
+    Scoped like every other listing: pinging a network this host has left fills
+    the dashboard's "not responding" panel with hosts that cannot answer by
+    definition and reports them as an outage.
     """
-    result = await db.execute(
+    scoped_to = await scoped_network_id(db)
+    stmt = (
         select(Device)
         .order_by(Device.last_seen.desc().nullslast(), Device.id.asc())
         .limit(limit)
     )
+    if scoped_to is not None:
+        stmt = stmt.where(Device.network_id == scoped_to)
+    result = await db.execute(stmt)
     devices = list(result.scalars().all())
 
     # The console host answers on every interface it holds (Wi-Fi + a USB

@@ -1602,13 +1602,33 @@ async def run_device_discovery(
         outcome.methods = list(dict.fromkeys(outcome.methods))
 
         if persist and enriched:
-            from app.services.network_identity import current_network_id
-
-            outcome.created, outcome.updated = await upsert_discovered_hosts(
-                db,
-                enriched,
-                network_id=await current_network_id(db),
+            from app.services.network_identity import (
+                current_network_id,
+                subnet_owning,
+                sweep_network_assignments,
             )
+
+            # Attribute each host to the subnet it was actually found in: one
+            # sweep can span several attached subnets (Wi-Fi plus a virtual
+            # adapter), and filing them all under whichever one detection
+            # happens to prefer mixes two networks together.
+            assignments = await sweep_network_assignments(db, targets)
+            fallback = await current_network_id(db)
+            buckets: Dict[Optional[int], List[DiscoveredHost]] = {}
+            for host in enriched:
+                subnet = subnet_owning(host.ip_address, targets)
+                network_id = assignments.get(subnet) if subnet else None
+                bucket = network_id if network_id is not None else fallback
+                buckets.setdefault(bucket, []).append(host)
+
+            for network_id, hosts in buckets.items():
+                created, updated = await upsert_discovered_hosts(
+                    db,
+                    hosts,
+                    network_id=network_id,
+                )
+                outcome.created += created
+                outcome.updated += updated
 
         # Verification marks what the router itself lists — the second half of
         # "is this device really on my network". It never fails a sweep: a

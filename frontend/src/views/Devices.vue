@@ -137,7 +137,10 @@ type NetworkRow = {
   is_current: boolean;
 };
 const networks = ref<NetworkRow[]>([]);
-const selectedNetwork = ref<number | null>(null);
+// ``null`` leaves the scope to the server, which answers with the network this
+// machine is on right now. "all" is the explicit opt-out for auditing hosts
+// seen somewhere else; a number pins one remembered network.
+const selectedNetwork = ref<number | "all" | null>(null);
 
 async function loadNetworks(): Promise<void> {
   try {
@@ -213,6 +216,59 @@ async function quickAction(action: "ping" | "trace" | "portscan", device: Device
   }
 }
 
+// One row per piece of hardware. A proxy-ARP router answers for a whole subnet
+// with its own MAC, so the inventory can hold hundreds of addresses for one
+// device; collapsing them keeps the list readable and the counts honest.
+// ``is_self`` rows stay separate — this machine legitimately holds one per NIC.
+type DeviceGroup = { key: string; lead: DeviceRow; others: DeviceRow[] };
+const expandedMacs = ref<Set<string>>(new Set());
+
+function _macKey(mac: string | null | undefined): string {
+  return (mac || "").trim().toUpperCase();
+}
+
+/** Canonical 12-hex MAC in the conventional colon form, for display only. */
+function formatMac(mac: string | null | undefined): string {
+  const compact = _macKey(mac).replace(/[^0-9A-F]/g, "");
+  if (compact.length !== 12) return _macKey(mac);
+  return compact.toLowerCase().match(/.{2}/g)?.join(":") ?? _macKey(mac);
+}
+
+function isMacExpanded(mac: string | null | undefined): boolean {
+  const key = _macKey(mac);
+  return !!key && expandedMacs.value.has(key);
+}
+
+function toggleMacGroup(mac: string | null | undefined): void {
+  const key = _macKey(mac);
+  if (!key) return;
+  const next = new Set(expandedMacs.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  expandedMacs.value = next;
+}
+
+const deviceGroups = computed<DeviceGroup[]>(() => {
+  const groups: DeviceGroup[] = [];
+  const byMac = new Map<string, DeviceGroup>();
+  for (const device of filteredDevices.value) {
+    const mac = _macKey(device.mac_address);
+    if (!mac || device.is_self) {
+      groups.push({ key: `id:${device.id}`, lead: device, others: [] });
+      continue;
+    }
+    const existing = byMac.get(mac);
+    if (existing) {
+      existing.others.push(device);
+      continue;
+    }
+    const group: DeviceGroup = { key: `mac:${mac}`, lead: device, others: [] };
+    byMac.set(mac, group);
+    groups.push(group);
+  }
+  return groups;
+});
+
 // Smart regex + shorthand filter
 // Supports: ip:192.168.*, status:down, status:gateway, plus plain text and regex
 const filteredDevices = computed(() => {
@@ -282,7 +338,11 @@ async function loadDevices(): Promise<void> {
       params.zone = selectedZone.value;
     }
     if (selectedNetwork.value !== null) {
-      params.network_id = String(selectedNetwork.value);
+      if (selectedNetwork.value === "all") {
+        params.scope = "all";
+      } else {
+        params.network_id = String(selectedNetwork.value);
+      }
     }
     const { data } = await axios.get<DeviceRow[]>("/api/devices", { params });
     devices.value = data;
@@ -578,9 +638,12 @@ onMounted(async () => {
           v-model="selectedNetwork"
           class="np-neon-input px-3 py-1.5 text-xs"
           title="Inventory is tracked per network"
+          @change="loadDevices"
         >
+          <option :value="null">This network</option>
+          <option value="all">All networks</option>
           <option v-for="n in networks" :key="n.id" :value="n.id">
-            {{ n.name }}{{ n.is_current ? " (current)" : "" }}
+            {{ n.name }}{{ n.is_current ? " (current)" : "" }} · {{ n.device_count }}
           </option>
         </select>
         <select
@@ -637,17 +700,31 @@ onMounted(async () => {
             </tr>
           </thead>
           <tbody>
+            <template v-for="group in deviceGroups" :key="group.key">
             <tr
-              v-for="d in filteredDevices"
+              v-for="d in [group.lead, ...(isMacExpanded(group.lead.mac_address) ? group.others : [])]"
               :key="d.id"
               class="cursor-pointer transition-colors hover:bg-[var(--np-surface-hover)]"
+              :class="d.id !== group.lead.id ? 'bg-[var(--np-surface-hover)]/40' : ''"
               @click="openDrawer(d)"
               @contextmenu.prevent="openContextMenu($event, d)"
             >
               <td class="px-3" :class="'py-2.5'">
-                <div class="font-mono text-[var(--np-text)] font-semibold">{{ d.is_self && d.interface_ips?.length ? d.interface_ips.join(' · ') : d.ip_address }}</div>
+                <div class="font-mono text-[var(--np-text)] font-semibold">
+                  <span v-if="d.id !== group.lead.id" class="mr-1 text-[var(--np-text-dim)]">↳</span>
+                  {{ d.is_self && d.interface_ips?.length ? d.interface_ips.join(' · ') : d.ip_address }}
+                </div>
                 <div class="mt-0.5 flex flex-wrap items-center gap-1">
-                  <span class="text-[0.7rem] text-[var(--np-text-dim)]">{{ d.is_self ? 'This computer' : (d.hostname || d.mac_address || 'Unknown') }}</span>
+                  <span class="text-[0.7rem] text-[var(--np-text-dim)]">{{ d.is_self ? 'This computer' : (d.hostname || formatMac(d.mac_address) || 'Unknown') }}</span>
+                  <button
+                    v-if="group.others.length && d.id === group.lead.id"
+                    type="button"
+                    class="rounded px-1.5 py-0.5 text-[0.7rem] border border-[var(--np-border-subtle)] text-[var(--np-text-dim)] hover:text-[var(--np-text)] transition-colors"
+                    :title="`${group.others.length} more address(es) answer for ${formatMac(d.mac_address)}`"
+                    @click.stop="toggleMacGroup(d.mac_address)"
+                  >
+                    {{ isMacExpanded(d.mac_address) ? 'Hide' : `+${group.others.length} addresses` }}
+                  </button>
                   <span
                     v-if="d.is_self"
                     class="rounded px-1.5 py-0.5 text-[0.7rem] font-semibold uppercase tracking-wide border border-[var(--np-accent-border)] bg-[var(--np-accent-soft)] text-[var(--np-accent)]"
@@ -693,7 +770,8 @@ onMounted(async () => {
                 <span v-else class="text-zinc-600">—</span>
               </td>
             </tr>
-            <tr v-if="filteredDevices.length === 0">
+            </template>
+            <tr v-if="deviceGroups.length === 0">
               <td colspan="4" class="px-3 py-6 text-center text-[var(--np-text-dim)]">
                 No devices found.
               </td>

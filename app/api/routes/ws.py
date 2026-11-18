@@ -80,6 +80,22 @@ def _save_pinned_hosts() -> None:
 _load_pinned_hosts()
 
 
+def pinned_host_keys() -> list[dict[str, str]]:
+    """Pins as the settings panel shows them: address and fingerprint."""
+    return [
+        {"host": host, "fingerprint": data.get("fingerprint", "")}
+        for host, data in sorted(_pinned_host_keys.items())
+    ]
+
+
+def forget_pinned_host(host: str) -> bool:
+    """Drop one pin. Returns whether it existed."""
+    removed = _pinned_host_keys.pop(host, None) is not None
+    if removed:
+        _save_pinned_hosts()
+    return removed
+
+
 async def _get_user_from_token(token: str, db: AsyncSession) -> User | None:
     """Decode a JWT and return the associated User, or None if invalid."""
     try:
