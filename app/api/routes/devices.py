@@ -413,6 +413,22 @@ async def list_zones(db: AsyncSession = Depends(db_session)) -> ZoneListResponse
     return ZoneListResponse(zones=zones)
 
 
+def _freshest_first(device: Device) -> float:
+    """Sort key for a device's last sighting; never-sighted rows sort last.
+
+    ``timestamp()`` is used rather than a datetime comparison because SQLite
+    hands back naive values while Postgres returns aware ones, and comparing the
+    two raises.
+    """
+    seen = getattr(device, "last_seen", None)
+    if seen is None:
+        return float("-inf")
+    try:
+        return seen.timestamp()
+    except (ValueError, OSError, OverflowError):
+        return float("-inf")
+
+
 def _topology_device_groups(
     devices: List[Device], host_macs: frozenset[str] | set[str]
 ) -> List[tuple[Device, List[Device]]]:
@@ -434,7 +450,11 @@ def _topology_device_groups(
 
     for members in console_by_network.values():
         members.sort(key=lambda device: device.id)
-        groups.append((members[0], members))
+        # The node carries one address: the one this machine was seen on last,
+        # not whichever row happens to have the lowest id. Its other addresses
+        # stay on the group and show up in the device panel.
+        representative = max(members, key=_freshest_first)
+        groups.append((representative, members))
 
     return groups
 
@@ -1073,8 +1093,20 @@ async def get_ping_status(
     Scoped like every other listing: pinging a network this host has left fills
     the dashboard's "not responding" panel with hosts that cannot answer by
     definition and reports them as an outage.
+
+    The console machine's own rows are skipped entirely. An interface keeps the
+    rows it held before DHCP moved it, so this PC ends up inventoried once per
+    address it has ever had; the old leases answer nothing, and the dashboard
+    listed the machine it is running on under "not responding". Nothing here can
+    say anything useful about this host anyway — it is demonstrably alive — so
+    those rows are neither probed nor reported.
     """
     scoped_to = await scoped_network_id(db)
+
+    # Skip this machine in SQL rather than after the fact: filtering the results
+    # afterwards would let its stale rows burn the ``limit`` and hide real
+    # devices behind them.
+    host_macs = await asyncio.to_thread(console_macs)
     stmt = (
         select(Device)
         .order_by(Device.last_seen.desc().nullslast(), Device.id.asc())
@@ -1082,12 +1114,18 @@ async def get_ping_status(
     )
     if scoped_to is not None:
         stmt = stmt.where(Device.network_id == scoped_to)
+    if host_macs:
+        # MACs are stored in mixed formats; normalise the column the same way
+        # the rest of the inventory does before comparing it with the set.
+        stored_mac = func.upper(
+            func.replace(func.replace(func.replace(Device.mac_address, ":", ""), "-", ""), ".", "")
+        )
+        # coalesce, because ``NULL NOT IN (...)`` is NULL, not true, and would
+        # silently drop every device that has no MAC at all.
+        stmt = stmt.where(~func.coalesce(stored_mac, "").in_(sorted(host_macs)))
+
     result = await db.execute(stmt)
     devices = list(result.scalars().all())
-
-    # The console host answers on every interface it holds (Wi-Fi + a USB
-    # adapter is common); its MACs tell the widget which rows are this PC.
-    host_macs = await asyncio.to_thread(console_macs)
 
     semaphore = asyncio.Semaphore(_PING_CONCURRENCY)
 
@@ -1101,19 +1139,6 @@ async def get_ping_status(
             "status": _classify_ping(outcome.latency_ms, outcome.reachable),
             "latency_ms": outcome.latency_ms,
             "last_seen": device.last_seen.isoformat() if device.last_seen else None,
-            # Same machine on two interfaces reads as "one device, two
-            # addresses" once the widget knows it is the console itself.
-            "is_self": bool(
-                device.mac_address
-                and normalize_mac(device.mac_address) in host_macs
-            ),
-            "interface_ips": sorted({
-                member.ip_address
-                for member in devices
-                if member.network_id == device.network_id
-                and member.mac_address
-                and normalize_mac(member.mac_address) in host_macs
-            }) if device.mac_address and normalize_mac(device.mac_address) in host_macs else [],
             "error": outcome.error,
         }
 

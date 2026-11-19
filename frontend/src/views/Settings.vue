@@ -617,7 +617,6 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-4 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title text-sm uppercase tracking-wider font-bold">Alert &amp; Notification Routing</span>
-          <span class="text-[0.7rem] text-[var(--np-text-dim)]">Configure notification routes and severity dispatch criteria.</span>
         </div>
       </header>
 
@@ -629,7 +628,6 @@ onMounted(async () => {
         <div class="space-y-4">
           <div class="flex flex-col gap-1 border-b border-[var(--np-border-subtle)] pb-2">
             <h4 class="text-xs uppercase tracking-wider font-bold text-[var(--np-text)]">Alert Destinations</h4>
-            <p class="text-[0.7rem] text-[var(--np-text-dim)]">Where alert dispatches will be routed.</p>
           </div>
 
           <div class="space-y-4">
@@ -638,7 +636,6 @@ onMounted(async () => {
               <div class="flex items-center justify-between">
                 <div class="flex flex-col">
                   <span class="text-xs font-semibold text-[var(--np-text)]">Email</span>
-                  <span class="text-[0.7rem] text-[var(--np-text-dim)]">Send alert summaries by email</span>
                 </div>
                 <ToggleSwitch v-model="notifications.email_enabled" :theme="theme" />
               </div>
@@ -657,7 +654,6 @@ onMounted(async () => {
         <div class="space-y-4">
           <div class="flex flex-col gap-1 border-b border-[var(--np-border-subtle)] pb-2">
             <h4 class="text-xs uppercase tracking-wider font-bold text-[var(--np-text)]">Dispatch Policy</h4>
-            <p class="text-[0.7rem] text-[var(--np-text-dim)]">When alerts fire.</p>
           </div>
 
           <div class="grid grid-cols-1 gap-4">
@@ -671,24 +667,24 @@ onMounted(async () => {
 
             <div class="flex items-center justify-between">
               <div class="flex flex-col">
-                <span class="text-xs font-semibold text-[var(--np-text)]">Warning Anomalies</span>
-                <span class="text-[0.7rem] text-[var(--np-text-dim)]">Fire on minor warnings or state changes</span>
+                                  <span class="text-xs font-semibold text-[var(--np-text)]">Warning Anomalies</span>
+
               </div>
               <ToggleSwitch v-model="notifications.alert_on_warning" :theme="theme" />
             </div>
 
             <div class="flex items-center justify-between">
               <div class="flex flex-col">
-                <span class="text-xs font-semibold text-[var(--np-text)]">Host Offline Detection</span>
-                <span class="text-[0.7rem] text-[var(--np-text-dim)]">Notify when an active host goes offline</span>
+                                  <span class="text-xs font-semibold text-[var(--np-text)]">Host Offline Detection</span>
+
               </div>
               <ToggleSwitch v-model="notifications.alert_on_device_down" :theme="theme" />
             </div>
 
             <div class="flex items-center justify-between">
               <div class="flex flex-col">
-                <span class="text-xs font-semibold text-[var(--np-text)]">Daily Console Digest</span>
-                <span class="text-[0.7rem] text-[var(--np-text-dim)]">Send daily network metrics summary</span>
+                                  <span class="text-xs font-semibold text-[var(--np-text)]">Daily Console Digest</span>
+
               </div>
               <ToggleSwitch v-model="notifications.daily_digest" :theme="theme" />
             </div>
@@ -796,8 +792,7 @@ onMounted(async () => {
       <div class="np-settings-section space-y-3">
         <p class="np-settings-section-title">SSH host keys</p>
         <p class="text-[0.7rem] text-[var(--np-text-dim)] font-semibold">
-          Pinned on the first console connection to an address. A rebuilt device presents a new
-          key and is refused on purpose — remove its pin here to trust the new one.
+          A rebuilt device presents a new key and is refused on purpose; forget its pin to trust it.
         </p>
         <p v-if="sshKeysError" class="text-[0.75rem] text-rose-400">{{ sshKeysError }}</p>
         <p
@@ -1068,7 +1063,6 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">Backup</span>
-          <span class="text-[0.7rem] text-[var(--np-text-dim)] font-semibold">Export / restore database snapshots.</span>
         </div>
       </header>
 
@@ -1151,7 +1145,6 @@ onMounted(async () => {
       <header class="np-panel-header -mx-4 -mt-4 mb-2 px-4">
         <div class="flex flex-col">
           <span class="np-panel-title">System</span>
-          <span class="text-[0.7rem] text-[var(--np-text-dim)] font-semibold">The services this install needs, whether they are running, and the inventory repairs available.</span>
         </div>
       </header>
 

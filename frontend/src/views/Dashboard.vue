@@ -123,11 +123,6 @@ interface PingResultRow {
   status: "up" | "slow" | "down";
   latency_ms: number | null;
   last_seen: string | null;
-  // True when this row is the machine running the console itself. It answers
-  // on every interface it holds (Wi-Fi + a USB adapter), so it appears once
-  // per address; those rows are one machine, not two devices.
-  is_self?: boolean;
-  interface_ips?: string[];
 }
 
 interface PingStatusResponse {
@@ -141,38 +136,12 @@ const pingError = ref<string | null>(null);
 const pingResults = ref<PingResultRow[]>([]);
 const pingSummary = ref<PingStatusResponse["summary"] | null>(null);
 
-const SELF_STATUS_RANK: Record<PingResultRow["status"], number> = { up: 0, slow: 1, down: 2 };
-
-// The console machine answers on every interface it holds (Wi-Fi plus a USB
-// adapter is common), so the ping check lists it once per address. Those rows
-// are one machine: collapse them into a single "This PC" bar instead of two
-// look-alike "Immortan" rows.
-const visiblePingRows = computed<PingResultRow[]>(() => {
-  const rows = pingResults.value;
-  const own = rows.filter((r) => r.is_self);
-  if (own.length === 0) return rows;
-  if (own.length === 1 && (own[0].interface_ips?.length ?? 0) <= 1) return rows;
-
-  const best = [...own].sort(
-    (a, b) =>
-      SELF_STATUS_RANK[a.status] - SELF_STATUS_RANK[b.status] ||
-      (a.latency_ms ?? Infinity) - (b.latency_ms ?? Infinity),
-  )[0];
-  const merged: PingResultRow = {
-    ...best,
-    id: -1,
-    hostname: "This PC",
-    ip_address: [...new Set(own.flatMap((r) => r.interface_ips?.length ? r.interface_ips : [r.ip_address]))].sort().join("  ·  "),
-  };
-  return [...rows.filter((r) => !r.is_self), merged];
-});
-
-// Interface twins must not inflate the headline numbers either: count the
-// collapsed rows, while "checked" stays the number of addresses actually
-// probed.
+// The server never probes this machine's own rows (it answers on every
+// interface it has ever held, and the stale leases look dead), so every row
+// here is a real other device and needs no collapsing.
 const pingCounts = computed(() => {
   if (!pingSummary.value) return null;
-  const rows = visiblePingRows.value;
+  const rows = pingResults.value;
   return {
     up: rows.filter((r) => r.status === "up").length,
     slow: rows.filter((r) => r.status === "slow").length,
@@ -183,31 +152,22 @@ const pingCounts = computed(() => {
 });
 
 const answering = computed(() =>
-  visiblePingRows.value
+  pingResults.value
     .filter((r) => r.status !== "down" && r.latency_ms !== null)
     .sort((a, b) => (b.latency_ms ?? 0) - (a.latency_ms ?? 0))
 );
-const notResponding = computed(() => visiblePingRows.value.filter((r) => r.status === "down"));
+const notResponding = computed(() => pingResults.value.filter((r) => r.status === "down"));
 const warningColor = ref("#f59e0b");
 
 async function checkPingStatus() {
   pingChecking.value = true;
   pingError.value = null;
   try {
-    const [pingResponse, deviceResponse] = await Promise.all([
-      axios.get<PingStatusResponse>("/api/devices/ping-status", { params: { limit: 64 } }),
-      axios.get<DeviceRow[]>("/api/devices", currentNetwork.value ? { params: { network_id: String(currentNetwork.value.id) } } : undefined),
-    ]);
-    const devicesById = new Map(deviceResponse.data.map((device) => [device.id, device]));
-    pingResults.value = pingResponse.data.results.map((row) => {
-      const device = devicesById.get(row.id);
-      return {
-        ...row,
-        is_self: row.is_self ?? device?.is_self,
-        interface_ips: row.interface_ips?.length ? row.interface_ips : device?.interface_ips,
-      };
+    const { data } = await axios.get<PingStatusResponse>("/api/devices/ping-status", {
+      params: { limit: 64 },
     });
-    pingSummary.value = pingResponse.data.summary;
+    pingResults.value = data.results;
+    pingSummary.value = data.summary;
   } catch {
     pingError.value = "The ping check could not run. Is the server reachable?";
   } finally {
@@ -293,25 +253,21 @@ const stats = computed(() => [
     id: "total",
     label: "Devices",
     value: totalDevices.value,
-    hint: "In the inventory",
   },
   {
     id: "online",
     label: "Responding",
     value: onlineDevices.value,
-    hint: `Seen in the last 10 minutes`,
   },
   {
     id: "gateways",
     label: "Gateways",
     value: gatewayCount.value,
-    hint: "Default-route nodes",
   },
   {
     id: "zones",
     label: "Zones",
     value: zoneCount.value,
-    hint: "Configured segments",
   },
 ]);
 
@@ -457,9 +413,6 @@ onBeforeUnmount(() => {
           Overview
         </p>
         <h1 class="mt-1 text-2xl font-bold tracking-tight text-[var(--np-text)]">Network overview</h1>
-        <p class="mt-1 text-xs text-[var(--np-text-muted)]">
-          How many devices are out there, which ones answer, and what needs attention.
-        </p>
       </div>
       <button
         class="np-cyber-btn self-start px-4 py-2 text-[0.7rem] uppercase tracking-wider sm:self-auto"
@@ -487,7 +440,6 @@ onBeforeUnmount(() => {
         <p class="mt-2 text-3xl font-bold leading-none tracking-tight text-[var(--np-text)]">
           {{ stat.value }}
         </p>
-        <p class="mt-2 text-[0.7rem] text-[var(--np-text-muted)]">{{ stat.hint }}</p>
       </article>
     </section>
 
@@ -583,10 +535,8 @@ onBeforeUnmount(() => {
             ? "Inventory is empty"
             : `${onlineDevices} of ${totalDevices} devices responding · ${zoneCount} zone${zoneCount === 1 ? "" : "s"}` }}
         </h2>
-        <p class="mt-1 max-w-xl text-xs text-[var(--np-text-muted)]">
-          {{ totalDevices === 0
-            ? "Run a sweep to see what is on this network."
-            : "Availability follows device sightings from the last ten minutes." }}
+        <p v-if="totalDevices === 0" class="mt-1 max-w-xl text-xs text-[var(--np-text-muted)]">
+          Run a sweep to see what is on this network.
           <span v-if="currentNetwork">
             <strong class="text-[var(--np-text)]">{{ currentNetwork.name }}</strong>
             <template v-if="currentNetwork.name !== currentNetwork.cidr">
@@ -631,7 +581,10 @@ onBeforeUnmount(() => {
               <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--np-danger)]" />
               <span class="truncate">{{ labelFor(row) }}</span>
             </span>
-            <span class="shrink-0 font-mono text-[0.7rem] text-[var(--np-text-dim)] tabular-nums">{{ row.ip_address }}</span>
+            <span
+              v-if="labelFor(row) !== row.ip_address"
+              class="shrink-0 font-mono text-[0.7rem] text-[var(--np-text-dim)] tabular-nums"
+            >{{ row.ip_address }}</span>
           </li>
           <li v-if="notResponding.length === 0 && pingCounts" class="text-xs text-[var(--np-text-dim)]">
             Every checked device answered.

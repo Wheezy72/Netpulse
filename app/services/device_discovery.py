@@ -1368,6 +1368,7 @@ async def upsert_discovered_hosts(
     # Hostname-based retirement needs the *same uniqueness rule adoption has*:
     # if several unseen rows share one name ("Android"), none of them can be
     # proven to be the machine that just reappeared, so none are retired.
+    removed: set[int] = set()
     stale_name_counts: Dict[str, int] = {}
     for row in rows:
         if row.id in claimed or row.ip_address in observed_ips:
@@ -1429,6 +1430,7 @@ async def upsert_discovered_hosts(
             row_name,
             ", ".join(sorted(observed_ips)),
         )
+        removed.add(id(row))
         await db.delete(row)
 
     # --- fold MAC-less twins into the row that has an address --------------
@@ -1440,7 +1442,9 @@ async def upsert_discovered_hosts(
     # generic name with each other are left alone.
     # Both the rows that existed before this sweep and the ones it just added
     # can be the identified twin, so consider the whole set.
-    every_row: List[Device] = list(rows) + [row for row in pending if row not in rows]
+    every_row: List[Device] = [
+        row for row in list(rows) + [row for row in pending if row not in rows] if id(row) not in removed
+    ]
     identified_by_name: Dict[str, List[Device]] = {}
     for row in every_row:
         name = (row.hostname or "").strip().lower()
@@ -1476,7 +1480,64 @@ async def upsert_discovered_hosts(
             twin.id,
             twin.ip_address,
         )
+        removed.add(id(row))
         await db.delete(row)
+
+    # --- one row per NIC ---------------------------------------------------
+    # An address is a lease; the network card is the device. The same NIC can
+    # hold two addresses at once — a router lease plus a leftover from the
+    # previous one, or a static alias — and then answers at both in a single
+    # sweep, which the inventory showed as two devices with two addresses.
+    # Grouping by MAC collapses exactly those, because two rows sharing a MAC
+    # cannot be different machines. A machine with two NICs keeps two rows:
+    # two cards really do look like two devices to discovery.
+    await db.flush()
+    by_mac: Dict[str, List[Device]] = {}
+    for row in every_row:
+        if id(row) in removed:
+            continue
+        mac = (row.mac_address or "").upper()
+        if mac:
+            by_mac.setdefault(mac, []).append(row)
+
+    for mac, group in by_mac.items():
+        if len(group) < 2:
+            continue
+
+        # Keep the row this sweep actually saw, at its lowest observed address
+        # (deterministic, and the lowest lease is the primary one in practice).
+        observed_here = [row for row in group if row.ip_address in observed_ips]
+        keeper = min(
+            observed_here or group,
+            key=lambda row: (_address_sort_key(row.ip_address), row.id or 0),
+        )
+
+        for row in group:
+            if row is keeper:
+                continue
+
+            keeper.hostname = keeper.hostname or row.hostname
+            keeper.vendor = keeper.vendor or row.vendor
+            keeper.device_type = keeper.device_type or row.device_type
+            keeper.os = keeper.os or row.os
+            keeper.is_gateway = keeper.is_gateway or row.is_gateway
+
+            await db.execute(
+                sa_update(ScriptJob)
+                .where(ScriptJob.device_id == row.id)
+                .values(device_id=None)
+            )
+            logger.info(
+                "Same NIC (mac=%s) held two addresses: keeping row #%s %s, "
+                "dropping duplicate row #%s %s.",
+                mac,
+                keeper.id,
+                keeper.ip_address,
+                row.id,
+                row.ip_address,
+            )
+            removed.add(id(row))
+            await db.delete(row)
 
     await db.commit()
     return created, updated

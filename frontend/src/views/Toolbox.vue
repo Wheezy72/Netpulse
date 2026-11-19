@@ -571,7 +571,6 @@ watch(
     <header class="flex items-end justify-between px-1 shrink-0">
       <div>
         <h1 class="text-2xl font-extrabold tracking-tight text-[var(--np-text)]">Toolbox</h1>
-        <p class="mt-1 text-xs text-[var(--np-text-muted)]">Scans, probes and automation jobs against the devices in your inventory.</p>
       </div>
       <div class="flex items-center gap-2">
         <button
@@ -829,7 +828,6 @@ watch(
             <div class="p-4 rounded-xl bg-[var(--np-thead-bg)] border border-[var(--np-border-subtle)] space-y-4">
               <div>
                 <h3 class="text-xs font-bold uppercase tracking-wider text-[var(--np-text)]">TCP Handshake Probe</h3>
-                <p class="text-[0.7rem] text-[var(--np-text-dim)] mt-1">Measures exact TCP connection response times to verify port accessibility.</p>
               </div>
 
               <div class="grid grid-cols-3 gap-3">

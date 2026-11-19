@@ -894,9 +894,6 @@ onBeforeUnmount(() => {
       <div>
         <p class="text-[0.7rem] font-mono uppercase tracking-[0.28em] text-[var(--np-text-dim)]">Network map</p>
         <h1 class="mt-1 text-2xl font-bold tracking-tight text-[var(--np-text)]">Interactive topology</h1>
-        <p class="mt-1 text-xs text-[var(--np-text-muted)]">
-          Discovered hosts, drawn from the uplink outwards.
-        </p>
       </div>
 
       <div class="flex flex-wrap items-center gap-2">
@@ -994,7 +991,7 @@ onBeforeUnmount(() => {
                     class="np-status-dot"
                     :class="`np-status-dot--${nodeReachability(data.device)?.status}`"
                   />
-                  {{ data.device.is_self && data.device.interface_ips?.length ? data.device.interface_ips.join(' · ') : data.device.ip_address }}
+                  {{ data.device.ip_address }}
                 </span>
               </div>
             </div>
@@ -1118,6 +1115,15 @@ onBeforeUnmount(() => {
                 <div class="flex justify-between border-b border-[var(--np-border-subtle)] pb-1.5">
                   <dt class="text-[var(--np-text-dim)]">Hostname</dt>
                   <dd class="font-bold text-[var(--np-text)]">{{ selectedNode.hostname || '—' }}</dd>
+                </div>
+                <div
+                  v-if="(selectedNode.interface_ips?.length ?? 0) > 1"
+                  class="flex justify-between gap-4 border-b border-[var(--np-border-subtle)] pb-1.5"
+                >
+                  <dt class="text-[var(--np-text-dim)]">Addresses</dt>
+                  <dd class="text-right font-mono text-[var(--np-text)]">
+                    {{ selectedNode.interface_ips?.join(' · ') }}
+                  </dd>
                 </div>
                 <div class="flex justify-between border-b border-[var(--np-border-subtle)] pb-1.5">
                   <dt class="text-[var(--np-text-dim)]">MAC Address</dt>

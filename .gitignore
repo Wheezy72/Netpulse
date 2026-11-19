@@ -50,6 +50,8 @@ data/scans/*.xml
 # SSH host keys. Both are local state, not source.
 data/signing_key
 data/known_hosts.json
+# Device CSV exports are local data, kept out of the repository.
+data/exports/
 
 # Runtime state: the launcher writes its PID here on every start.
 data/run/

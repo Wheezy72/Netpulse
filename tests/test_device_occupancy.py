@@ -213,3 +213,50 @@ class TestDerivedFactsFollowTheHardware:
         device = (await db_session.execute(select(Device))).scalars().one()
         assert device.device_type == "Windows Workstation"
         assert device.os == "Windows"
+
+
+class TestOneRowPerNic:
+    """An address is a lease; the card is the device.
+
+    Reported symptom: this PC held two leases at once and the inventory listed
+    it twice. One NIC is one device, however many addresses it answers on.
+    """
+
+    async def test_one_nic_at_two_addresses_is_one_device(self, db_session) -> None:
+        from sqlalchemy import select
+
+        from app.models.device import Device
+
+        await upsert_discovered_hosts(
+            db_session,
+            [
+                DiscoveredHost(
+                    ip_address="192.168.1.100",
+                    mac_address="FCA47A112233",
+                    hostname="Immortan",
+                    device_type="Windows Workstation",
+                    os="Windows",
+                ),
+                DiscoveredHost(ip_address="192.168.1.102", mac_address="FCA47A112233"),
+            ],
+        )
+
+        devices = (await db_session.execute(select(Device))).scalars().all()
+        assert len(devices) == 1
+        assert devices[0].ip_address == "192.168.1.100"
+        assert devices[0].hostname == "Immortan"
+
+    async def test_two_nics_are_two_devices(self, db_session) -> None:
+        from sqlalchemy import select
+
+        from app.models.device import Device
+
+        await upsert_discovered_hosts(
+            db_session,
+            [
+                DiscoveredHost(ip_address="192.168.1.100", mac_address="FCA47A112233"),
+                DiscoveredHost(ip_address="192.168.1.102", mac_address="7C5CF8112233"),
+            ],
+        )
+
+        assert len((await db_session.execute(select(Device))).scalars().all()) == 2

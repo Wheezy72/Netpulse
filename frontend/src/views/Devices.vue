@@ -557,7 +557,7 @@ onMounted(async () => {
         <div class="flex flex-col">
           <span class="np-panel-title">Devices</span>
           <span class="text-[0.7rem] text-[var(--np-text-dim)]">
-            Inventory of discovered hosts. Right-click any row for quick actions.
+            Right-click any row for quick actions.
           </span>
         </div>
         <div class="flex items-center gap-2">

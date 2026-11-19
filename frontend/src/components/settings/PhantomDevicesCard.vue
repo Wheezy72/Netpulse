@@ -105,8 +105,7 @@ async function prune(): Promise<void> {
       <div class="min-w-0">
         <p class="text-[0.8rem] font-semibold np-info-card-value">Phantom hosts</p>
         <p class="mt-0.5 text-[0.7rem] leading-relaxed np-info-card-text">
-          A router answering for addresses it does not own leaves a whole subnet of rows carrying one
-          MAC. Checking the inventory shows them; removing them keeps the router's own address.
+          Rows sharing one MAC because a router answers for addresses it does not own.
         </p>
       </div>
       <button

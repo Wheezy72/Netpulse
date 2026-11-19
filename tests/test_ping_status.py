@@ -137,6 +137,49 @@ class TestPingStatusWiring:
             [4], [1, 2], [3]
         ]
 
+    def test_the_node_is_shown_on_its_most_recent_address(self):
+        from datetime import datetime, timezone
+
+        module = _load_devices_router()
+        devices = [
+            SimpleNamespace(
+                id=1,
+                mac_address="AA:00:00:00:00:01",
+                network_id=7,
+                last_seen=datetime(2026, 11, 2, 20, 0, tzinfo=timezone.utc),
+            ),
+            SimpleNamespace(
+                id=2,
+                mac_address="AA:00:00:00:00:02",
+                network_id=7,
+                last_seen=datetime(2026, 11, 18, 11, 0, tzinfo=timezone.utc),
+            ),
+        ]
+
+        groups = module._topology_device_groups(devices, {"AA0000000001", "AA0000000002"})
+
+        representative, members = groups[0]
+        assert representative.id == 2, "the map must show the address seen most recently"
+        assert [member.id for member in members] == [1, 2]
+
+    def test_a_never_sighted_row_does_not_win_over_a_sighted_one(self):
+        from datetime import datetime, timezone
+
+        module = _load_devices_router()
+        devices = [
+            SimpleNamespace(
+                id=1, mac_address="AA:00:00:00:00:01", network_id=7,
+                last_seen=datetime(2026, 11, 18, 11, 0, tzinfo=timezone.utc),
+            ),
+            SimpleNamespace(id=2, mac_address="AA:00:00:00:00:02", network_id=7, last_seen=None),
+        ]
+
+        representative, _members = module._topology_device_groups(
+            devices, {"AA0000000001", "AA0000000002"}
+        )[0]
+
+        assert representative.id == 1
+
     def test_same_hostname_does_not_merge_an_unidentified_host(self):
         module = _load_devices_router()
         console = SimpleNamespace(
@@ -151,3 +194,119 @@ class TestPingStatusWiring:
         groups = module._topology_device_groups([console, other_pc], {"AA0000000001"})
 
         assert [[device.id for device in members] for _, members in groups] == [[2], [1]]
+
+
+@pytest.fixture
+async def db_session():
+    pytest.importorskip("sqlalchemy")
+    pytest.importorskip("greenlet", reason="SQLAlchemy's async extension requires greenlet")
+    pytest.importorskip("aiosqlite")
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db.base import Base
+    from app.models.device import Device  # noqa: F401 - registers the mapper
+    from app.models.device_port import DevicePort  # noqa: F401
+    from app.models.metric import Metric  # noqa: F401
+    from app.models.network import Network  # noqa: F401
+    from app.models.scan_job import ScanJob  # noqa: F401
+    from app.models.script_job import ScriptJob  # noqa: F401
+    from app.models.vulnerability import Vulnerability  # noqa: F401
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as session:
+        yield session
+
+    await engine.dispose()
+
+
+class TestPingStatusSkipsThisMachine:
+    """The console machine is never pinged, so it cannot appear as an outage.
+
+    A NIC keeps a row for every address it has held; the old lease answers
+    nothing, and the dashboard used to list the machine it runs on under "not
+    responding".
+    """
+
+    async def _seed(self, session):
+        from app.models.device import Device
+        from app.models.network import Network
+
+        home = Network(key="mac:HOME", name="home", cidr="192.168.1.0/24")
+        session.add(home)
+        await session.commit()
+
+        rows = [
+            # This machine's NIC, on the address it holds now.
+            Device(ip_address="192.168.1.10", mac_address="F41E5796FBC7", network_id=home.id),
+            # The same NIC on a lease it let go — the row that read as "down".
+            Device(ip_address="192.168.1.90", mac_address="f4:1e:57:96:fb:c7", network_id=home.id),
+            # No MAC at all: must still be probed.
+            Device(ip_address="192.168.1.20", network_id=home.id),
+            Device(ip_address="192.168.1.21", mac_address="AABBCCDDEEFF", network_id=home.id),
+        ]
+        session.add_all(rows)
+        await session.commit()
+        return rows
+
+    async def _prepare(self, session, monkeypatch, macs):
+        rows = await self._seed(session)
+        probed: list[str] = []
+
+        async def fake_ping(host, count=1, timeout_s=1.0):
+            probed.append(host)
+            return PingOutcome(host=host, reachable=True, latency_ms=3.0, packet_loss_pct=0.0)
+
+        from app.api.routes import devices as devices_route
+
+        async def stay_on(db, *, network_id=None, scope="current"):
+            return rows[0].network_id
+
+        monkeypatch.setattr(devices_route, "console_macs", lambda: frozenset(macs))
+        monkeypatch.setattr(devices_route, "icmp_ping", fake_ping)
+        monkeypatch.setattr(devices_route, "scoped_network_id", stay_on)
+        return devices_route, probed
+
+    async def test_this_machines_addresses_are_neither_probed_nor_reported(
+        self, db_session, monkeypatch
+    ):
+        devices_route, probed = await self._prepare(db_session, monkeypatch, {"F41E5796FBC7"})
+
+        payload = await devices_route.get_ping_status(
+            limit=12, db=db_session, _user=SimpleNamespace(id=1)
+        )
+
+        assert sorted(probed) == ["192.168.1.20", "192.168.1.21"]
+        assert {row["ip_address"] for row in payload["results"]} == {
+            "192.168.1.20",
+            "192.168.1.21",
+        }
+        assert payload["summary"] == {"up": 2, "slow": 0, "down": 0, "total": 2}
+
+    async def test_a_skipped_row_does_not_burn_a_slot(self, db_session, monkeypatch):
+        devices_route, probed = await self._prepare(db_session, monkeypatch, {"F41E5796FBC7"})
+
+        payload = await devices_route.get_ping_status(
+            limit=1, db=db_session, _user=SimpleNamespace(id=1)
+        )
+
+        # Filtering after the query would have spent the single slot on this
+        # machine and returned nothing at all.
+        assert len(payload["results"]) == 1
+        assert len(probed) == 1
+
+    async def test_no_detected_macs_pings_the_whole_inventory(self, db_session, monkeypatch):
+        devices_route, probed = await self._prepare(db_session, monkeypatch, set())
+
+        payload = await devices_route.get_ping_status(
+            limit=12, db=db_session, _user=SimpleNamespace(id=1)
+        )
+
+        # Mislabelling another device as this machine is worse than not
+        # labelling at all, so an empty set must filter nothing.
+        assert payload["summary"]["total"] == 4
+        assert len(probed) == 4
