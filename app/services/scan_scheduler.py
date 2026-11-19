@@ -139,6 +139,83 @@ async def _targets_for(session: AsyncSession, schedule: dict) -> list[str]:
     return targets
 
 
+def completion_message(job: ScanJob) -> tuple[str, str]:
+    """``(subject, body)`` summarising a finished scheduled scan.
+
+    Built from the job's own parsed result, so the mail says what the scan
+    actually found instead of only that it finished.
+    """
+    summary = job.result_summary or {}
+    hosts = [h for h in (summary.get("hosts") or []) if isinstance(h, dict)]
+    state = "completed" if job.status == ScanJobStatus.COMPLETED else "failed"
+
+    subject = f"[NetPulse] Scheduled scan {state}: {job.target}"
+    lines = [
+        f"Target: {job.target}",
+        f"Profile: {job.profile}",
+        f"Status: {job.status.value}",
+    ]
+    if summary.get("error"):
+        lines.append(f"Error: {summary['error']}")
+    if summary.get("hosts_up") is not None:
+        lines.append(f"Hosts up: {summary['hosts_up']}")
+    if summary.get("duration_seconds") is not None:
+        lines.append(f"Duration: {summary['duration_seconds']}s")
+
+    if hosts:
+        open_ports = sum(int(host.get("open_ports") or 0) for host in hosts)
+        lines.append(f"Hosts in result: {len(hosts)}")
+        lines.append(f"Open ports found: {open_ports}")
+        lines.append("")
+        for host in hosts[:25]:
+            label = host.get("hostname") or host.get("address") or "unknown"
+            lines.append(
+                f"  {host.get('address', '?')}  {label}  "
+                f"({host.get('open_ports') or 0} open)"
+            )
+        if len(hosts) > 25:
+            lines.append(f"  … and {len(hosts) - 25} more (see Toolbox → scans)")
+
+    if job.completed_at is not None:
+        lines.append("")
+        lines.append(f"Finished: {job.completed_at.isoformat()}")
+
+    return subject, "\n".join(lines)
+
+
+async def _notify_scan_complete(session: AsyncSession, job: ScanJob) -> None:
+    """Send the schedule's completion mail, honouring the alert channels.
+
+    Notification addresses come from Settings → Notifications through the same
+    policy the other alerts use, so a scan summary reaches the people already
+    receiving device alerts — never a hardcoded address. A missing address or
+    a broken mail server is logged and otherwise ignored: the scan itself has
+    already succeeded.
+    """
+    try:
+        from app.services.alert_policy import load_alert_policy
+        from app.services.alerts import send_system_alert
+
+        policy = await load_alert_policy(session)
+        if not policy.enabled:
+            logger.info(
+                "Scan-complete notification skipped: no notification address is enabled."
+            )
+            return
+
+        subject, body = completion_message(job)
+        sent = await send_system_alert(
+            subject,
+            body,
+            event_type="scan",
+            recipients=list(policy.recipients),
+        )
+        if sent:
+            logger.info("Scan-complete notification sent for %s.", job.target)
+    except Exception as exc:  # notifications must never fail a finished scan
+        logger.warning("Scan-complete notification failed: %s", exc)
+
+
 def _remember(schedule: dict, **updates: str) -> dict:
     """Return a new dict: SQLAlchemy only notices a JSON column when the
     attribute is reassigned, not when the existing dict is mutated in place."""
@@ -168,6 +245,7 @@ async def run_due_scheduled_scans(session: AsyncSession) -> int:
             continue
 
         profile = PROFILE_FOR_SCAN_TYPE.get(str(schedule.get("scan_type") or "quick"), "quick")
+        notify_on_complete = bool(schedule.get("notify_on_complete", False))
         targets = await _targets_for(session, schedule)
         if not targets:
             settings_row.scan_schedule = _remember(
@@ -203,12 +281,19 @@ async def run_due_scheduled_scans(session: AsyncSession) -> int:
             await session.refresh(job)
             queued_ids.append(job.id)
 
-            async def _run(scan_id: str = job.id, argv: list[str] = list(plan.argv)) -> None:
+            async def _run(
+                scan_id: str = job.id,
+                argv: list[str] = list(plan.argv),
+                notify: bool = notify_on_complete,
+            ) -> None:
                 async with async_session_factory() as run_session:  # type: ignore[union-attr]
                     scan_job = await run_session.get(ScanJob, scan_id)
                     if scan_job is None:
                         return
                     await run_scan_job(run_session, scan_job, safe_args=argv)
+                    await run_session.refresh(scan_job)
+                    if notify:
+                        await _notify_scan_complete(run_session, scan_job)
 
             task = asyncio.create_task(_run())
             _running.add(task)

@@ -153,3 +153,48 @@ class TestRecoveryCodes:
         second = await _second_step(db, first.mfa_token or "", codes[1])
 
         assert second.access_token
+
+
+class TestChangingTheSecondFactorRevokesOldSessions:
+    """Enabling or disabling 2FA retires every session opened before it.
+
+    A session an attacker opened with a leaked password must not survive the
+    owner turning 2FA on — otherwise the feature protects nothing that already
+    happened, and the intruder keeps working while 2FA looks "enabled".
+    """
+
+    async def test_enabling_bumps_the_version_and_reissues_this_session(self, db: AsyncSession):
+        from app.api.routes import account
+
+        user = await _user(db, totp=False)
+        setup = await account.mfa_setup(
+            account.MfaPasswordRequest(password=PASSWORD), db, user
+        )
+
+        result = await account.mfa_enable(
+            account.MfaCodeRequest(code=totp_code(setup["secret"])), db, user
+        )
+
+        await db.refresh(user)
+        assert user.totp_enabled is True
+        assert user.token_version == 1
+        claims = jwt.decode(
+            result["access_token"], settings.secret_key, algorithms=[settings.jwt_algorithm]
+        )
+        assert claims["ver"] == 1
+
+    async def test_disabling_bumps_the_version_again(self, db: AsyncSession):
+        from app.api.routes import account
+
+        user = await _user(db)
+        result = await account.mfa_disable(
+            account.MfaDisarmRequest(password=PASSWORD, code=totp_code(SECRET)), db, user
+        )
+
+        await db.refresh(user)
+        assert user.totp_enabled is False
+        assert user.token_version == 1
+        claims = jwt.decode(
+            result["access_token"], settings.secret_key, algorithms=[settings.jwt_algorithm]
+        )
+        assert claims["ver"] == 1

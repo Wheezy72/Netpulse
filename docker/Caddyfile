@@ -1,0 +1,39 @@
+# NetPulse behind a TLS-terminating reverse proxy.
+#
+# Started by the `proxy` service in docker-compose.yml. Caddy gets a
+# certificate, redirects http -> https, and forwards to the app on
+# 127.0.0.1:8000. The app is bound to loopback for exactly this reason: there
+# is no plain-HTTP way in from the network.
+#
+# NETPULSE_HOST is the name clients type — a LAN name such as
+# netpulse.home.arpa, or a real domain. It defaults to localhost, which only
+# works on the machine running the stack.
+
+{
+	email {$ACME_EMAIL:}
+}
+
+{$NETPULSE_HOST:localhost} {
+	# LAN install: Caddy signs with its own CA. Import Caddy's root certificate
+	# once per device (see SECURITY.md) or the browser will warn. For a public
+	# domain with 80/443 reachable from the internet, delete this line and
+	# Caddy uses Let's Encrypt automatically.
+	tls internal
+
+	encode zstd gzip
+
+	reverse_proxy 127.0.0.1:8000 {
+		# Streamed scan output and the log tail stay open for minutes; the
+		# default timeouts would cut them off mid-run.
+		transport http {
+			read_timeout 15m
+			write_timeout 15m
+		}
+	}
+
+	header {
+		# The app sends HSTS, CSP and the rest itself. Caddy only stops
+		# advertising its own version.
+		-Server
+	}
+}

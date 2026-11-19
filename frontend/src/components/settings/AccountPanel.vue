@@ -209,10 +209,14 @@ async function confirmMfa(): Promise<void> {
   }
   mfaBusy.value = true;
   try {
-    const { data } = await axios.post<{ enabled: boolean; recovery_codes: string[] }>(
-      "/api/auth/mfa/enable",
-      { code: mfaCode.value }
-    );
+    const { data } = await axios.post<{
+      enabled: boolean;
+      recovery_codes: string[];
+      access_token?: string;
+    }>("/api/auth/mfa/enable", { code: mfaCode.value });
+    // Enabling revokes every earlier session, including this one, and answers
+    // with a fresh token for this device.
+    if (data.access_token) auth.setToken(data.access_token);
     mfaEnabled.value = true;
     recoveryCodes.value = data.recovery_codes || [];
     mfaRemaining.value = recoveryCodes.value.length;
@@ -237,10 +241,11 @@ async function disableMfa(): Promise<void> {
   }
   mfaBusy.value = true;
   try {
-    await axios.post("/api/auth/mfa/disable", {
-      password: mfaPassword.value,
-      code: mfaCode.value,
-    });
+    const { data } = await axios.post<{ enabled: boolean; access_token?: string }>(
+      "/api/auth/mfa/disable",
+      { password: mfaPassword.value, code: mfaCode.value }
+    );
+    if (data.access_token) auth.setToken(data.access_token);
     mfaEnabled.value = false;
     mfaRemaining.value = 0;
     recoveryCodes.value = [];

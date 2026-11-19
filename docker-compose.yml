@@ -60,6 +60,10 @@ services:
       start_period: 60s
       # Run as root in the container so raw sockets work (ARP sweeps, SYN scans).
     user: "0"
+    # Loopback only, on purpose: the TLS proxy below is the single way in.
+    # --proxy-headers makes the app believe Caddy's X-Forwarded-* headers,
+    # restricted to the local proxy address so nothing else can spoof them.
+    command: ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "127.0.0.1"]
     environment:
       DATABASE_URL: postgresql+asyncpg://netpulse:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@127.0.0.1:5432/netpulse
       REDIS_URL: redis://127.0.0.1:6379/0
@@ -79,6 +83,9 @@ services:
       PULSE_CLOUDFLARE_IP: ${PULSE_CLOUDFLARE_IP:-1.1.1.1}
       SCRIPTS_BASE_DIR: /app/scripts
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["http://localhost:8000"]}
+      # Clients now arrive through the TLS proxy, so its forwarded address is
+      # the real one. Safe here because the app itself listens on loopback.
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
 
       # Celery beat (embedded in netpulse-worker) owns every scheduled job in
       # this stack. The app also runs in-process loops for installs without
@@ -97,6 +104,29 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+
+  # ---------------------------------------------------------------------------
+  # HTTPS in front of the app
+  # ---------------------------------------------------------------------------
+  proxy:
+    image: caddy:2-alpine
+    container_name: netpulse-proxy
+    restart: unless-stopped
+    # Host networking so 80/443 are the host's own, next to the app on
+    # 127.0.0.1:8000. Nothing else needs to be published.
+    network_mode: host
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      # The name people type. Default localhost; set e.g. netpulse.home.arpa.
+      NETPULSE_HOST: ${NETPULSE_HOST:-localhost}
+      # Only used when Caddy obtains a public certificate.
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
 
   # Celery worker with the beat scheduler embedded (-B) so a separate
   # beat container is no longer needed.
@@ -136,3 +166,7 @@ services:
 volumes:
   db_data:
   app_data:
+  # Caddy keeps its certificate and CA material here; without the volume a
+  # restart would issue a new certificate and every device would warn again.
+  caddy_data:
+  caddy_config:

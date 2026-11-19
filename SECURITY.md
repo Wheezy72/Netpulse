@@ -38,6 +38,34 @@ instance beyond localhost, do at least this:
 | Terminate TLS in front of it | Passwords and session cookies otherwise cross the network in clear text. HSTS is sent only when a request arrives over HTTPS. |
 | Keep `TRUST_PROXY_HEADERS=false` unless a proxy sets them | Otherwise `X-Forwarded-For` lets a client spoof its address past rate limiting. |
 | Give it a network account, not a domain admin | Discovery needs raw sockets, not credentials. Router and SNMP credentials are stored to run verification and playbooks; scope them narrowly. |
+| Turn on two-factor authentication (Settings → Account) | A leaked or reused password is the realistic way in. Enrolment needs an authenticator app; disabling it needs the password **and** a current code. |
+
+### HTTPS in front of it
+
+The compose stack ships a TLS-terminating proxy, so plain HTTP is not a way
+in from the network:
+
+```bash
+# .env
+NETPULSE_HOST=netpulse.home.arpa      # the name clients type
+# ACME_EMAIL=you@example.com          # only needed for a public certificate
+
+docker compose up -d proxy
+```
+
+- The `proxy` service (Caddy) listens on 80/443, redirects to HTTPS and
+  forwards to `127.0.0.1:8000`. The app is bound to loopback for that reason,
+  so the proxy cannot be bypassed.
+- On a LAN name, Caddy signs with its own CA. Import Caddy's root certificate
+  (`docker compose cp proxy:/data/caddy/pki/authorities/local/root.crt .`)
+  once per device. For a real domain with 80/443 reachable from the internet,
+  delete `tls internal` from `docker/Caddyfile` and Caddy uses Let's Encrypt.
+- If you run a proxy of your own instead: terminate TLS, forward
+  `X-Forwarded-Proto: https`, keep the app on loopback, and leave
+  `TRUST_PROXY_HEADERS=true` so login throttling sees real client addresses.
+  The app then sends HSTS, marks session cookies `Secure`, and redirects
+  nothing to plain HTTP. `COOKIE_SECURE=true` forces `Secure` regardless of
+  what the request says.
 
 ## What the app does on your behalf
 
@@ -65,5 +93,9 @@ Worth knowing, because these are deliberate and not defects:
   `Cross-Origin-Resource-Policy`, and HSTS when the request arrives over TLS.
 - API responses are `no-store, private`; the SPA is the only HTML the server
   returns with a CSP.
+- TOTP two-factor authentication (RFC 6238) with single-use recovery codes
+  stored as SHA-256 hashes. Enabling or disabling it revokes every session
+  opened before the change; the device that made the change is issued a fresh
+  one, so a password-only session cannot outlive enrolment.
 - No public sign-up: an admin creates accounts, and invited users must change
   the temporary password on first sign-in.

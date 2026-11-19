@@ -314,6 +314,7 @@ async def mfa_enable(
     payload: MfaCodeRequest,
     db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
+    response: Response = None,  # type: ignore[assignment]
 ) -> Dict[str, Any]:
     db_user = await _reload_user(db, current_user)
     if not (db_user.totp_secret or "").strip():
@@ -335,12 +336,31 @@ async def mfa_enable(
     db_user.set_recovery_hashes(hashes_for(codes))
     db_user.totp_enabled = True
     await db.commit()
+
+    # Enabling the second factor must also retire every session opened under
+    # the password alone. The threat 2FA exists for is a password that has
+    # already leaked, and a session the attacker opened before enrolment would
+    # otherwise survive with full access — 2FA would look enabled while the
+    # intruder stayed inside. The caller keeps working: the version is bumped
+    # and they are handed a fresh token (and cookie) carrying it.
+    version = await revoke_sessions(db, db_user)
+    token = create_access_token(
+        subject=token_subject_for(db_user),
+        role=db_user.role.value,
+        token_version=version,
+    )
+    if response is not None:
+        set_session_cookies(
+            response, token, max_age=settings.access_token_expire_minutes * 60
+        )
+
     logger.warning(
-        "Two-factor authentication enabled for %s; %d recovery codes issued.",
+        "Two-factor authentication enabled for %s; %d recovery codes issued, "
+        "all earlier sessions revoked.",
         db_user.username,
         len(codes),
     )
-    return {"enabled": True, "recovery_codes": codes}
+    return {"enabled": True, "recovery_codes": codes, "access_token": token}
 
 
 @router.post("/mfa/disable", summary="Turn the second factor off")
@@ -348,7 +368,8 @@ async def mfa_disable(
     payload: MfaDisarmRequest,
     db: AsyncSession = Depends(db_session),
     current_user: User = Depends(get_current_user),
-) -> Dict[str, bool]:
+    response: Response = None,  # type: ignore[assignment]
+) -> Dict[str, Any]:
     db_user = await _reload_user(db, current_user)
     _require_password(db_user, payload.password)
     if not db_user.totp_enabled:
@@ -365,8 +386,27 @@ async def mfa_disable(
     db_user.totp_enabled = False
     db_user.totp_recovery_codes = None
     await db.commit()
-    logger.warning("Two-factor authentication disabled for %s.", db_user.username)
-    return {"enabled": False}
+
+    # Disabling is a security downgrade, and the usual reason is a phone that
+    # was lost or an enrolment that went wrong. Every session from before the
+    # change is retired, including the one that performed it; a fresh token
+    # keeps this device signed in with the account's new security level.
+    version = await revoke_sessions(db, db_user)
+    token = create_access_token(
+        subject=token_subject_for(db_user),
+        role=db_user.role.value,
+        token_version=version,
+    )
+    if response is not None:
+        set_session_cookies(
+            response, token, max_age=settings.access_token_expire_minutes * 60
+        )
+
+    logger.warning(
+        "Two-factor authentication disabled for %s; earlier sessions revoked.",
+        db_user.username,
+    )
+    return {"enabled": False, "access_token": token}
 
 
 @router.post("/mfa/recovery-codes", summary="Issue a fresh set of recovery codes")
